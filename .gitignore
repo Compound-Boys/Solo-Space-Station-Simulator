@@ -172,3 +172,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Linux AppImage build venv (created by Code/build_appimage.sh)
+.buildvenv/
+*.AppImage

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Space Station Explorer
+GenericName=Space Station Simulator
+Comment=A vibe-coded Space Station 13-inspired simulator
+Exec=SpaceStationExplorer
+Icon=space_station_icon
+Categories=Game;Simulation;
+Terminal=false
