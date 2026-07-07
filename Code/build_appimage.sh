@@ -100,7 +100,9 @@ fi
 echo ">> [6/6] Building the AppImage..."
 OUT="dist/${APP}-${ARCH}.AppImage"
 # Try FUSE first; fall back to extract-and-run in FUSE-less environments (CI).
-if ! ARCH="$ARCH" "$TOOL" "$APPDIR" "$OUT" 2>/dev/null; then
+# Keep the first attempt's diagnostics (a non-FUSE failure would otherwise be lost).
+if ! ARCH="$ARCH" "$TOOL" "$APPDIR" "$OUT" 2>build/appimagetool.log; then
+    echo "   first attempt failed (see build/appimagetool.log); retrying with --appimage-extract-and-run"
     ARCH="$ARCH" "$TOOL" --appimage-extract-and-run "$APPDIR" "$OUT"
 fi
 chmod +x "$OUT"

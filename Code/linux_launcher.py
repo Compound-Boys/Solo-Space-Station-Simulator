@@ -44,10 +44,9 @@ if __name__ == "__main__":
     base_path = get_data_path()
 
     # main.py writes to base_path/game/saves; game.py's on-close autosave writes
-    # to a CWD-relative game/saves. Create both and cd into the data dir so every
-    # save path resolves somewhere writable.
+    # to a CWD-relative game/saves. Create the dir and cd into the data dir so
+    # every save path resolves to the same writable location.
     os.makedirs(os.path.join(base_path, "game", "saves"), exist_ok=True)
-    os.makedirs(os.path.join(base_path, "saves"), exist_ok=True)
     os.chdir(base_path)
 
     try:
@@ -56,6 +55,26 @@ if __name__ == "__main__":
         root = tk.Tk()
         app = SpaceStationGame(root, base_path)
         root.mainloop()
-    except Exception as e:
-        print(f"Error starting game: {e}")
+    except Exception:
+        # The AppImage is built windowed (console=False), so a desktop launch has
+        # no terminal to print to. Persist the traceback and surface it in a dialog
+        # instead of failing invisibly.
+        import traceback
+
+        tb = traceback.format_exc()
+        log_path = os.path.join(base_path, "error.log")
+        try:
+            with open(log_path, "w") as f:
+                f.write(tb)
+        except Exception:
+            pass
+        try:
+            from tkinter import messagebox
+
+            messagebox.showerror(
+                "Space Station Explorer - Startup Error",
+                f"The game failed to start:\n\n{tb}\n\nDetails saved to {log_path}",
+            )
+        except Exception:
+            print(tb)
         sys.exit(1)
