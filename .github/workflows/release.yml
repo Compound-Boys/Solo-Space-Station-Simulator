@@ -1,0 +1,85 @@
+name: Release builds
+
+# Builds the native Linux AppImage and the Windows .exe, then publishes them
+# to a GitHub Release. Triggered by pushing a version tag (e.g. v1.0.0), or
+# manually via the Actions tab.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to create (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: Code
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Build Windows executable
+        run: python build_exe.py
+      - name: Upload exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: Code/dist/SpaceStationExplorer.exe
+          if-no-files-found: error
+
+  linux-appimage:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Code
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tkinter
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+      - name: Build AppImage
+        # The script auto-falls back to --appimage-extract-and-run when FUSE is
+        # unavailable (as on GitHub runners).
+        run: bash build_appimage.sh
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage
+          path: Code/dist/SpaceStationExplorer-x86_64.AppImage
+          if-no-files-found: error
+
+  release:
+    needs: [windows-exe, linux-appimage]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || github.event.inputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "Space Station Explorer $TAG" \
+            --notes "Native builds of Space Station Explorer.
+
+          - **Linux:** \`SpaceStationExplorer-x86_64.AppImage\` — portable, double-clickable; saves go to \`~/.local/share/SpaceStationExplorer\`.
+          - **Windows:** \`SpaceStationExplorer.exe\` — standalone; saves go to a \`saves\` folder alongside the exe.
+
+          Built automatically from \`${{ github.sha }}\`." \
+            artifacts/linux-appimage/SpaceStationExplorer-x86_64.AppImage \
+            artifacts/windows-exe/SpaceStationExplorer.exe
