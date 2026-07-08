@@ -1,3 +1,6 @@
+import tkinter as tk
+from tkinter import ttk
+
 class Quarters:
     def __init__(self, parent_window, player_data, return_callback):
         # Create a new toplevel window

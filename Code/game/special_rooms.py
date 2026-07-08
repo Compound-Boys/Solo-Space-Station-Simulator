@@ -6,6 +6,7 @@ import math
 
 # Import item definitions
 from .items import get_item_definition, get_items_by_category
+from .power_constants import SYSTEM_POWER_RATES
 
 class MedBay:
     def __init__(self, parent_window, player_data, station_crew, return_callback):
@@ -1910,13 +1911,8 @@ class Engineering:
                                      font=("Arial", 10, "italic"), bg="#222222", fg="#AAAAAA", wraplength=500)
             power_draw_info.pack(anchor="w", pady=5)
             
-            # Power consumption rates for each system at max level
-            system_power_rates = {
-                "life_support": 0.5,         # Higher power consumption
-                "hallway_lighting": 0.3,     # Medium power consumption
-                "security_systems": 0.3,     # Medium power consumption
-                "communication_array": 0.2    # Lower power consumption
-            }
+            # Power consumption rates for each system at max level (see power_constants.py)
+            system_power_rates = SYSTEM_POWER_RATES
             
             # Dictionary to store power draw labels
             power_draw_labels = {}
@@ -2080,20 +2076,36 @@ class Engineering:
                 update_battery_display()
             
             # Radio buttons for power modes
-            power_var = tk.StringVar(value=self.player_data["station_power"]["power_mode"])
+            power_var = tk.StringVar(
+                panel_window,
+                value=self.player_data["station_power"]["power_mode"],
+            )
+            panel_window._power_mode_var = power_var
             modes = [
                 ("Balanced (Standard Operation)", "balanced"),
                 ("High Performance (Increased Draw)", "high"),
                 ("Power Saving (Limited Functionality)", "low"),
                 ("Emergency Only (Critical Systems)", "emergency")
             ]
-            
+            power_mode_radios = []
+
+            def _sync_power_mode_radios(_event=None):
+                selected = power_var.get()
+                for rb in power_mode_radios:
+                    if rb.cget("value") == selected:
+                        rb.select()
+                    else:
+                        rb.deselect()
+
             for text, mode in modes:
                 mode_radio = tk.Radiobutton(power_mode_frame, text=text, variable=power_var, value=mode,
-                                          bg="#222222", fg="white", selectcolor="#444444", 
+                                          bg="#222222", fg="white", selectcolor="#222222",
                                           activebackground="#222222", activeforeground="white",
+                                          highlightthickness=0, takefocus=0,
                                           command=lambda m=mode: set_power_mode(m))
                 mode_radio.pack(anchor="w", padx=20, pady=2)
+                mode_radio.bind("<Leave>", _sync_power_mode_radios)
+                power_mode_radios.append(mode_radio)
             
             # Function to handle mousewheel scrolling
             def on_mousewheel(event):
