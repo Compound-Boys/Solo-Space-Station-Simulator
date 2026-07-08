@@ -8,14 +8,12 @@ import random
 from tkinter import messagebox
 
 from game.stock_market import (
-    StockMarket,
     StockMarketEngine,
     default_stock_market_state,
-    sync_holdings_to_companies,
     generate_market_tip,
 )
 from game.game import Game
-from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany
+from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany, Quarters
 from game.items import get_item_definition, ALL_ITEMS, ItemInventoryMixin
 from game.character_creation import CharacterCreation
 from game.power_constants import (
@@ -33,6 +31,7 @@ SPECIAL_ROOM_CLASSES = {
     "Engineering": Engineering,
     "Bar": Bar,
     "Botany": Botany,
+    "Quarters": Quarters,
 }
 
 SPECIAL_ROOM_TILES = {
@@ -42,6 +41,7 @@ SPECIAL_ROOM_TILES = {
     "6,3": "Engineering",
     "0,-1": "Bar",
     "3,-1": "Botany",
+    "-1,0": "Quarters",
 }
 
 SPECIAL_ROOM_HALLWAY = {
@@ -51,6 +51,7 @@ SPECIAL_ROOM_HALLWAY = {
     "6,3": (5, 3),
     "0,-1": (0, 3),
     "3,-1": (3, 0),
+    "-1,0": (0, 0),
 }
 
 class SpaceStationGame(ItemInventoryMixin):
@@ -174,13 +175,19 @@ class SpaceStationGame(ItemInventoryMixin):
         )
         self.add_note(f"Suffered {label.lower()} damage: Took {damage}% damage (total now {total}%)")
 
+    def _enter_special_room(self, room_class):
+        """Create a special room UI instance from a room class."""
+        self.player_data["ship_map"] = self.ship_map
+        self.current_room = room_class(
+            self.root, self.player_data, self.station_crew, self.update_player_data_from_room
+        )
+
     def _instantiate_special_room(self, room_name):
         """Create a special room UI instance by name."""
         room_class = SPECIAL_ROOM_CLASSES.get(room_name)
         if room_class is None:
             return
-        self.player_data["ship_map"] = self.ship_map
-        room_class(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
+        self._enter_special_room(room_class)
 
     def on_closing(self):
         """Handle application closing"""
@@ -385,8 +392,8 @@ class SpaceStationGame(ItemInventoryMixin):
             self.add_note("CRITICAL EVENT: Nearly died from oxygen deprivation. Emergency medical systems intervened.")
             
             # Return player to quarters
-            self.player_data["location"] = {"x": 0, "y": 0}
-            self.show_room()
+            self.player_data["location"] = {"x": -1, "y": 0}
+            self.show_hallway()
         except Exception as e:
             print(f"Error handling oxygen death: {e}")
     
@@ -445,6 +452,8 @@ class SpaceStationGame(ItemInventoryMixin):
         # Clear the window
         for widget in self.root.winfo_children():
             widget.destroy()
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         # Title
         title_label = tk.Label(self.root, text="Space Station Explorer", font=("Arial", 24), bg="black", fg="white")
@@ -484,62 +493,8 @@ class SpaceStationGame(ItemInventoryMixin):
         self._save_game()
         self.start_market_thread()
         self.start_battery_timer()
-        self.show_room()
-    
-    def show_room(self):
-        for widget in self.root.winfo_children():
-            widget.destroy()
-
-        self._ensure_game_running()
-        
-        # Title
-        room_label = tk.Label(self.root, text="Your Quarters", font=("Arial", 24), bg="black", fg="white")
-        room_label.pack(pady=30)
-        
-        # Description
-        desc_label = tk.Label(self.root, text="A small living quarters with basic amenities.", 
-                             font=("Arial", 12), bg="black", fg="white", wraplength=600)
-        desc_label.pack(pady=10)
-        
-        # Player info
-        info_frame = tk.Frame(self.root, bg="black")
-        info_frame.pack(pady=10)
-        
-        name_label = tk.Label(info_frame, text=f"Name: {self.player_data['name']}", font=("Arial", 12), bg="black", fg="white")
-        name_label.pack(side=tk.LEFT, padx=20)
-        
-        job_label = tk.Label(info_frame, text=f"Job: {self.player_data['job']}", font=("Arial", 12), bg="black", fg="white")
-        job_label.pack(side=tk.LEFT, padx=20)
-        
-        credits_label = tk.Label(info_frame, text=f"Credits: {self.player_data['credits']:.2f}", font=("Arial", 12), bg="black", fg="white")
-        credits_label.pack(side=tk.LEFT, padx=20)
-        
-        # Room items
-        button_frame = tk.Frame(self.root, bg="black")
-        button_frame.pack(pady=20)
-        
-        bed_btn = tk.Button(button_frame, text="Bed", font=("Arial", 14), width=15, command=self.interact_bed)
-        bed_btn.grid(row=0, column=0, padx=10, pady=10)
-        
-        locker_btn = tk.Button(button_frame, text="Storage Locker", font=("Arial", 14), width=15, command=self.show_storage)
-        locker_btn.grid(row=0, column=1, padx=10, pady=10)
-        
-        computer_btn = tk.Button(button_frame, text="Computer", font=("Arial", 14), width=15, command=self.show_computer)
-        computer_btn.grid(row=1, column=0, padx=10, pady=10)
-        
-        door_btn = tk.Button(button_frame, text="Door", font=("Arial", 14), width=15, command=self.use_door)
-        door_btn.grid(row=1, column=1, padx=10, pady=10)
-        
-        # Character sheet button 
-        character_btn = tk.Button(button_frame, text="Character Sheet", font=("Arial", 14), width=15, command=self.show_character_sheet)
-        character_btn.grid(row=2, column=0, columnspan=2, padx=10, pady=10)
-        
-        # Save and exit button
-        save_frame = tk.Frame(self.root, bg="black")
-        save_frame.pack(pady=30)
-        
-        save_btn = tk.Button(save_frame, text="Save and Exit", font=("Arial", 14), width=15, command=self.save_and_exit)
-        save_btn.pack()
+        self.player_data["location"] = {"x": -1, "y": 0}
+        self.show_hallway()
     
     def show_character_sheet(self):
         """Show the character sheet window"""
@@ -705,7 +660,7 @@ class SpaceStationGame(ItemInventoryMixin):
         overall_health_label.pack(anchor="w", padx=10, pady=5)
         
         # Store the previous screen to return to
-        self.previous_screen = getattr(self, 'previous_screen', 'show_room')
+        self.previous_screen = getattr(self, 'previous_screen', 'show_hallway')
         
         # Return button that goes back to the previous screen
         return_btn = tk.Button(self.root, text="Return", font=("Arial", 14), width=15, 
@@ -895,335 +850,6 @@ class SpaceStationGame(ItemInventoryMixin):
         close_btn = tk.Button(popup, text="Close", font=("Arial", 12), width=10, command=popup.destroy)
         close_btn.pack(pady=10)
     
-    def interact_bed(self):
-        # Create a new top-level window for save dialog
-        save_window = tk.Toplevel(self.root)
-        save_window.title("Bed")
-        save_window.geometry("300x150")
-        save_window.transient(self.root)
-        save_window.grab_set()
-        
-        # Center the window
-        save_window.geometry("+%d+%d" % (self.root.winfo_rootx() + 250,
-                                        self.root.winfo_rooty() + 200))
-        
-        # Create frame with padding
-        save_frame = tk.Frame(save_window, bg="black")
-        save_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Message
-        tk.Label(
-            save_frame,
-            text="Would you like to save your game?",
-            font=("Arial", 12),
-            bg="black",
-            fg="white"
-        ).pack(pady=10)
-        
-        # Buttons frame
-        buttons_frame = tk.Frame(save_frame, bg="black")
-        buttons_frame.pack(pady=10)
-        
-        # Yes button
-        tk.Button(
-            buttons_frame,
-            text="Yes",
-            font=("Arial", 12),
-            command=lambda: self.save_game_and_close(save_window)
-        ).pack(side=tk.LEFT, padx=10)
-        
-        # No button
-        tk.Button(
-            buttons_frame,
-            text="No",
-            font=("Arial", 12),
-            command=save_window.destroy
-        ).pack(side=tk.LEFT, padx=10)
-    
-    def save_game_and_close(self, save_window):
-        """Save the game and close the save dialog"""
-        self._save_game()
-        save_window.destroy()
-    
-    def show_storage(self):
-        # Clear the window
-        for widget in self.root.winfo_children():
-            widget.destroy()
-        
-        # Title
-        storage_label = tk.Label(self.root, text="Storage Locker", font=("Arial", 24), bg="black", fg="white")
-        storage_label.pack(pady=20)
-        
-        # Container for locker and inventory sections
-        main_container = tk.Frame(self.root, bg="black")
-        main_container.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-        
-        # Left frame for locker items
-        locker_frame = tk.LabelFrame(main_container, text="Locker Items", font=("Arial", 14), bg="black", fg="white", bd=2)
-        locker_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        # Right frame for player inventory
-        inventory_frame = tk.LabelFrame(main_container, text="Your Inventory", font=("Arial", 14), bg="black", fg="white", bd=2)
-        inventory_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=5)
-        
-        # --- Locker items data (Uses ALL_ITEMS definitions) ---
-        # Define the IDs of items initially in the locker
-        initial_locker_item_ids = [
-            "welcome_guide", "flashlight", "station_map", "emergency_rations", 
-            "basic_tools", "id_card_reader", "portable_scanner", 
-            "maintenance_manual", "emergency_beacon", "first_aid_kit"
-        ]
-        
-        # Get full definitions for locker items
-        locker_item_defs = [get_item_definition(item_id) for item_id in initial_locker_item_ids if get_item_definition(item_id)]
-
-        # Filter out items the player already has (compare by ID)
-        player_inventory_ids = {item.get('id') for item in self.player_data.get("inventory", []) if isinstance(item, dict)}
-        filtered_items = [item_def for item_def in locker_item_defs if item_def.get('id') not in player_inventory_ids]
-        
-        # --- Create scrollable canvas for locker items ---
-        locker_canvas = tk.Canvas(locker_frame, bg="black", highlightthickness=0)
-        locker_scrollbar = tk.Scrollbar(locker_frame, orient="vertical", command=locker_canvas.yview)
-        locker_canvas.configure(yscrollcommand=locker_scrollbar.set)
-        
-        # Pack canvas first, then scrollbar conditionally
-        locker_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        # Scrollbar packed later if needed
-        
-        locker_items_frame = tk.Frame(locker_canvas, bg="black")
-        locker_canvas.create_window((0, 0), window=locker_items_frame, anchor="nw")
-        
-        # --- Populate locker items frame (using item dictionaries) ---
-        if not filtered_items:
-            empty_label = tk.Label(locker_items_frame, text="The storage locker is empty.", font=("Arial", 12), bg="black", fg="white")
-            empty_label.pack(pady=10, padx=10, anchor="w")
-        else:
-            for i, item_def in enumerate(filtered_items):
-                item_frame = tk.Frame(locker_items_frame, bg="dark gray", bd=2, relief=tk.RAISED, width=300)
-                item_frame.pack(fill=tk.X, pady=5, padx=5)
-                
-                info_frame = tk.Frame(item_frame, bg="dark gray")
-                info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor="w")
-                
-                item_name_label = tk.Label(info_frame, text=item_def.get('name', 'Unknown Item'), font=("Arial", 12, "bold"), bg="dark gray")
-                item_name_label.pack(anchor="w", padx=10, pady=(5, 0))
-                
-                item_desc_label = tk.Label(info_frame, text=item_def.get('description', ''), font=("Arial", 10), bg="dark gray", wraplength=200)
-                item_desc_label.pack(anchor="w", padx=10, pady=(0, 5))
-                
-                button_frame = tk.Frame(item_frame, bg="dark gray")
-                button_frame.pack(side=tk.RIGHT, padx=10, pady=5)
-                
-                # Pass the item ID to take_item
-                take_btn = tk.Button(button_frame, text="Take", font=("Arial", 10),
-                                    command=lambda item_id=item_def.get('id'): self.take_item(item_id))
-                take_btn.pack()
-        
-        # --- Create scrollable canvas for inventory items ---
-        inventory_canvas = tk.Canvas(inventory_frame, bg="black", highlightthickness=0)
-        inventory_scrollbar = tk.Scrollbar(inventory_frame, orient="vertical", command=inventory_canvas.yview)
-        inventory_canvas.configure(yscrollcommand=inventory_scrollbar.set)
-        
-        # Pack canvas first, then scrollbar conditionally
-        inventory_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        # Scrollbar packed later if needed
-
-        inventory_items_frame = tk.Frame(inventory_canvas, bg="black")
-        inventory_canvas.create_window((0, 0), window=inventory_items_frame, anchor="nw")
-        
-        # --- Populate inventory items (using item dictionaries) ---
-        player_inventory = self.player_data.get("inventory", [])
-        if not player_inventory:
-            empty_label = tk.Label(inventory_items_frame, text="Your inventory is empty.", font=("Arial", 12), bg="black", fg="white")
-            empty_label.pack(pady=10, padx=10, anchor="w")
-        else:
-            for i, item_def in enumerate(player_inventory):
-                item_frame = tk.Frame(inventory_items_frame, bg="dark gray", bd=2, relief=tk.RAISED, width=300)
-                item_frame.pack(fill=tk.X, pady=5, padx=5)
-                
-                # Display item name
-                name_text = str(item_def) # Fallback for non-dict items
-                item_color = "red"        # Default color for errors/legacy
-                if isinstance(item_def, dict) and 'name' in item_def:
-                    name_text = item_def['name']
-                    item_color = "white" # Normal color for dict items
-                
-                name_label = tk.Label(item_frame, text=name_text, font=("Arial", 12, "bold"), bg="dark gray", fg=item_color)
-                name_label.pack(side=tk.LEFT, padx=10, pady=5, anchor="w")
-                
-                # Pass the index to store_item
-                store_btn = tk.Button(item_frame, text="Store in Locker", font=("Arial", 10),
-                                    command=lambda index=i: self.store_item(index)) # Pass index
-                store_btn.pack(side=tk.RIGHT, padx=10, pady=5)
-        
-        # --- Configure canvas scrolling and back button --- 
-        
-        # Function to configure scroll region and show/hide scrollbar
-        def configure_scroll(canvas, scrollbar, items_frame):
-            canvas.update_idletasks() # Ensure frame size is calculated
-            canvas.config(scrollregion=canvas.bbox("all"))
-            # Check if content height exceeds canvas height
-            if items_frame.winfo_reqheight() > canvas.winfo_reqheight():
-                scrollbar.pack(side=tk.RIGHT, fill=tk.Y) # Show scrollbar
-            else:
-                scrollbar.pack_forget() # Hide scrollbar
-        
-        # Configure scroll regions initially
-        configure_scroll(locker_canvas, locker_scrollbar, locker_items_frame)
-        configure_scroll(inventory_canvas, inventory_scrollbar, inventory_items_frame)
-
-        # Mousewheel scrolling - bind directly to each canvas
-        def _on_locker_mousewheel(event):
-            locker_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        def _on_inventory_mousewheel(event):
-            inventory_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
-        locker_canvas.bind("<MouseWheel>", _on_locker_mousewheel)
-        locker_items_frame.bind("<MouseWheel>", _on_locker_mousewheel) # Bind frame too
-        inventory_canvas.bind("<MouseWheel>", _on_inventory_mousewheel)
-        inventory_items_frame.bind("<MouseWheel>", _on_inventory_mousewheel) # Bind frame too
-
-        # Back button (needs to unbind events)
-        back_btn = tk.Button(self.root, text="Back to Room", font=("Arial", 14), width=15, 
-                           command=lambda lc=locker_canvas, ic=inventory_canvas: self._exit_storage(lc, ic))
-        back_btn.pack(pady=20)
-    
-    def _exit_storage(self, locker_canvas, inventory_canvas):
-        """Clean up bindings before exiting storage view"""
-        # Unbind specific mouse wheel handlers
-        try:
-            locker_canvas.unbind("<MouseWheel>")
-            # Find the frame inside the canvas to unbind it too (more robust needed if structure changes)
-            locker_items_frame = locker_canvas.winfo_children()[0] 
-            locker_items_frame.unbind("<MouseWheel>")
-        except Exception as e:
-            print(f"Error unbinding locker scroll: {e}")
-            pass
-        try:
-            inventory_canvas.unbind("<MouseWheel>")
-            inventory_items_frame = inventory_canvas.winfo_children()[0]
-            inventory_items_frame.unbind("<MouseWheel>")
-        except Exception as e:
-            print(f"Error unbinding inventory scroll: {e}")
-            pass
-        # Return to room view
-        self.show_room()
-    
-    def take_item(self, item_id):
-        """Takes an item from the locker based on its ID."""
-        if not item_id:
-            messagebox.showerror("Error", "Invalid item ID provided.")
-            return
-
-        # Get the item definition
-        item_def = get_item_definition(item_id)
-        if not item_def:
-            messagebox.showerror("Error", f"Could not find definition for item ID: {item_id}.")
-            return
-
-        item_name = item_def.get("name", "Unknown Item")
-
-        # Check if player already has this item ID
-        player_inventory = self.player_data.setdefault("inventory", [])
-        has_item = any(isinstance(inv_item, dict) and inv_item.get('id') == item_id for inv_item in player_inventory)
-        
-        if not has_item:
-            player_inventory.append(item_def) # Add the dictionary
-            messagebox.showinfo("Item Taken", f"You took the {item_name}.")
-            # Add note
-            self.add_note(f"Took {item_name} ({item_id}) from locker.")
-            self.show_storage()  # Refresh the storage view
-        else:
-             messagebox.showinfo("Already Have It", f"You already have a {item_name}.")
-
-    def store_item(self, item_index):
-        """Stores an item from the inventory into the locker, using the item's index."""
-        player_inventory = self.player_data.get("inventory", [])
-        
-        if not (0 <= item_index < len(player_inventory)):
-             messagebox.showerror("Error", f"Invalid item index.")
-             return
-
-        # Get the item dictionary using the index
-        item_to_store = player_inventory[item_index]
-        
-        # Prefer name from dict if available
-        item_name = str(item_to_store) # Fallback
-        item_id = None
-        if isinstance(item_to_store, dict):
-            item_name = item_to_store.get('name', 'Unknown Item')
-            item_id = item_to_store.get('id')
-
-        # Remove item from player data by index
-        del player_inventory[item_index]
-        messagebox.showinfo("Item Stored", f"You placed the {item_name} in the storage locker.")
-        
-        # Add note
-        note_text = f"Stored {item_name}" + (f" ({item_id})" if item_id else "") + " in locker."
-        self.add_note(note_text)
-
-        self.show_storage() # Refresh the storage view
-
-    def show_computer(self):
-        for widget in self.root.winfo_children():
-            widget.destroy()
-
-        self._ensure_game_running()
-        
-        # Title
-        computer_label = tk.Label(self.root, text="Computer Terminal", font=("Arial", 24), bg="black", fg="white")
-        computer_label.pack(pady=30)
-        
-        # Computer options
-        options_frame = tk.Frame(self.root, bg="black")
-        options_frame.pack(pady=20)
-        
-        stock_btn = tk.Button(options_frame, text="Stock Market", font=("Arial", 14), width=15,
-                             command=self.open_stock_market)
-        stock_btn.pack(pady=10)
-        
-        turnoff_btn = tk.Button(options_frame, text="Turn Off Computer", font=("Arial", 14), width=15, command=self.show_room)
-        turnoff_btn.pack(pady=10)
-    
-    def open_stock_market(self):
-        StockMarket(
-            self.root,
-            self.player_data,
-            self.market_engine.companies,
-            self.market_engine.cycle_number,
-            self.market_engine.day_number,
-            self.update_player_data,
-        )
-    
-    def update_player_data(self, updated_data):
-        # Update player data when returning from stock market
-        
-        # Check if there were any stock transactions
-        if "stock_transactions" in updated_data:
-            transactions = updated_data.pop("stock_transactions")
-            
-            # Log notes for significant transactions
-            for transaction in transactions:
-                if transaction["type"] == "buy":
-                    self.add_note(f"Bought {transaction['shares']} shares of {transaction['company']} at {transaction['price']:.2f} cr/share (Total: {transaction['total']:.2f} cr)")
-                elif transaction["type"] == "sell":
-                    profit = transaction.get("profit", 0)
-                    if profit != 0:
-                        profit_text = f" (Profit: {profit:.2f} cr)" if profit > 0 else f" (Loss: {abs(profit):.2f} cr)"
-                    else:
-                        profit_text = ""
-                    
-                    self.add_note(f"Sold {transaction['shares']} shares of {transaction['company']} at {transaction['price']:.2f} cr/share (Total: {transaction['total']:.2f} cr){profit_text}")
-        
-        self.player_data = updated_data
-        
-        # Update owned shares in the companies list
-        if "stock_holdings" in updated_data:
-            sync_holdings_to_companies(self.market_engine.companies, updated_data["stock_holdings"])
-        
-        # Return to computer menu instead of room view
-        self.show_computer()
-    
     def use_door(self):
         # Get current location
         x = self.player_data["location"]["x"]
@@ -1233,8 +859,7 @@ class SpaceStationGame(ItemInventoryMixin):
             self.player_data["location"] = {"x": 0, "y": 0}
             self.show_hallway()
         else:  # In hallway, move to quarters
-            self.player_data["location"] = {"x": -1, "y": 0}
-            self.show_room()
+            self.enter_special_room_at("Quarters", "-1,0")
     
     def get_location_key(self):
         x = self.player_data["location"]["x"]
@@ -1244,6 +869,8 @@ class SpaceStationGame(ItemInventoryMixin):
     def show_hallway(self):
         for widget in self.root.winfo_children():
             widget.destroy()
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         self._ensure_game_running()
 
@@ -1770,19 +1397,20 @@ class SpaceStationGame(ItemInventoryMixin):
             y = self.player_data["location"].get("y", 0)
             
             # Check if player is in a special room or hallway
-            if (x == 6 and y == 0) or (x == 0 and y == 6) or (x == 6 and y == 6) or (x == 6 and y == 3) or (x == 0 and y == -1) or (x == 3 and y == -1):
+            loc_key = f"{x},{y}"
+            if loc_key in SPECIAL_ROOM_TILES and loc_key != "-1,0":
                 # Player was in a special room, return to hallway entrance
-                self.update_player_data_from_room(self.player_data) # Use the callback logic to place player correctly
+                self.update_player_data_from_room(self.player_data)
             elif x == -1 and y == 0:
                 # Player was in quarters
-                self.show_room()
+                self.show_hallway()
             else:
                 # Player was in a hallway
                 self.show_hallway()
         else:
             # Default to quarters if location is missing
             self.player_data["location"] = {"x": -1, "y": 0}
-            self.show_room()
+            self.show_hallway()
         
         return True
 
@@ -1812,6 +1440,7 @@ class SpaceStationGame(ItemInventoryMixin):
         """Update player and crew data when returning from a room"""
         # Remove temporary keys from player data if they exist
         ship_map_from_room = updated_player_data.pop("ship_map", None)
+        exit_to_menu = updated_player_data.pop("_exit_to_menu", False)
 
         # Update player data
         self.player_data = updated_player_data
@@ -1826,6 +1455,12 @@ class SpaceStationGame(ItemInventoryMixin):
 
         self._ensure_game_running()
 
+        if exit_to_menu:
+            self._save_game()
+            self.stop_battery_timer()
+            self.show_main_menu()
+            return
+
         x = self.player_data["location"]["x"]
         y = self.player_data["location"]["y"]
 
@@ -1833,8 +1468,6 @@ class SpaceStationGame(ItemInventoryMixin):
         loc_key = f"{x},{y}"
         if loc_key in SPECIAL_ROOM_HALLWAY:
             return_x, return_y = SPECIAL_ROOM_HALLWAY[loc_key]
-        elif x == -1 and y == 0:
-            return_x, return_y = 0, 0
 
         self.player_data["location"]["x"] = return_x
         self.player_data["location"]["y"] = return_y
