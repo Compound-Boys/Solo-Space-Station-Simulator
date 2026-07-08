@@ -1,3 +1,7 @@
+import tkinter as tk
+from tkinter import ttk
+import datetime
+
 class Quarters:
     def __init__(self, parent_window, player_data, return_callback):
         # Create a new toplevel window

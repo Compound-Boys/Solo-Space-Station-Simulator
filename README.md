@@ -1,41 +1,103 @@
-# Vibemaxing-In-Space
-A Vibe Coding experiement, based on Space Station 13
+# Solo Space Station Simulator
 
-## Notes
-~~* Made using Claude 3.7 Max in Cursor (minimum $.05 per call)~~
-* Every release after 33.2.5 is using Gemini 2.5 Max (Same minimum cost)
-* I am making branches at price points to track progress.
+A text-based exploration game set on a space station, built with Python and Tkinter.
 
-### Releases
-* These are worded by dollar amounts. i.e. release/xx.y.z is equivalent to $xx.yz 
-* This represents how much had been paid for cluade to get to that point. 
-* Current Releases:
-  * release 2.5.0 - Basic Stock Market fuctionality, basic navigation, robust error handling.
-    * ~$.80 for the room app.
-    * ~$.40 for the room navigation.
-    * ~$.20 for the stock market refactor from something I had.
-    * The rest is bug fixes for the above
-  * release 5.0.5 - Adding rooms to the station, as well as funcationality to the rooms, and new roles
-    * ~$1.05 to get the room working
-    * ~.20 for getting the roles implemented
-    * ~.30 for adding funcationality of roles to rooms
-    * The rest is bug fixes
-  * release 8.4.5 - Added engineering bay, limb based health system, ability to heal in medbay, and a bunch of random events in the hallway
-    * Don't remember much of the breakdown
-    * ~$.75 I do remember for the notes system
-    * Other then some UI issues, there was not many bug fixes
-  * release 10.3.0 - Added .exe build, and the ability to read the books in your locker
-    * ~$1.10 for doing the .exe build, and to remove the linux builder I didn't ask for
-    * The rest was some minor bug fixes and adding the read ability.
-  * release 16.9.5 - Added 2 new roles: Head of Personnel and Botanist. Added new stations. Also added drink mixing. 
-    * The average prompt is now costing ~$0.25, instead of ~$.15 per prompt for any non-minor change.
-  * release 33.2.5 - Added new damage types(no med changes yet), added engineering power functionality, added basic atmospherics
-    * This release was painful. Everything up to release 32 was 10% me prompting, 85% Claude messing up, and 5% me trying to fix
-    * As a test, I tried Gemini 2.5 Max. 
-    * I was able to fix everything within 2 prompts
-    * Gemini 2.5 Max is primiary from here on out
-  * release 41.2.0 - Tried to add a new save/load system, but decided to end the project here
- 
-  ANY OTHER COMMITS PAST THIS POINT ARE NOT VIBE CODING. 
-  I WILL CONTINUE WORKING IN ANOTHER REPO. 
-  LINK TO COME SOON
+## Core Features
+
+- **Character System**: Create a character with unique jobs (Staff Assistant to Captain), each with special access and starting credits
+- **Station Navigation**: Explore interconnected rooms and hallways with random events
+- **Inventory System**: Collect, store, and manage items throughout the station
+- **Health System**: Track limb health, manage injuries, and seek medical treatment
+- **Save System**: Save and load game progress at any time
+
+## Station Systems
+
+### Power Management
+- Monitor and manage station power levels
+- Control system power allocation (life support, lighting, security, communications)
+- Solar panel charging system
+- Emergency power modes
+- Battery level monitoring and management
+
+### Medical System
+- Comprehensive health tracking (limbs, burns, poison, oxygen)
+- Professional medical treatment options
+- Detailed health reports and recommendations
+- Advanced treatment for medical staff
+- Emergency trauma care
+
+### Security System
+- Access control for restricted areas
+- Door locking/unlocking for authorized personnel
+- Security monitoring and alerts
+- Guard interaction and assistance
+
+### Stock Market
+- Real-time market simulation with automatic updates
+- Buy/sell shares in various companies
+- Price history tracking and visualization
+- Portfolio management and profit tracking
+- Filtering and sorting options
+- Detailed transaction history
+
+### Bar System
+- Order drinks from menu
+- Special bartender drink mixing abilities
+- Ingredient discovery and experimentation
+- Recipe system with effects
+- Social interactions
+
+### Botany System
+- Seed collection and management
+- Plant growth and cultivation
+- Multiple planter management
+- Growth monitoring
+- Special access for botanists
+
+### Life Support
+- Oxygen level monitoring
+- Emergency protocols
+- System damage effects
+- Crew safety management
+
+## Getting Started
+
+1. Install Python 3.x and required packages:
+```
+pip install -r requirements.txt
+```
+
+2. Run the game:
+```
+python run_game.py
+```
+
+## Station Layout
+
+The station features a circular layout with:
+- Central quarters at (0,0)
+- Connected hallways forming a complete circuit
+- Special rooms:
+  - Engineering Bay (5,3)
+  - Bar (0,3)
+  - Botany Lab (3,0)
+  - MedBay, Security, and Bridge at strategic locations
+
+## Job Access Levels
+
+- **Staff Assistant**: Basic access
+- **Engineer**: Engineering Bay + power management
+- **Security**: Security systems + door control
+- **Doctor**: MedBay + advanced treatment
+- **Bartender**: Bar + drink mixing
+- **Botanist**: Botany Lab + plant cultivation
+- **Head of Personnel**: Multiple department access
+- **Captain**: Full station access
+
+## Tips
+
+- Monitor your health and seek treatment when needed
+- Keep track of power levels and oxygen status
+- Use the stock market to earn additional credits
+- Explore all rooms to discover new features and items
+- Save regularly using your bed or the save button 
