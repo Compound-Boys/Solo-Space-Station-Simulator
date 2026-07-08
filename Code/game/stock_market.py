@@ -1,9 +1,31 @@
 import tkinter as tk
+import math
 import random
 import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter import messagebox, ttk
+
+DEFAULT_COMPANY_NAMES = [
+    "TechCorp",
+    "GlobalBank",
+    "HealthCare Plus",
+    "EnergyCo",
+    "FoodChain",
+    "AutoMakers",
+    "RetailGiant",
+    "PharmaTech",
+    "RealEstate Co",
+    "MediaGroup",
+    "Aerospace Inc",
+    "TechStart",
+    "GreenEnergy",
+    "DigitalBank",
+    "SmartHome",
+]
+
+UPDATE_INTERVAL_SECONDS = 60
+CYCLES_PER_DAY = 5
 
 class Company:
     def __init__(self, name, starting_value):
@@ -30,6 +52,219 @@ class Company:
         # Limit price history to most recent 50 cycles
         if len(self.price_history) > 50:
             self.price_history.pop(0)
+
+
+def create_default_companies(history_cycles=5):
+    """Create the default company list with optional price history."""
+    companies = [Company(name, random.uniform(10, 1000)) for name in DEFAULT_COMPANY_NAMES]
+    for _ in range(history_cycles):
+        for company in companies:
+            company.update_value()
+    return companies
+
+
+def serialize_companies(companies):
+    """Serialize live company objects for player_data storage."""
+    return [
+        {
+            "name": company.name,
+            "current_value": company.current_value,
+            "previous_value": company.previous_value,
+            "price_history": company.price_history,
+            "owned_shares": company.owned_shares if hasattr(company, "owned_shares") else 0,
+        }
+        for company in companies
+    ]
+
+
+def apply_companies_from_save(companies, company_data_list):
+    """Restore live company objects from saved player_data."""
+    if not company_data_list or len(company_data_list) != len(companies):
+        return
+
+    for i, company_data in enumerate(company_data_list):
+        companies[i].name = company_data["name"]
+        companies[i].current_value = company_data["current_value"]
+        companies[i].previous_value = company_data["previous_value"]
+        companies[i].price_history = company_data["price_history"]
+        companies[i].owned_shares = company_data.get("owned_shares", 0)
+
+
+def sync_holdings_to_companies(companies, stock_holdings):
+    """Sync player stock holdings onto company owned_shares fields."""
+    holdings = stock_holdings or {}
+    for company in companies:
+        company.owned_shares = holdings.get(company.name, 0)
+
+
+def refresh_companies_from_player_data(companies, player_data):
+    """Apply saved company prices, then restore ownership from stock_holdings."""
+    market_data = player_data.get("stock_market", {})
+    apply_companies_from_save(companies, market_data.get("companies"))
+    sync_holdings_to_companies(companies, player_data.get("stock_holdings"))
+
+
+def migrate_stock_holdings_from_companies(player_data):
+    """Backfill stock_holdings from serialized company owned_shares for old saves."""
+    if player_data.get("stock_holdings"):
+        return
+
+    market_data = player_data.get("stock_market", {})
+    companies = market_data.get("companies")
+    if not companies:
+        return
+
+    holdings = {
+        company["name"]: company["owned_shares"]
+        for company in companies
+        if company.get("owned_shares", 0) > 0
+    }
+    if holdings:
+        player_data["stock_holdings"] = holdings
+
+
+def get_seconds_until_update(last_update_time, interval=UPDATE_INTERVAL_SECONDS):
+    """Calculate seconds remaining until the next market update."""
+    now = datetime.datetime.now()
+    elapsed = (now - last_update_time).total_seconds()
+    return int(max(0, interval - elapsed))
+
+
+def default_stock_market_state():
+    """Return a fresh stock_market block for player_data."""
+    return {
+        "cycle_number": 1,
+        "day_number": 1,
+        "companies": [],
+        "last_update_time": datetime.datetime.now().isoformat(),
+        "trade_log": [],
+    }
+
+
+def truncate_credits(value):
+    """Truncate credits to 2 decimal places (toward zero, never round up)."""
+    return math.trunc(value * 100) / 100
+
+
+def record_trade(player_data, cycle, day, side, company_name, shares, price, total):
+    """Append or merge a buy/sell entry in the current cycle trade log."""
+    if "stock_market" not in player_data:
+        player_data["stock_market"] = {}
+
+    if "trade_log" not in player_data["stock_market"]:
+        player_data["stock_market"]["trade_log"] = []
+
+    current_cycle_entry = None
+    for entry in player_data["stock_market"]["trade_log"]:
+        if entry.get("cycle") == cycle and entry.get("day") == day:
+            current_cycle_entry = entry
+            break
+
+    if not current_cycle_entry:
+        current_cycle_entry = {
+            "cycle": cycle,
+            "day": day,
+            "trades": {"bought": {}, "sold": {}},
+        }
+        player_data["stock_market"]["trade_log"].append(current_cycle_entry)
+
+    if side not in current_cycle_entry["trades"]:
+        current_cycle_entry["trades"][side] = {}
+
+    side_trades = current_cycle_entry["trades"][side]
+    if company_name in side_trades:
+        existing = side_trades[company_name]
+        existing["amount"] += shares
+        existing["total"] += total
+        existing["price"] = existing["total"] / existing["amount"]
+    else:
+        side_trades[company_name] = {
+            "amount": shares,
+            "price": price,
+            "total": total,
+        }
+
+
+def generate_market_tip(companies_data):
+    """Return a random overheard market tip, or None if no companies exist."""
+    if not companies_data:
+        return None
+
+    company = random.choice(companies_data)
+    direction = random.choice(["rise", "fall"])
+    name = company["name"]
+
+    if direction == "rise":
+        return f"Overheard that {name} stock is expected to rise soon!"
+    return f"Overheard that {name} stock might be dropping in value soon!"
+
+
+class StockMarketEngine:
+    """Owns live market state and background tick logic."""
+
+    def __init__(self, companies=None):
+        self.companies = companies if companies is not None else create_default_companies()
+        self.cycle_number = 1
+        self.day_number = 1
+        self.last_update_time = datetime.datetime.now()
+
+    def tick_if_due(self):
+        """Advance the market if the update interval has elapsed."""
+        now = datetime.datetime.now()
+        elapsed = (now - self.last_update_time).total_seconds()
+        if elapsed < UPDATE_INTERVAL_SECONDS:
+            return False
+
+        for company in self.companies:
+            company.update_value()
+
+        self.cycle_number += 1
+        if self.cycle_number > CYCLES_PER_DAY:
+            self.cycle_number = 1
+            self.day_number += 1
+
+        self.last_update_time = now
+        return True
+
+    def sync_to_player_data(self, player_data):
+        """Write current market state into player_data."""
+        if "stock_market" not in player_data:
+            player_data["stock_market"] = default_stock_market_state()
+
+        sync_holdings_to_companies(self.companies, player_data.get("stock_holdings"))
+
+        player_data["stock_market"].update({
+            "cycle_number": self.cycle_number,
+            "day_number": self.day_number,
+            "companies": serialize_companies(self.companies),
+            "last_update_time": self.last_update_time.isoformat(),
+        })
+
+        if "trade_log" not in player_data["stock_market"]:
+            player_data["stock_market"]["trade_log"] = []
+
+    def load_from_player_data(self, player_data):
+        """Restore market state from player_data."""
+        if "stock_market" not in player_data:
+            return
+
+        market_data = player_data["stock_market"]
+        self.cycle_number = market_data.get("cycle_number", 0)
+        self.day_number = market_data.get("day_number", 1)
+
+        if "last_update_time" in market_data:
+            try:
+                self.last_update_time = datetime.datetime.fromisoformat(market_data["last_update_time"])
+            except (ValueError, TypeError):
+                self.last_update_time = datetime.datetime.now()
+        else:
+            self.last_update_time = datetime.datetime.now()
+
+        migrate_stock_holdings_from_companies(player_data)
+
+        if "companies" in market_data:
+            refresh_companies_from_player_data(self.companies, player_data)
+
 
 class StockMarket:
     def __init__(self, parent_window, player_data, companies, cycle_number, day_number, return_callback):
@@ -62,6 +297,9 @@ class StockMarket:
         
         # Ownership filter: "all", "owned", "not_owned" 
         self.ownership_filter = "all"
+
+        # Trend filter: "all", "rising", "falling"
+        self.trend_filter = "all"
         
         # Bind window closing
         self.stock_window.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -71,9 +309,7 @@ class StockMarket:
         self.stock_window.grab_set()
         
         # Load company owned shares from player data
-        if "stock_holdings" in player_data:
-            for company in self.companies:
-                company.owned_shares = player_data["stock_holdings"].get(company.name, 0)
+        sync_holdings_to_companies(self.companies, player_data.get("stock_holdings"))
         
         # Create main frames
         self.left_frame = tk.Frame(self.stock_window, bg="black", width=300)
@@ -198,6 +434,29 @@ class StockMarket:
                                      font=("Arial", 10), bg="#333333", fg="white",
                                      command=lambda: self.filter_by_ownership("not_owned"))
         self.not_owned_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+
+        # Trend filter options
+        trend_label = tk.Label(self.filter_frame, text="Trend:",
+                                 font=("Arial", 12), bg="black", fg="white")
+        trend_label.pack(anchor="w", pady=(10, 0))
+
+        self.trend_buttons_frame = tk.Frame(self.filter_frame, bg="black")
+        self.trend_buttons_frame.pack(fill=tk.X, pady=5)
+
+        self.all_trend_btn = tk.Button(self.trend_buttons_frame, text="All",
+                                          font=("Arial", 10), bg="#333333", fg="white", relief=tk.SUNKEN,
+                                          command=lambda: self.filter_by_trend("all"))
+        self.all_trend_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+
+        self.rising_btn = tk.Button(self.trend_buttons_frame, text="Rising",
+                                  font=("Arial", 10), bg="#333333", fg="white",
+                                  command=lambda: self.filter_by_trend("rising"))
+        self.rising_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+
+        self.falling_btn = tk.Button(self.trend_buttons_frame, text="Falling",
+                                     font=("Arial", 10), bg="#333333", fg="white",
+                                     command=lambda: self.filter_by_trend("falling"))
+        self.falling_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
         
         # Companies list
         self.companies_listbox = tk.Listbox(self.left_content, 
@@ -246,91 +505,69 @@ class StockMarket:
             
         # Start the timer
         self.update_timer()
+
+    def _refresh_companies_from_player_data(self):
+        """Apply saved company prices and ownership from player_data."""
+        refresh_companies_from_player_data(self.companies, self.player_data)
+
+    def _sync_cycle_day_from_player_data(self):
+        """Update cycle/day labels from player_data if they changed."""
+        market_data = self.player_data.get("stock_market", {})
+        poll_cycle = market_data.get("cycle_number", 0)
+        poll_day = market_data.get("day_number", 1)
+
+        if poll_cycle != self.last_seen_cycle or poll_day != self.last_seen_day:
+            self.cycle_number = poll_cycle
+            self.day_number = poll_day
+            self.last_seen_cycle = poll_cycle
+            self.last_seen_day = poll_day
+            self.cycle_label.config(text=f"Cycle: {self.cycle_number}")
+            self.day_label.config(text=f"Day: {self.day_number}")
+            return True
+
+        return False
     
     def update_timer(self):
         """Update the countdown timer for next stock update"""
-        # Poll for changes in player_data
-        if "stock_market" in self.player_data:
-            poll_cycle = self.player_data["stock_market"].get("cycle_number", 0)
-            poll_day = self.player_data["stock_market"].get("day_number", 1)
-            
-            # If cycle or day has changed in player_data, update our values
-            if poll_cycle != self.last_seen_cycle or poll_day != self.last_seen_day:
-                self.cycle_number = poll_cycle
-                self.day_number = poll_day
-                self.last_seen_cycle = poll_cycle
-                self.last_seen_day = poll_day
-                
-                # Directly update UI
-                self.cycle_label.config(text=f"Cycle: {self.cycle_number}")
-                self.day_label.config(text=f"Day: {self.day_number}")
-                
-                # Force update company data
-                if "companies" in self.player_data["stock_market"]:
-                    for i, company_data in enumerate(self.player_data["stock_market"]["companies"]):
-                        if i < len(self.companies):
-                            self.companies[i].current_value = company_data["current_value"]
-                            self.companies[i].previous_value = company_data["previous_value"]
-                            self.companies[i].price_history = company_data["price_history"]
-                
-                # Refresh the company list with current filters and sorting
-                self.populate_companies_listbox()
-                
-                # Try to maintain the same company selection
-                if self.current_company:
-                    selected_name = self.current_company.name
-                    # Find this company in the list
-                    for i in range(self.companies_listbox.size()):
-                        item_text = self.companies_listbox.get(i)
-                        if item_text == selected_name:
-                            self.companies_listbox.selection_clear(0, tk.END)
-                            self.companies_listbox.selection_set(i)
-                            self.companies_listbox.see(i)
-                            self.on_company_select(None)  # Refresh display
-                            break
-        
-        # Get the last update time from player data
+        cycle_day_changed = self._sync_cycle_day_from_player_data()
+        if cycle_day_changed:
+            self._refresh_companies_from_player_data()
+            self.populate_companies_listbox()
+
+            if self.current_company:
+                selected_name = self.current_company.name
+                for i in range(self.companies_listbox.size()):
+                    item_text = self.companies_listbox.get(i)
+                    if item_text == selected_name:
+                        self.companies_listbox.selection_clear(0, tk.END)
+                        self.companies_listbox.selection_set(i)
+                        self.companies_listbox.see(i)
+                        self.on_company_select(None)
+                        break
+
         if "stock_market" in self.player_data and "last_update_time" in self.player_data["stock_market"]:
             try:
                 last_update = datetime.datetime.fromisoformat(self.player_data["stock_market"]["last_update_time"])
-                now = datetime.datetime.now()
-                elapsed = (now - last_update).total_seconds()
-                remaining = max(0, 60 - elapsed)  # Update every 60 seconds
-                
+                remaining = get_seconds_until_update(last_update)
+
                 if remaining <= 0:
-                    # Timer has reached zero - update the display with new data
                     self.timer_label.config(text="Updating Market...", fg="green")
-                    
-                    # Directly update from player data
+
                     if "stock_market" in self.player_data:
-                        # Always update our cycle/day display to match player_data
                         self.cycle_number = self.player_data["stock_market"].get("cycle_number", self.cycle_number)
                         self.day_number = self.player_data["stock_market"].get("day_number", self.day_number)
-                        
-                        # Update the UI
                         self.cycle_label.config(text=f"Cycle: {self.cycle_number}")
                         self.day_label.config(text=f"Day: {self.day_number}")
-                        
-                        # Update company data from player_data
-                        if "companies" in self.player_data["stock_market"]:
-                            for i, company_data in enumerate(self.player_data["stock_market"]["companies"]):
-                                if i < len(self.companies):
-                                    self.companies[i].current_value = company_data["current_value"]
-                                    self.companies[i].previous_value = company_data["previous_value"]
-                                    self.companies[i].price_history = company_data["price_history"]
-                    
-                    # Remember which company was selected before the update
+                        self._refresh_companies_from_player_data()
+
                     selected_company = None
-                    selected_idx = -1
                     if self.companies_listbox.curselection():
                         selected_idx = self.companies_listbox.curselection()[0]
                         if selected_idx < self.companies_listbox.size():
                             selected_company = self.companies_listbox.get(selected_idx)
-                    
-                    # Refresh the company list with proper filtering
+
                     self.populate_companies_listbox()
-                    
-                    # Try to restore the previous selection
+
                     if selected_company:
                         for i in range(self.companies_listbox.size()):
                             if self.companies_listbox.get(i) == selected_company:
@@ -339,31 +576,27 @@ class StockMarket:
                                 self.on_company_select(None)
                                 break
                         else:
-                            # If company not found in new filtered list, select first item if available
                             if self.companies_listbox.size() > 0:
                                 self.companies_listbox.selection_set(0)
                                 self.on_company_select(None)
                     elif self.companies_listbox.size() > 0:
-                        # If no previous selection, select the first company
                         self.companies_listbox.selection_set(0)
                         self.on_company_select(None)
-                    
-                    # Wait briefly before next check to avoid spamming updates
+
                     self.stock_window.after(1000, self.update_timer)
                     return
-                else:
-                    minutes = int(remaining // 60)
-                    seconds = int(remaining % 60)
-                    self.timer_label.config(text=f"Next Update: {minutes:02d}:{seconds:02d}", 
-                                           fg="yellow" if remaining > 15 else "orange" if remaining > 5 else "red")
+
+                minutes = int(remaining // 60)
+                seconds = int(remaining % 60)
+                self.timer_label.config(
+                    text=f"Next Update: {minutes:02d}:{seconds:02d}",
+                    fg="yellow" if remaining > 15 else "orange" if remaining > 5 else "red",
+                )
             except (ValueError, TypeError):
-                # If there's an error parsing the time, show unknown
                 self.timer_label.config(text="Next Update: Unknown", fg="gray")
         else:
-            # If last update time is not available
             self.timer_label.config(text="Next Update: Unknown", fg="gray")
-        
-        # Schedule next update in 1 second
+
         self.stock_window.after(1000, self.update_timer)
     
     def on_company_select(self, event):
@@ -562,6 +795,7 @@ class StockMarket:
                 
             # Update player credits
             self.player_data["credits"] -= total_cost
+            self.player_data["credits"] = truncate_credits(self.player_data["credits"])
             
             # Update company owned shares
             self.current_company.owned_shares += shares
@@ -585,49 +819,17 @@ class StockMarket:
                 "timestamp": datetime.datetime.now().isoformat()
             }
             self.stock_transactions.append(transaction)
-            
-            # Add to trade log for history
-            if "stock_market" not in self.player_data:
-                self.player_data["stock_market"] = {}
-                
-            if "trade_log" not in self.player_data["stock_market"]:
-                self.player_data["stock_market"]["trade_log"] = []
-                
-            # Check if there's an entry for the current cycle/day
-            current_cycle_entry = None
-            for entry in self.player_data["stock_market"]["trade_log"]:
-                if entry.get("cycle") == self.cycle_number and entry.get("day") == self.day_number:
-                    current_cycle_entry = entry
-                    break
-                    
-            # Create a new entry if needed
-            if not current_cycle_entry:
-                current_cycle_entry = {
-                    "cycle": self.cycle_number,
-                    "day": self.day_number,
-                    "trades": {"bought": {}, "sold": {}}
-                }
-                self.player_data["stock_market"]["trade_log"].append(current_cycle_entry)
-                
-            # Add the buy transaction
-            if "bought" not in current_cycle_entry["trades"]:
-                current_cycle_entry["trades"]["bought"] = {}
-                
-            company_name = self.current_company.name
-            if company_name in current_cycle_entry["trades"]["bought"]:
-                # Update existing entry
-                existing = current_cycle_entry["trades"]["bought"][company_name]
-                existing["amount"] += shares
-                existing["total"] += total_cost
-                # Update average price
-                existing["price"] = existing["total"] / existing["amount"]
-            else:
-                # Add new entry
-                current_cycle_entry["trades"]["bought"][company_name] = {
-                    "amount": shares,
-                    "price": self.current_company.current_value,
-                    "total": total_cost
-                }
+
+            record_trade(
+                self.player_data,
+                self.cycle_number,
+                self.day_number,
+                "bought",
+                self.current_company.name,
+                shares,
+                self.current_company.current_value,
+                total_cost,
+            )
             
             # Update display
             self.credits_label.config(text=f"Credits: {self.player_data['credits']:.2f}")
@@ -660,6 +862,7 @@ class StockMarket:
             
             # Update player credits
             self.player_data["credits"] += total_value
+            self.player_data["credits"] = truncate_credits(self.player_data["credits"])
             
             # Update company owned shares
             self.current_company.owned_shares -= shares
@@ -696,49 +899,17 @@ class StockMarket:
                 "timestamp": datetime.datetime.now().isoformat()
             }
             self.stock_transactions.append(transaction)
-            
-            # Add to trade log for history
-            if "stock_market" not in self.player_data:
-                self.player_data["stock_market"] = {}
-                
-            if "trade_log" not in self.player_data["stock_market"]:
-                self.player_data["stock_market"]["trade_log"] = []
-                
-            # Check if there's an entry for the current cycle/day
-            current_cycle_entry = None
-            for entry in self.player_data["stock_market"]["trade_log"]:
-                if entry.get("cycle") == self.cycle_number and entry.get("day") == self.day_number:
-                    current_cycle_entry = entry
-                    break
-                    
-            # Create a new entry if needed
-            if not current_cycle_entry:
-                current_cycle_entry = {
-                    "cycle": self.cycle_number,
-                    "day": self.day_number,
-                    "trades": {"bought": {}, "sold": {}}
-                }
-                self.player_data["stock_market"]["trade_log"].append(current_cycle_entry)
-                
-            # Add the sell transaction
-            if "sold" not in current_cycle_entry["trades"]:
-                current_cycle_entry["trades"]["sold"] = {}
-                
-            company_name = self.current_company.name
-            if company_name in current_cycle_entry["trades"]["sold"]:
-                # Update existing entry
-                existing = current_cycle_entry["trades"]["sold"][company_name]
-                existing["amount"] += shares
-                existing["total"] += total_value
-                # Update average price
-                existing["price"] = existing["total"] / existing["amount"]
-            else:
-                # Add new entry
-                current_cycle_entry["trades"]["sold"][company_name] = {
-                    "amount": shares,
-                    "price": self.current_company.current_value,
-                    "total": total_value
-                }
+
+            record_trade(
+                self.player_data,
+                self.cycle_number,
+                self.day_number,
+                "sold",
+                self.current_company.name,
+                shares,
+                self.current_company.current_value,
+                total_value,
+            )
             
             # Update display
             self.credits_label.config(text=f"Credits: {self.player_data['credits']:.2f}")
@@ -943,13 +1114,12 @@ class StockMarket:
             self.on_company_select(None)  # Explicitly call after selection is made
     
     def sort_companies(self, sort_order):
-        """Sort companies based on price"""
+        """Sort companies by price; does not alter active filters."""
         self.sort_order = sort_order
-        
-        # Update button appearance
+
         self.low_high_btn.config(relief=tk.RAISED)
         self.high_low_btn.config(relief=tk.RAISED)
-        
+
         if sort_order == "price_asc":
             self.low_high_btn.config(relief=tk.SUNKEN)
         else:
@@ -1020,6 +1190,41 @@ class StockMarket:
             self.companies_listbox.selection_set(0)
             self.on_company_select(None)  # Explicitly call after selection is made
     
+    def filter_by_trend(self, trend_filter):
+        """Filter companies by price trend; does not alter active sort order."""
+        self.trend_filter = trend_filter
+
+        self.all_trend_btn.config(relief=tk.RAISED)
+        self.rising_btn.config(relief=tk.RAISED)
+        self.falling_btn.config(relief=tk.RAISED)
+
+        if trend_filter == "all":
+            self.all_trend_btn.config(relief=tk.SUNKEN)
+        elif trend_filter == "rising":
+            self.rising_btn.config(relief=tk.SUNKEN)
+        elif trend_filter == "falling":
+            self.falling_btn.config(relief=tk.SUNKEN)
+
+        selected_company = None
+        if self.companies_listbox.curselection():
+            selected_idx = self.companies_listbox.curselection()[0]
+            if selected_idx < self.companies_listbox.size():
+                selected_company = self.companies_listbox.get(selected_idx)
+
+        self.populate_companies_listbox()
+
+        if selected_company:
+            for i in range(self.companies_listbox.size()):
+                if self.companies_listbox.get(i) == selected_company:
+                    self.companies_listbox.selection_set(i)
+                    self.companies_listbox.see(i)
+                    self.on_company_select(None)
+                    return
+
+        if self.companies_listbox.size() > 0:
+            self.companies_listbox.selection_set(0)
+            self.on_company_select(None)
+    
     def populate_companies_listbox(self):
         """Populate the companies listbox based on current filter and sort order"""
         # Clear current contents
@@ -1050,21 +1255,26 @@ class StockMarket:
                 (self.ownership_filter == "owned" and is_owned) or
                 (self.ownership_filter == "not_owned" and not is_owned)
             )
+
+            price_change = company.current_value - company.previous_value
+            passes_trend = (
+                self.trend_filter == "all"
+                or (self.trend_filter == "rising" and price_change > 0)
+                or (self.trend_filter == "falling" and price_change < 0)
+            )
             
-            # Add to filtered list if it passes both filters
-            if passes_affordability and passes_ownership:
-                filtered_companies.append((company.name, company.current_value))
+            # Add to filtered list if it passes all filters
+            if passes_affordability and passes_ownership and passes_trend:
+                filtered_companies.append((company.name, company.current_value, price_change))
         
         # Sort the filtered companies
         if self.sort_order == "price_asc":
-            # Sort by price, low to high
             filtered_companies.sort(key=lambda x: x[1])
         else:
-            # Sort by price, high to low
             filtered_companies.sort(key=lambda x: x[1], reverse=True)
         
         # Add sorted companies to the listbox
-        for company_name, price in filtered_companies:
+        for company_name, price, _price_change in filtered_companies:
             # Add company to listbox
             self.companies_listbox.insert(tk.END, company_name)
         

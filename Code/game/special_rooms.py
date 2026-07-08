@@ -7,6 +7,7 @@ import math
 # Import item definitions
 from .items import get_item_definition, get_items_by_category
 from .power_constants import SYSTEM_POWER_RATES
+from .door_control import toggle_door_lock as toggle_room_door_lock, is_door_locked
 
 class MedBay:
     def __init__(self, parent_window, player_data, station_crew, return_callback):
@@ -355,40 +356,12 @@ class MedBay:
         self.medbay_window.focus_force()
     
     def toggle_door_lock(self):
-        # Get the door location key
-        door_key = "0,6"
-        
-        # Get the ship map from player data (need to pass it via player_data)
-        if "ship_map" not in self.player_data:
-            self.medbay_window.after(10, lambda: messagebox.showinfo("Door Control", "Unable to access door control system.", parent=self.medbay_window))
-            return
-            
-        ship_map = self.player_data["ship_map"]
-        if door_key not in ship_map:
-            self.medbay_window.after(10, lambda: messagebox.showinfo("Door Control", "Unable to access door control system.", parent=self.medbay_window))
-            return
-            
-        # Toggle the door lock
-        if ship_map[door_key].get("locked", False):
-            ship_map[door_key]["locked"] = False
-            ship_map[door_key]["desc"] = "The medical facility of the station. The door is unlocked."
-            self.medbay_window.after(10, lambda: messagebox.showinfo("Door Control", "The MedBay door has been unlocked.", parent=self.medbay_window))
-        else:
-            ship_map[door_key]["locked"] = True
-            ship_map[door_key]["desc"] = "The medical facility of the station. The door is locked."
-            self.medbay_window.after(10, lambda: messagebox.showinfo("Door Control", "The MedBay door has been locked.", parent=self.medbay_window))
-        
-        # Update ship map in player data
-        self.player_data["ship_map"] = ship_map
-        
-        # Make sure the window stays on top after dialog
-        self.medbay_window.after(20, self.medbay_window.lift)
-        self.medbay_window.focus_force()
+        toggle_room_door_lock(self.player_data, "0,6", self.medbay_window)
     
     def on_closing(self):
         # Check if the door is locked
         door_key = "0,6"  # MedBay door
-        if self.player_data.get("ship_map", {}).get(door_key, {}).get("locked", False):
+        if is_door_locked(self.player_data, door_key):
             self.medbay_window.after(10, lambda: messagebox.showinfo("Locked Door", "The door is locked. You must unlock it before leaving.", parent=self.medbay_window))
             # Make sure the window stays on top after dialog
             self.medbay_window.after(20, self.medbay_window.lift)
@@ -909,40 +882,12 @@ class Bridge:
         close_btn.pack(pady=10)
     
     def toggle_door_lock(self):
-        # Get the door location key
-        door_key = "6,0"
-        
-        # Get the ship map from player data
-        if "ship_map" not in self.player_data:
-            self.bridge_window.after(10, lambda: messagebox.showinfo("Door Control", "Unable to access door control system.", parent=self.bridge_window))
-            return
-            
-        ship_map = self.player_data["ship_map"]
-        if door_key not in ship_map:
-            self.bridge_window.after(10, lambda: messagebox.showinfo("Door Control", "Unable to access door control system.", parent=self.bridge_window))
-            return
-            
-        # Toggle the door lock
-        if ship_map[door_key].get("locked", False):
-            ship_map[door_key]["locked"] = False
-            ship_map[door_key]["desc"] = "The control center of the station. The door is unlocked."
-            self.bridge_window.after(10, lambda: messagebox.showinfo("Door Control", "The Bridge door has been unlocked.", parent=self.bridge_window))
-        else:
-            ship_map[door_key]["locked"] = True
-            ship_map[door_key]["desc"] = "The control center of the station. The door is locked."
-            self.bridge_window.after(10, lambda: messagebox.showinfo("Door Control", "The Bridge door has been locked.", parent=self.bridge_window))
-        
-        # Update ship map in player data
-        self.player_data["ship_map"] = ship_map
-        
-        # Make sure the window stays on top after dialog
-        self.bridge_window.after(20, self.bridge_window.lift)
-        self.bridge_window.focus_force()
+        toggle_room_door_lock(self.player_data, "6,0", self.bridge_window)
     
     def on_closing(self):
         # Check if the door is locked
         door_key = "6,0"  # Bridge door
-        if self.player_data.get("ship_map", {}).get(door_key, {}).get("locked", False):
+        if is_door_locked(self.player_data, door_key):
             self.bridge_window.after(10, lambda: messagebox.showinfo("Locked Door", "The door is locked. You must unlock it before leaving.", parent=self.bridge_window))
             # Make sure the window stays on top after dialog
             self.bridge_window.after(20, self.bridge_window.lift)
@@ -1091,40 +1036,12 @@ class Security:
         self.security_window.focus_force()
     
     def toggle_door_lock(self):
-        # Get the door location key
-        door_key = "6,6"
-        
-        # Get the ship map from player data
-        if "ship_map" not in self.player_data:
-            self.security_window.after(10, lambda: messagebox.showinfo("Door Control", "Unable to access door control system.", parent=self.security_window))
-            return
-            
-        ship_map = self.player_data["ship_map"]
-        if door_key not in ship_map:
-            self.security_window.after(10, lambda: messagebox.showinfo("Door Control", "Unable to access door control system.", parent=self.security_window))
-            return
-            
-        # Toggle the door lock
-        if ship_map[door_key].get("locked", False):
-            ship_map[door_key]["locked"] = False
-            ship_map[door_key]["desc"] = "The security center of the station. The door is unlocked."
-            self.security_window.after(10, lambda: messagebox.showinfo("Door Control", "The Security door has been unlocked.", parent=self.security_window))
-        else:
-            ship_map[door_key]["locked"] = True
-            ship_map[door_key]["desc"] = "The security center of the station. The door is locked."
-            self.security_window.after(10, lambda: messagebox.showinfo("Door Control", "The Security door has been locked.", parent=self.security_window))
-        
-        # Update ship map in player data
-        self.player_data["ship_map"] = ship_map
-        
-        # Make sure the window stays on top after dialog
-        self.security_window.after(20, self.security_window.lift)
-        self.security_window.focus_force()
+        toggle_room_door_lock(self.player_data, "6,6", self.security_window)
     
     def on_closing(self):
         # Check if the door is locked
         door_key = "6,6"  # Security door
-        if self.player_data.get("ship_map", {}).get(door_key, {}).get("locked", False):
+        if is_door_locked(self.player_data, door_key):
             self.security_window.after(10, lambda: messagebox.showinfo("Locked Door", "The door is locked. You must unlock it before leaving.", parent=self.security_window))
             # Make sure the window stays on top after dialog
             self.security_window.after(20, self.security_window.lift)
@@ -2304,40 +2221,12 @@ class Engineering:
                                  parent=self.engineering_window)
     
     def toggle_door_lock(self):
-        # Get the door location key
-        door_key = "6,3"
-        
-        # Get the ship map from player data
-        if "ship_map" not in self.player_data:
-            self.engineering_window.after(10, lambda: messagebox.showinfo("Door Control", "Unable to access door control system.", parent=self.engineering_window))
-            return
-            
-        ship_map = self.player_data["ship_map"]
-        if door_key not in ship_map:
-            self.engineering_window.after(10, lambda: messagebox.showinfo("Door Control", "Unable to access door control system.", parent=self.engineering_window))
-            return
-            
-        # Toggle the door lock
-        if ship_map[door_key].get("locked", False):
-            ship_map[door_key]["locked"] = False
-            ship_map[door_key]["desc"] = "The station's engineering and maintenance center. The door is unlocked."
-            self.engineering_window.after(10, lambda: messagebox.showinfo("Door Control", "The Engineering Bay door has been unlocked.", parent=self.engineering_window))
-        else:
-            ship_map[door_key]["locked"] = True
-            ship_map[door_key]["desc"] = "The station's engineering and maintenance center. The door is locked."
-            self.engineering_window.after(10, lambda: messagebox.showinfo("Door Control", "The Engineering Bay door has been locked.", parent=self.engineering_window))
-        
-        # Update ship map in player data
-        self.player_data["ship_map"] = ship_map
-        
-        # Make sure the window stays on top after dialog
-        self.engineering_window.after(20, self.engineering_window.lift)
-        self.engineering_window.focus_force()
+        toggle_room_door_lock(self.player_data, "6,3", self.engineering_window)
     
     def on_closing(self):
         # Check if the door is locked
         door_key = "6,3"  # Engineering door
-        if self.player_data.get("ship_map", {}).get(door_key, {}).get("locked", False):
+        if is_door_locked(self.player_data, door_key):
             self.engineering_window.after(10, lambda: messagebox.showinfo("Locked Door", "The door is locked. You must unlock it before leaving.", parent=self.engineering_window))
             # Make sure the window stays on top after dialog
             self.engineering_window.after(20, self.engineering_window.lift)
@@ -3445,50 +3334,13 @@ class Bar:
         close_btn.pack(pady=10)
     
     def toggle_door_lock(self):
-        """Toggle the lock on the bar door"""
-        # Get the door location key
-        door_key = "0,-1"  # Bar door
-        
-        # Get the ship map from player data
-        if "ship_map" not in self.player_data:
-            self.bar_window.after(10, lambda: tk.messagebox.showinfo("Door Control", 
-                                                             "Unable to access door control system.", 
-                                                             parent=self.bar_window))
-            return
-            
-        ship_map = self.player_data["ship_map"]
-        if door_key not in ship_map:
-            self.bar_window.after(10, lambda: tk.messagebox.showinfo("Door Control", 
-                                                             "Unable to access door control system.", 
-                                                             parent=self.bar_window))
-            return
-            
-        # Toggle the door lock
-        if ship_map[door_key].get("locked", False):
-            ship_map[door_key]["locked"] = False
-            ship_map[door_key]["desc"] = "The station's social hub where crew members can relax and enjoy drinks. The door is unlocked."
-            self.bar_window.after(10, lambda: tk.messagebox.showinfo("Door Control", 
-                                                             "The Bar door has been unlocked.", 
-                                                             parent=self.bar_window))
-        else:
-            ship_map[door_key]["locked"] = True
-            ship_map[door_key]["desc"] = "The station's social hub where crew members can relax and enjoy drinks. The door is locked."
-            self.bar_window.after(10, lambda: tk.messagebox.showinfo("Door Control", 
-                                                             "The Bar door has been locked.", 
-                                                             parent=self.bar_window))
-        
-        # Update ship map in player data
-        self.player_data["ship_map"] = ship_map
-        
-        # Make sure the window stays on top after dialog
-        self.bar_window.after(20, self.bar_window.lift)
-        self.bar_window.focus_force()
+        toggle_room_door_lock(self.player_data, "0,-1", self.bar_window)
     
     def on_closing(self):
         """Handle window closing"""
         # Check if the door is locked
         door_key = "0,-1"  # Bar door
-        if self.player_data.get("ship_map", {}).get(door_key, {}).get("locked", False):
+        if is_door_locked(self.player_data, door_key):
             self.bar_window.after(10, lambda: tk.messagebox.showinfo("Locked Door", "The door is locked. You must unlock it before leaving.", parent=self.bar_window))
             # Make sure the window stays on top after dialog
             self.bar_window.after(20, self.bar_window.lift)
@@ -4177,42 +4029,13 @@ class Botany:
         main_canvas.bind("<Configure>", adjust_canvas_frame)
     
     def toggle_door_lock(self):
-        """Toggle the lock on the botany lab door"""
-        # Get the door location key
-        door_key = "3,-1"
-        
-        # Get the ship map from player data
-        if "ship_map" not in self.player_data:
-            self.botany_window.after(10, lambda: messagebox.showinfo("Door Control", "Unable to access door control system.", parent=self.botany_window))
-            return
-            
-        ship_map = self.player_data["ship_map"]
-        if door_key not in ship_map:
-            self.botany_window.after(10, lambda: messagebox.showinfo("Door Control", "Unable to access door control system.", parent=self.botany_window))
-            return
-            
-        # Toggle the door lock
-        if ship_map[door_key].get("locked", False):
-            ship_map[door_key]["locked"] = False
-            ship_map[door_key]["desc"] = "The station's plant cultivation and research facility. The door is unlocked."
-            self.botany_window.after(10, lambda: messagebox.showinfo("Door Control", "The Botany Lab door has been unlocked.", parent=self.botany_window))
-        else:
-            ship_map[door_key]["locked"] = True
-            ship_map[door_key]["desc"] = "The station's plant cultivation and research facility. The door is locked."
-            self.botany_window.after(10, lambda: messagebox.showinfo("Door Control", "The Botany Lab door has been locked.", parent=self.botany_window))
-        
-        # Update ship map in player data
-        self.player_data["ship_map"] = ship_map
-        
-        # Make sure the window stays on top after dialog
-        self.botany_window.after(20, self.botany_window.lift)
-        self.botany_window.focus_force()
+        toggle_room_door_lock(self.player_data, "3,-1", self.botany_window)
     
     def on_closing(self):
         """Handle window closing"""
         # Check if the door is locked
         door_key = "3,-1"  # Botany Lab door
-        if self.player_data.get("ship_map", {}).get(door_key, {}).get("locked", False):
+        if is_door_locked(self.player_data, door_key):
             self.botany_window.after(10, lambda: messagebox.showinfo("Locked Door", "The door is locked. You must unlock it before leaving.", parent=self.botany_window))
             # Make sure the window stays on top after dialog
             self.botany_window.after(20, self.botany_window.lift)

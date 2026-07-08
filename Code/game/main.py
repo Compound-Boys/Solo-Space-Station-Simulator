@@ -1,54 +1,57 @@
 import tkinter as tk
-import json
 import os
+import sys
 import time
 import threading
 import datetime
 import random
 from tkinter import messagebox
-from tkinter import simpledialog
-from tkinter import ttk, PhotoImage
 
-# Add the stock market imports
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure
-
-# Import the StockMarket class
-from game.stock_market import StockMarket
-from game.stock_market import Company
-
-# Import the Game class correctly
+from game.stock_market import (
+    StockMarket,
+    StockMarketEngine,
+    default_stock_market_state,
+    sync_holdings_to_companies,
+    generate_market_tip,
+)
 from game.game import Game
-
-# Import special room classes
 from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany
-
-# Import item helper
 from game.items import get_item_definition, ALL_ITEMS, ItemInventoryMixin
-
-# Import shared power constants
+from game.character_creation import CharacterCreation
 from game.power_constants import (
-    SYSTEM_POWER_RATES,
     LOW_POWER_SYSTEM_LEVELS,
     HIGH_MODE_SOLAR_DRAIN,
     calculate_discharge,
     calculate_solar_charge,
+    default_station_power,
 )
 
-# List of potential NPC names
-NPC_NAMES = [
-    "Alex Chen", "Morgan Yu", "Sarah Connor", "John Shepard", "Ellen Ripley",
-    "Isaac Clarke", "Samantha Carter", "Jean-Luc Picard", "Nyota Uhura", "Malcolm Reynolds",
-    "River Tam", "Kaidan Alenko", "Liara T'Soni", "James Holden", "Naomi Nagata",
-    "Amos Burton", "Alex Kamal", "Camina Drummer", "Julie Mao", "Joe Miller",
-    "Kara Thrace", "William Adama", "Laura Roslin", "Gaius Baltar", "Sharon Valerii",
-    "David Bowman", "Frank Poole", "Chris Hadfield", "Valentina Tereshkova", "Yuri Gagarin",
-    "Sally Ride", "Neil Armstrong", "Mae Jemison", "Buzz Aldrin", "Alan Shepard",
-    "Jim Lovell", "John Glenn", "Peggy Whitson", "Scott Kelly", "Christina Koch",
-    "Anne McClain", "Jessica Meir", "Sunita Williams", "Mark Kelly", "Michael Collins",
-    "Helen Sharman", "Tim Peake", "Andreas Mogensen", "Thomas Pesquet", "Samantha Cristoforetti"
-]
+SPECIAL_ROOM_CLASSES = {
+    "Bridge": Bridge,
+    "MedBay": MedBay,
+    "Security": Security,
+    "Engineering": Engineering,
+    "Bar": Bar,
+    "Botany": Botany,
+}
+
+SPECIAL_ROOM_TILES = {
+    "6,0": "Bridge",
+    "0,6": "MedBay",
+    "6,6": "Security",
+    "6,3": "Engineering",
+    "0,-1": "Bar",
+    "3,-1": "Botany",
+}
+
+SPECIAL_ROOM_HALLWAY = {
+    "6,0": (5, 0),
+    "0,6": (0, 5),
+    "6,6": (5, 5),
+    "6,3": (5, 3),
+    "0,-1": (0, 3),
+    "3,-1": (3, 0),
+}
 
 class SpaceStationGame(ItemInventoryMixin):
     def __init__(self, root, base_path):
@@ -57,62 +60,28 @@ class SpaceStationGame(ItemInventoryMixin):
         self.root.title("Space Station 13 Text Clone")
         self.root.geometry("800x600")
         self.root.configure(bg="black")
-        
-        # Initialize variables
-        self.previous_position = None
+
         self.market_running = False
         self.market_thread = None
-        self.last_update_time = datetime.datetime.now()
-        self.station_crew = [] # Initialize crew list here
-        
-        # Initialize battery timer
+        self.station_crew = []
+
         self.battery_timer_running = False
         self.battery_timer_id = None
-        
-        # Store base path for file operations
-        self.base_path = base_path
-        
+
         # Stock market background tracking
-        self.companies = [
-            Company("TechCorp", random.uniform(10, 1000)),
-            Company("GlobalBank", random.uniform(10, 1000)),
-            Company("HealthCare Plus", random.uniform(10, 1000)),
-            Company("EnergyCo", random.uniform(10, 1000)),
-            Company("FoodChain", random.uniform(10, 1000)),
-            Company("AutoMakers", random.uniform(10, 1000)),
-            Company("RetailGiant", random.uniform(10, 1000)),
-            Company("PharmaTech", random.uniform(10, 1000)),
-            Company("RealEstate Co", random.uniform(10, 1000)),
-            Company("MediaGroup", random.uniform(10, 1000)),
-            Company("Aerospace Inc", random.uniform(10, 1000)),
-            Company("TechStart", random.uniform(10, 1000)),
-            Company("GreenEnergy", random.uniform(10, 1000)),
-            Company("DigitalBank", random.uniform(10, 1000)),
-            Company("SmartHome", random.uniform(10, 1000))
-        ]
-
-        # Generate 5 cycles of history for each company
-        for _ in range(5):
-            for company in self.companies:
-                company.update_value()
-
-        self.stock_cycle_number = 1
-        self.stock_day_number = 1
+        self.market_engine = StockMarketEngine()
         
         self.player_data = {
             "name": "",
             "job": "",
+            "department": "",
+            "subdepartment": "",
             "inventory": [],
-            "credits": 1000,  # Add credits to player data
-            "location": {"x": 0, "y": 0},  # Add location data for hallway navigation
-            "stock_holdings": {},  # Add stock holdings data
-            "stock_market": {
-                "cycle_number": 1,
-                "day_number": 1,
-                "companies": [],
-                "last_update_time": datetime.datetime.now().isoformat(),
-                "trade_log": []  # Add trade log to persist between sessions
-            },
+            "credits": 1000,
+            "location": {"x": 0, "y": 0},
+            "stock_holdings": {},
+            "station_crew": [],
+            "stock_market": default_stock_market_state(),
             "limbs": {
                 "left_arm": 100,
                 "right_arm": 100,
@@ -126,22 +95,11 @@ class SpaceStationGame(ItemInventoryMixin):
                 "poison": 0,
                 "oxygen": 0
             },
-            "station_power": {
-                "battery_level": 25.0,
-                "solar_charging": False,
-                "last_update_time": datetime.datetime.now().isoformat(),
-                "system_levels": {
-                    "life_support": 10,
-                    "hallway_lighting": 5,
-                    "security_systems": 7,
-                    "communication_array": 5
-                },
-                "power_mode": "balanced"
-            },
-            "notes": []  # Add notes array to track important events
+            "station_power": default_station_power(),
+            "notes": []
         }
-        
-        # Ship map configuration - Updated to include Botany Lab
+
+        # Ship map configuration
         self.ship_map = {
             "-1,0": {"name": "Quarters", "desc": "Your personal quarters on the station."},
             "0,0": {"name": "Hallway Junction", "desc": "A junction in the hallway. Your quarters are nearby."},
@@ -169,7 +127,7 @@ class SpaceStationGame(ItemInventoryMixin):
             "2,5": {"name": "East Section", "desc": "A hallway along the eastern side of the station."},
             "1,5": {"name": "East Section", "desc": "A hallway connecting back to the main hallways."},
             
-            # Special Rooms (Locked)
+            # Special room tiles
             "6,0": {"name": "Bridge", "desc": "The control center of the station. The door is unlocked.", "locked": False},
             "0,6": {"name": "MedBay", "desc": "The medical facility of the station. The door is unlocked.", "locked": False},
             "6,6": {"name": "Security", "desc": "The security center of the station. The door is unlocked.", "locked": False},
@@ -182,24 +140,56 @@ class SpaceStationGame(ItemInventoryMixin):
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         self.show_main_menu()
-    
+
+    def _sync_crew_to_player_data(self):
+        """Write in-memory crew list into player_data before saving."""
+        self.player_data["station_crew"] = self.station_crew
+
+    def _load_crew_from_player_data(self):
+        """Restore crew list from loaded player_data."""
+        self.station_crew = self.player_data.get("station_crew", [])
+
+    def _save_game(self):
+        """Update market state, sync crew, and persist the save file."""
+        self.market_engine.sync_to_player_data(self.player_data)
+        self._sync_crew_to_player_data()
+        Game.save_game(self.player_data)
+
+    def _ensure_game_running(self):
+        """Start background market and battery timers if they are not running."""
+        if not self.market_running:
+            self.start_market_thread()
+        if not self.battery_timer_running:
+            self.start_battery_timer()
+
+    def _add_damage_type(self, damage_key, label, min_damage, max_damage):
+        """Apply incremental damage of a given type to the player."""
+        damage = random.randint(min_damage, max_damage)
+        original_damage = self.player_data["damage"].get(damage_key, 0)
+        self.player_data["damage"][damage_key] = min(100, original_damage + damage)
+        total = self.player_data["damage"][damage_key]
+        messagebox.showinfo(
+            f"{label} Damage",
+            f"You suffered {damage}% {label.lower()} damage! Total {label.lower()} damage: {total}%.",
+        )
+        self.add_note(f"Suffered {label.lower()} damage: Took {damage}% damage (total now {total}%)")
+
+    def _instantiate_special_room(self, room_name):
+        """Create a special room UI instance by name."""
+        room_class = SPECIAL_ROOM_CLASSES.get(room_name)
+        if room_class is None:
+            return
+        self.player_data["ship_map"] = self.ship_map
+        room_class(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
+
     def on_closing(self):
         """Handle application closing"""
-        # Stop the market thread
         self.stop_market_thread()
-        
-        # Stop the battery timer
         self.stop_battery_timer()
-        
-        # Save the game before closing if a game is in progress
+
         if self.player_data and self.player_data.get("name"):
-            # Update market data one last time
-            self.update_market_data()
-            
-            # Save the game
-            Game.save_game(self.player_data)
-        
-        # Destroy the window
+            self._save_game()
+
         self.root.destroy()
     
     def start_market_thread(self):
@@ -234,21 +224,9 @@ class SpaceStationGame(ItemInventoryMixin):
         if not self.battery_timer_running:
             return
             
-        # Ensure station_power exists in player data
         if "station_power" not in self.player_data:
-            self.player_data["station_power"] = {
-                "battery_level": 25.0,
-                "solar_charging": False,
-                "last_update_time": datetime.datetime.now().isoformat(),
-                "system_levels": {
-                    "life_support": 10,
-                    "hallway_lighting": 5,
-                    "security_systems": 7,
-                    "communication_array": 5
-                },
-                "power_mode": "balanced"
-            }
-        
+            self.player_data["station_power"] = default_station_power()
+
         try:
             # Get the last update time
             last_update = datetime.datetime.fromisoformat(self.player_data["station_power"]["last_update_time"])
@@ -258,14 +236,7 @@ class SpaceStationGame(ItemInventoryMixin):
             # Get system power levels from player data
             system_levels = self.player_data["station_power"]["system_levels"]
             total_discharge_rate = calculate_discharge(system_levels, elapsed_seconds)
-                    
-            # Debug print
-            # print(f"Power draw - Life support: {system_levels.get('life_support', 0)}/10, "
-            #       f"Lighting: {system_levels.get('hallway_lighting', 0)}/10, "
-            #       f"Security: {system_levels.get('security_systems', 0)}/10, "
-            #       f"Comms: {system_levels.get('communication_array', 0)}/10")
-            
-            # If solar charging is active, apply a flat charge rate
+
             solar_charging = self.player_data["station_power"]["solar_charging"]
             charge_rate = calculate_solar_charge(elapsed_seconds, solar_charging)
             
@@ -290,11 +261,7 @@ class SpaceStationGame(ItemInventoryMixin):
             # Update battery level
             current_level = self.player_data["station_power"]["battery_level"]
             new_level = max(0, min(100, current_level + net_change))
-            
-            # Debug print for battery changes
-            # print(f"Battery update: {current_level:.2f}% -> {new_level:.2f}%, Solar: {self.player_data['station_power']['solar_charging']}, Net Change: {net_change:.4f}% (Charge: {charge_rate:.4f}%, Discharge: {total_discharge_rate:.4f}%)")
-            
-            # Update player data with new battery level
+
             self.player_data["station_power"]["battery_level"] = new_level
             self.player_data["station_power"]["last_update_time"] = now.isoformat()
             
@@ -307,22 +274,12 @@ class SpaceStationGame(ItemInventoryMixin):
                 if random.random() < 0.2:  # 20% chance on each check
                     self.show_low_power_warning()
             elif new_level <= 0:
-                # Battery completely drained - trigger power outage
                 self.trigger_power_outage()
-            
-            # Lights are affected when battery level is low
-            if current_level > 10 and new_level <= 10:
-                # Transition to low power lighting
-                self.update_corridor_lighting(low_power=True)
-            elif current_level <= 10 and new_level > 10:
-                # Transition back to normal lighting
-                self.update_corridor_lighting(low_power=False)
         except Exception as e:
             print(f"Error updating battery: {e}")
-            # Reset the timer in case of error
             self.player_data["station_power"]["last_update_time"] = datetime.datetime.now().isoformat()
-        
-        # Schedule next update in 2 seconds (was 5 seconds) to make changes more apparent
+
+        # Poll every 2 seconds
         self.battery_timer_id = self.root.after(2000, self.update_battery)
     
     def check_life_support_status(self, elapsed_seconds):
@@ -377,10 +334,7 @@ class SpaceStationGame(ItemInventoryMixin):
                             self.show_oxygen_warning(90)
                         if new_oxygen_damage >= 100:
                             self.handle_oxygen_death()
-                    else:
-                        # Optional: Add logic here if NPCs should react to low oxygen (e.g., log event, change behavior)
-                        pass
-                        
+
                 elif apply_recovery and current_oxygen_damage > 0:
                     recovery_amount = min(current_oxygen_damage, elapsed_seconds * recovery_rate_per_second)
                     new_oxygen_damage = max(0, current_oxygen_damage - recovery_amount)
@@ -388,10 +342,7 @@ class SpaceStationGame(ItemInventoryMixin):
                     
                     if is_player:
                          print(f"Player Oxygen recovery: Current={current_oxygen_damage:.1f}%, Recovered={recovery_amount:.1f}% -> New={new_oxygen_damage:.1f}% (elapsed={elapsed_seconds:.1f}s)")
-                    else:
-                        # Optional: Log NPC recovery
-                        pass
-                        
+
         except Exception as e:
             print(f"Error checking life support status for crew: {e}")
     
@@ -468,200 +419,19 @@ class SpaceStationGame(ItemInventoryMixin):
                 messagebox.showerror("Power Outage", 
                                    "CRITICAL: Station power failure! Emergency systems active. Activate solar arrays immediately!",
                                    parent=self.root)
-            
-            # Update corridor lighting to emergency mode
-            self.update_corridor_lighting(emergency=True)
-            
-            # Add a note about the power failure
+
             self.add_note("CRITICAL: Station suffered complete power failure. Emergency systems active.")
-            
+
         except Exception as e:
             print(f"Error handling power outage: {e}")
-    
-    def update_corridor_lighting(self, low_power=False, emergency=False):
-        """Update the lighting in corridors based on power status"""
-        # This would update the visual appearance of hallways 
-        # For now we'll just print a message to see the feature working
-        if emergency:
-            print("Station lighting switched to emergency backup power - red emergency lights only")
-            # In a real implementation, you would change the background color to dark red
-            # You could also modify the description of hallways
-        elif low_power:
-            print("Station lighting dimmed to conserve power")
-            # In a real implementation, you would change the hallway background to a darker shade
-        else:
-            print("Station lighting restored to normal levels")
-            # In a real implementation, you would restore normal hallway appearance
-    
+
     def run_stock_market(self):
         """Run the stock market in the background"""
         while self.market_running:
-            # Calculate time until next update
-            now = datetime.datetime.now()
-            elapsed = (now - self.last_update_time).total_seconds()
-            
-            # If 60 seconds have passed since last update
-            if elapsed >= 60:
-                # Update all companies
-                for company in self.companies:
-                    company.update_value()
-                
-                # Update cycle and day numbers
-                self.stock_cycle_number += 1
-                
-                # Check if we completed a full cycle (1-5)
-                if self.stock_cycle_number > 5:
-                    # Reset cycle to 1 and increment day
-                    self.stock_cycle_number = 1
-                    self.stock_day_number += 1
-                
-                # Update last update time
-                self.last_update_time = now
-                
-                # Immediately update player data with new market state
-                # This ensures all UI windows have access to the latest data
-                self.update_market_data()
-                
-                # Process any pending trades if any
-                self.process_pending_trades()
-                
-                # Log market update
-                # print(f"Market updated: Cycle {self.stock_cycle_number}, Day {self.stock_day_number}")
-            
-            # Sleep for 1 second before checking again
+            if self.market_engine.tick_if_due():
+                self.market_engine.sync_to_player_data(self.player_data)
+
             time.sleep(1)
-    
-    def process_pending_trades(self):
-        """Process any pending trades in the player data"""
-        if "pending_trades" in self.player_data["stock_market"]:
-            pending = self.player_data["stock_market"]["pending_trades"]
-            if pending and (pending.get('bought') or pending.get('sold')):
-                # Check if we already have a trade log for this cycle
-                if "trade_log" not in self.player_data["stock_market"]:
-                    self.player_data["stock_market"]["trade_log"] = []
-                
-                # Check if there's already an entry for the current cycle
-                current_cycle_log = None
-                for entry in self.player_data["stock_market"]["trade_log"]:
-                    if entry.get("cycle") == self.stock_cycle_number and entry.get("day") == self.stock_day_number:
-                        current_cycle_log = entry
-                        break
-                
-                # Only create an entry if there are actual trades
-                has_trades = False
-                if pending.get('bought'):
-                    has_trades = any(trade.get('amount', 0) > 0 for trade in pending['bought'].values())
-                if not has_trades and pending.get('sold'):
-                    has_trades = any(trade.get('amount', 0) > 0 for trade in pending['sold'].values())
-                
-                if current_cycle_log and has_trades:
-                    # Update existing entry for this cycle
-                    trades = current_cycle_log.get("trades", {})
-                    
-                    # Update bought trades
-                    if 'bought' in pending:
-                        if 'bought' not in trades:
-                            trades['bought'] = {}
-                        for company, trade_data in pending['bought'].items():
-                            amount = trade_data.get('amount', 0)
-                            if amount > 0:  # Only process trades with non-zero amounts
-                                if company in trades['bought']:
-                                    # Merge the trades
-                                    trades['bought'][company]['amount'] += amount
-                                    trades['bought'][company]['total'] += trade_data.get('total', 0)
-                                else:
-                                    # Add new company trades
-                                    trades['bought'][company] = trade_data
-                    
-                    # Update sold trades
-                    if 'sold' in pending:
-                        if 'sold' not in trades:
-                            trades['sold'] = {}
-                        for company, trade_data in pending['sold'].items():
-                            amount = trade_data.get('amount', 0)
-                            if amount > 0:  # Only process trades with non-zero amounts
-                                if company in trades['sold']:
-                                    # Merge the trades
-                                    trades['sold'][company]['amount'] += amount
-                                    trades['sold'][company]['total'] += trade_data.get('total', 0)
-                                else:
-                                    # Add new company trades
-                                    trades['sold'][company] = trade_data
-                    
-                    # Update the trades in the current cycle log
-                    current_cycle_log["trades"] = trades
-                    
-                elif has_trades:
-                    # Add new trade entry for this cycle
-                    trade_entry = {
-                        "cycle": self.stock_cycle_number,
-                        "day": self.stock_day_number,
-                        "trades": pending
-                    }
-                    self.player_data["stock_market"]["trade_log"].append(trade_entry)
-                
-                # Clear pending trades
-                self.player_data["stock_market"]["pending_trades"] = {}
-    
-    def update_market_data(self):
-        """Update player data with current market state"""
-        # Store company data
-        company_data = []
-        for company in self.companies:
-            company_data.append({
-                "name": company.name,
-                "current_value": company.current_value,
-                "previous_value": company.previous_value,
-                "price_history": company.price_history,
-                "owned_shares": company.owned_shares if hasattr(company, "owned_shares") else 0
-            })
-        
-        # Update player data
-        self.player_data["stock_market"].update({
-            "cycle_number": self.stock_cycle_number,
-            "day_number": self.stock_day_number,
-            "companies": company_data,
-            "last_update_time": self.last_update_time.isoformat()
-        })
-        
-        # Ensure trade log exists
-        if "trade_log" not in self.player_data["stock_market"]:
-            self.player_data["stock_market"]["trade_log"] = []
-    
-    def load_market_data(self):
-        """Load market data from player data"""
-        if "stock_market" in self.player_data:
-            market_data = self.player_data["stock_market"]
-            
-            # Load cycle and day numbers
-            self.stock_cycle_number = market_data.get("cycle_number", 0)
-            self.stock_day_number = market_data.get("day_number", 1)
-            
-            # Load last update time
-            if "last_update_time" in market_data:
-                try:
-                    self.last_update_time = datetime.datetime.fromisoformat(market_data["last_update_time"])
-                except (ValueError, TypeError):
-                    # If there's an error parsing the time, use current time
-                    self.last_update_time = datetime.datetime.now()
-            else:
-                self.last_update_time = datetime.datetime.now()
-            
-            # Load company data
-            if "companies" in market_data and len(market_data["companies"]) == len(self.companies):
-                for i, company_data in enumerate(market_data["companies"]):
-                    self.companies[i].name = company_data["name"]
-                    self.companies[i].current_value = company_data["current_value"]
-                    self.companies[i].previous_value = company_data["previous_value"]
-                    self.companies[i].price_history = company_data["price_history"]
-                    self.companies[i].owned_shares = company_data.get("owned_shares", 0)
-    
-    def get_time_until_next_update(self):
-        """Calculate the time in seconds until the next market update"""
-        now = datetime.datetime.now()
-        elapsed = (now - self.last_update_time).total_seconds()
-        remaining = max(0, 60 - elapsed)
-        return int(remaining)
     
     def show_main_menu(self):
         # Unbind mousewheel if it was bound
@@ -694,316 +464,33 @@ class SpaceStationGame(ItemInventoryMixin):
         quit_btn.pack(pady=10)
     
     def show_character_creation(self):
-        # Clear the window
-        for widget in self.root.winfo_children():
-            widget.destroy()
-        
-        # Title
-        title_label = tk.Label(self.root, text="Character Creation", font=("Arial", 24), bg="black", fg="white")
-        title_label.pack(pady=30)
-        
-        # Character creation form
-        form_frame = tk.Frame(self.root, bg="black")
-        form_frame.pack(pady=20)
-        
-        # Name input
-        name_label = tk.Label(form_frame, text="Character Name:", font=("Arial", 14), bg="black", fg="white")
-        name_label.grid(row=0, column=0, sticky="w", pady=10)
-        
-        self.name_entry = tk.Entry(form_frame, font=("Arial", 14), width=25)
-        self.name_entry.grid(row=0, column=1, pady=10)
-        
-        # Random Name button
-        def set_random_name():
-            self.name_entry.delete(0, tk.END)
-            self.name_entry.insert(0, random.choice(NPC_NAMES))
-            
-        random_name_btn = tk.Button(form_frame, text="Random", font=("Arial", 12), command=set_random_name)
-        random_name_btn.grid(row=0, column=2, padx=(5, 0), pady=10)
-        
-        # Job selection
-        job_label = tk.Label(form_frame, text="Select Job:", font=("Arial", 14), bg="black", fg="white")
-        # Job selection
-        job_label = tk.Label(form_frame, text="Select Job:", font=("Arial", 14), bg="black", fg="white")
-        job_label.grid(row=1, column=0, sticky="w", pady=10)
-        
-        self.job_var = tk.StringVar(value="Staff Assistant")
-        
-        # Updated jobs list with new roles
-        jobs = ["Staff Assistant", "Engineer", "Security Guard", "Doctor", "Captain", "Bartender", "Head of Personnel", "Botanist"]
-        job_menu = tk.OptionMenu(form_frame, self.job_var, *jobs, command=self.update_job_information)
-        job_menu.config(font=("Arial", 14), width=20)
-        job_menu.grid(row=1, column=1, pady=10)
-        
-        # Credits display based on selected job
-        credits_label = tk.Label(form_frame, text="Starting Credits:", font=("Arial", 14), bg="black", fg="white")
-        credits_label.grid(row=2, column=0, sticky="w", pady=10)
-        
-        self.credits_value = tk.Label(form_frame, text="1000 cr", font=("Arial", 14), bg="black", fg="white")
-        self.credits_value.grid(row=2, column=1, sticky="w", pady=10)
-        
-        # Job description frame
-        desc_frame = tk.Frame(self.root, bg="black")
-        desc_frame.pack(pady=10, fill=tk.X, padx=50)
-        
-        desc_label = tk.Label(desc_frame, text="Job Description:", font=("Arial", 14, "bold"), bg="black", fg="white")
-        desc_label.pack(anchor=tk.W)
-        
-        self.job_description = tk.Label(desc_frame, text="", font=("Arial", 12), bg="black", fg="white", wraplength=700, justify=tk.LEFT)
-        self.job_description.pack(anchor=tk.W, pady=5)
-        
-        # Initialize the job description for the default job
-        self.update_job_information(self.job_var.get())
-        
-        # Buttons
-        button_frame = tk.Frame(self.root, bg="black")
-        button_frame.pack(pady=20)
-        
-        start_game_btn = tk.Button(button_frame, text="Start Game", font=("Arial", 14), width=15, command=self.start_game)
-        start_game_btn.pack(side=tk.LEFT, padx=10)
-        
-        back_btn = tk.Button(button_frame, text="Back", font=("Arial", 14), width=15, command=self.show_main_menu)
-        back_btn.pack(side=tk.LEFT, padx=10)
+        CharacterCreation(
+            self.root,
+            self.player_data,
+            self.market_engine.companies,
+            on_back=self.show_main_menu,
+            on_complete=self._on_character_created
+        )
     
-    def update_job_information(self, job_name):
-        """Update the job description and credits display based on selected job"""
-        job = job_name
-        
-        # Set credit amount based on job
-        if job == "Staff Assistant":
-            credits = 1000
-            description = "Staff Assistants are the backbone of daily station operations. They handle various tasks as needed across the station. Starting with 1000 credits."
-        elif job == "Engineer":
-            credits = 2500
-            description = "Engineers are responsible for keeping the station's critical systems operational. They excel at repairing equipment and solving technical problems. Starting with 2500 credits and access to the Engineering Station."
-        elif job == "Security Guard":
-            credits = 5000
-            description = "Security Guards maintain order and protect the station from threats. They have access to security systems and equipment. Starting with 5000 credits and access to the Security Station."
-        elif job == "Doctor":
-            credits = 7500
-            description = "Doctors provide medical care to the station's crew. They can diagnose and treat a variety of conditions. Starting with 7500 credits and access to the MedBay Station."
-        elif job == "Captain":
-            credits = 10000
-            description = "The Captain is the highest authority on the station. They make critical decisions and coordinate all departments. Starting with 10000 credits and access to all station areas."
-        elif job == "Bartender":
-            credits = 3500
-            description = "Bartenders run the station's social hub, mixing drinks and providing a place for crew members to relax. They have deep knowledge of beverages and excellent social skills. Starting with 3500 credits and access to the Bar Station."
-        elif job == "Head of Personnel":
-            credits = 9000
-            description = "The Head of Personnel (HoP) is the second-in-command of the station. They manage crew assignments, access permissions, and administrative matters. Starting with 9000 credits and access to the HoP Station and Bar Station."
-        elif job == "Botanist":
-            credits = 3000
-            description = "Botanists cultivate and maintain the station's plant life. They grow food, medicinal herbs, and decorative plants in the Botany Lab. Starting with 3000 credits and access to the Botany Station."
-        else:
-            credits = 1000  # Default
-            description = "Select a job to see its description."
-            
-        # Update the credits display
-        self.credits_value.config(text=f"{credits} cr")
-        
-        # Update the job description
-        self.job_description.config(text=description)
-    
-    def start_game(self):
-        # Get player information
-        player_name = self.name_entry.get().strip()
-        
-        if not player_name:
-            messagebox.showerror("Error", "Please enter a character name.")
-            return
-        
-        # Save player data
-        self.player_data["name"] = player_name
-        self.player_data["job"] = self.job_var.get()
-        self.player_data["inventory"] = []
-        self.player_data["location"] = {"x": -1, "y": 0}
-        self.player_data["stock_holdings"] = {}
-        
-        # Initialize damage stats
-        self.player_data["damage"] = {
-            "burn": 0,
-            "poison": 0,
-            "oxygen": 0
-        }
-        
-        # Set starting credits based on job
-        job = self.job_var.get()
-        if job == "Staff Assistant":
-            self.player_data["credits"] = 1000
-        elif job == "Engineer":
-            self.player_data["credits"] = 2500
-        elif job == "Security Guard":
-            self.player_data["credits"] = 5000
-        elif job == "Doctor":
-            self.player_data["credits"] = 7500
-        elif job == "Captain":
-            self.player_data["credits"] = 10000
-        elif job == "Bartender":
-            self.player_data["credits"] = 3500
-        elif job == "Head of Personnel":
-            self.player_data["credits"] = 9000
-        elif job == "Botanist":
-            self.player_data["credits"] = 3000
-        else:
-            self.player_data["credits"] = 1000  # Default for Staff Assistant
-            
-        # Set job-specific permissions for room access
-        if job == "Captain":
-            # Captain has access to all stations
-            self.player_data["permissions"] = {
-                "security_station": True,
-                "medbay_station": True,
-                "bridge_station": True,
-                "engineering_station": True,
-                "bar_station": True,
-                "hop_station": True,
-                "botany_station": True
-            }
-        elif job == "Head of Personnel":
-            # HoP has access to HoP station, Bar station, and Botany station
-            self.player_data["permissions"] = {
-                "security_station": False,
-                "medbay_station": False,
-                "bridge_station": False,
-                "engineering_station": False,
-                "bar_station": True,
-                "hop_station": True,
-                "botany_station": True
-            }
-        elif job == "Botanist":
-            # Botanist has access to Botany station
-            self.player_data["permissions"] = {
-                "security_station": False,
-                "medbay_station": False,
-                "bridge_station": False,
-                "engineering_station": False,
-                "bar_station": False,
-                "hop_station": False,
-                "botany_station": True
-            }
-        else:
-            # Other jobs have specific access
-            self.player_data["permissions"] = {
-                "security_station": job == "Security Guard",
-                "medbay_station": job == "Doctor",
-                "bridge_station": job == "Captain",
-                "engineering_station": job == "Engineer",
-                "bar_station": job == "Bartender",
-                "hop_station": False,
-                "botany_station": job == "Botanist"
-            }
-        
-        # --- NPC Generation --- 
-        self.station_crew = [] # Reset crew list for new game
-        available_names = NPC_NAMES.copy()
-        if player_name in available_names:
-             available_names.remove(player_name) # Avoid duplicate names
-             
-        department_heads = {
-            "Captain": {"credits": 10000, "station": "bridge_station"},
-            "Head of Personnel": {"credits": 9000, "station": "hop_station"},
-            "Security Guard": {"credits": 5000, "station": "security_station"},
-            "Doctor": {"credits": 7500, "station": "medbay_station"},
-            "Engineer": {"credits": 2500, "station": "engineering_station"},
-            "Botanist": {"credits": 3000, "station": "botany_station"},
-            "Bartender": {"credits": 3500, "station": "bar_station"}
-        }
-
-        for npc_job, data in department_heads.items():
-            if npc_job != job: # If the player didn't take this job
-                if not available_names:
-                    npc_name = f"NPC_{npc_job.replace(' ', '')}" # Fallback name
-                else:
-                    npc_name = random.choice(available_names)
-                    available_names.remove(npc_name)
-
-                npc_data = {
-                    "name": npc_name,
-                    "job": npc_job,
-                    "credits": data["credits"], # Give them starting credits too
-                    "inventory": [], # Empty inventory for now
-                    "location": {"x": -1, "y": 0}, # Start in quarters for simplicity
-                    "limbs": { # Same starting health as player
-                        "left_arm": 100, "right_arm": 100, "left_leg": 100,
-                        "right_leg": 100, "chest": 100, "head": 100
-                    },
-                    "damage": {"burn": 0, "poison": 0, "oxygen": 0},
-                     "permissions": {s: (j == npc_job) for j, d in department_heads.items() for s in [d["station"]]} # Basic permission for their station
-                }
-                # Add special permissions for NPC Captain/HoP if generated
-                if npc_job == "Captain":
-                    npc_data["permissions"] = {d["station"]: True for d in department_heads.values()}
-                elif npc_job == "Head of Personnel":
-                    npc_data["permissions"]["bar_station"] = True
-                    npc_data["permissions"]["botany_station"] = True
-
-                self.station_crew.append(npc_data)
-                print(f"Generated NPC: {npc_name} ({npc_job})") # Debug print
-        # --- End NPC Generation ---
-
-        # Initialize stock market with starting values
-        if "stock_market" not in self.player_data:
-            self.player_data["stock_market"] = {
-                "cycle_number": 1,
-                "day_number": 1,
-                "last_update_time": datetime.datetime.now().isoformat(),
-                "companies": [],
-                "trade_log": []
-            }
-            
-            # Initialize company data in player data
-            for company in self.companies:
-                self.player_data["stock_market"]["companies"].append({
-                    "name": company.name,
-                    "current_value": company.current_value,
-                    "previous_value": company.previous_value,
-                    "price_history": company.price_history,
-                    "owned_shares": 0
-                })
-        
-        # Initialize station power - Solar panels default ON unless player can control them
-        can_control_power = job in ["Engineer", "Captain"]
-        self.player_data["station_power"] = {
-            "battery_level": 25.0,
-            "solar_charging": not can_control_power,  # True if player can't control, False otherwise
-            "last_update_time": datetime.datetime.now().isoformat(),
-            "system_levels": {
-                "life_support": 10,
-                "hallway_lighting": 5,
-                "security_systems": 7,
-                "communication_array": 5
-            },
-            "power_mode": "balanced"
-        }
-        
-        # Create or save character file 
+    def _on_character_created(self, player_data, station_crew):
+        """Receive the finished character and NPC crew from character creation"""
+        self.player_data = player_data
+        self.station_crew = station_crew
+        self._sync_crew_to_player_data()
         self.save_and_start()
-    
+
     def save_and_start(self):
-       
         """Save the character and start the game"""
-        Game.save_game(self.player_data)
-        
-        # Initialize stock market data
-        self.update_market_data()
-        
-        # Start the market thread
+        self._save_game()
         self.start_market_thread()
-        
-        # Start the battery timer
         self.start_battery_timer()
-        
-        # Show room
         self.show_room()
     
     def show_room(self):
-        # Clear the window
         for widget in self.root.winfo_children():
             widget.destroy()
-        
-        # Ensure market thread is running
-        if not self.market_running:
-            self.start_market_thread()
+
+        self._ensure_game_running()
         
         # Title
         room_label = tk.Label(self.root, text="Your Quarters", font=("Arial", 24), bg="black", fg="white")
@@ -1056,13 +543,10 @@ class SpaceStationGame(ItemInventoryMixin):
     
     def show_character_sheet(self):
         """Show the character sheet window"""
-        # Clear the window
         for widget in self.root.winfo_children():
             widget.destroy()
-        
-        # Ensure market thread is running
-        if not self.market_running:
-            self.start_market_thread()
+
+        self._ensure_game_running()
         
         # Configure window size
         self.root.geometry("800x700")  # Increased height to accommodate all content
@@ -1081,6 +565,10 @@ class SpaceStationGame(ItemInventoryMixin):
         
         job_label = tk.Label(info_frame, text=f"Job: {self.player_data['job']}", font=("Arial", 14), bg="black", fg="white")
         job_label.pack(anchor="w", padx=10, pady=5)
+
+        department = self.player_data.get("department", "Unknown")
+        department_label = tk.Label(info_frame, text=f"Department: {department}", font=("Arial", 14), bg="black", fg="white")
+        department_label.pack(anchor="w", padx=10, pady=5)
         
         # Credits (displayed to 2 decimal places)
         credits_label = tk.Label(info_frame, text=f"Credits: {self.player_data['credits']:.2f}", font=("Arial", 14), bg="black", fg="white")
@@ -1454,12 +942,7 @@ class SpaceStationGame(ItemInventoryMixin):
     
     def save_game_and_close(self, save_window):
         """Save the game and close the save dialog"""
-        # Update market data before saving
-        self.update_market_data()
-        
-        Game.save_game(self.player_data)
-        
-        # Close the save dialog without showing a confirmation
+        self._save_game()
         save_window.destroy()
     
     def show_storage(self):
@@ -1682,13 +1165,10 @@ class SpaceStationGame(ItemInventoryMixin):
         self.show_storage() # Refresh the storage view
 
     def show_computer(self):
-        # Clear the window
         for widget in self.root.winfo_children():
             widget.destroy()
-        
-        # Ensure market thread is running
-        if not self.market_running:
-            self.start_market_thread()
+
+        self._ensure_game_running()
         
         # Title
         computer_label = tk.Label(self.root, text="Computer Terminal", font=("Arial", 24), bg="black", fg="white")
@@ -1706,12 +1186,14 @@ class SpaceStationGame(ItemInventoryMixin):
         turnoff_btn.pack(pady=10)
     
     def open_stock_market(self):
-        # Calculate time until next update
-        time_until_update = self.get_time_until_next_update()
-        
-        # Pass the current market state to the stock market window
-        market = StockMarket(self.root, self.player_data, self.companies, 
-                           self.stock_cycle_number, self.stock_day_number, self.update_player_data)
+        StockMarket(
+            self.root,
+            self.player_data,
+            self.market_engine.companies,
+            self.market_engine.cycle_number,
+            self.market_engine.day_number,
+            self.update_player_data,
+        )
     
     def update_player_data(self, updated_data):
         # Update player data when returning from stock market
@@ -1737,8 +1219,7 @@ class SpaceStationGame(ItemInventoryMixin):
         
         # Update owned shares in the companies list
         if "stock_holdings" in updated_data:
-            for company in self.companies:
-                company.owned_shares = updated_data["stock_holdings"].get(company.name, 0)
+            sync_holdings_to_companies(self.market_engine.companies, updated_data["stock_holdings"])
         
         # Return to computer menu instead of room view
         self.show_computer()
@@ -1761,46 +1242,32 @@ class SpaceStationGame(ItemInventoryMixin):
         return f"{x},{y}"
     
     def show_hallway(self):
-        # Clear the window
         for widget in self.root.winfo_children():
             widget.destroy()
-            
-        # Ensure market thread is running
-        if not self.market_running:
-            self.start_market_thread()
-        
-        # Get current location
-        x = self.player_data["location"]["x"]
-        y = self.player_data["location"]["y"]
-        
-        # Store previous position for backtracking
-        self.previous_position = (x, y)
-        
+
+        self._ensure_game_running()
+
         loc_key = self.get_location_key()
-        
+
         if loc_key not in self.ship_map:
             messagebox.showerror("Error", "Invalid location!")
             self.player_data["location"] = {"x": 0, "y": 0}
             loc_key = "0,0"
-        
-        # Check if we're at a special room that can be entered
-        if self.check_special_room():
-            return
-        
+
+        if loc_key in SPECIAL_ROOM_TILES:
+            room_name = SPECIAL_ROOM_TILES[loc_key]
+            location = self.ship_map[loc_key]
+            if location.get("locked", False):
+                messagebox.showinfo("Locked Door", f"The {room_name} door is locked.")
+                hallway_x, hallway_y = SPECIAL_ROOM_HALLWAY[loc_key]
+                self.player_data["location"]["x"] = hallway_x
+                self.player_data["location"]["y"] = hallway_y
+                loc_key = self.get_location_key()
+            else:
+                self._instantiate_special_room(room_name)
+                return
+
         location = self.ship_map[loc_key]
-        
-        # Check if room is locked
-        if location.get("locked", False):
-            messagebox.showinfo("Locked Door", f"The door to the {location['name']} is locked. You need proper authorization to enter.")
-            # Return to previous position
-            prev_x, prev_y = self.get_previous_position()
-            self.player_data["location"]["x"] = prev_x
-            self.player_data["location"]["y"] = prev_y
-            # Show hallway again with updated position
-            self.show_hallway()
-            return
-        
-        # Get battery level for lighting effects
         battery_level = 100.0  # Default to full power
         if "station_power" in self.player_data:
             battery_level = self.player_data["station_power"].get("battery_level", 100.0)
@@ -1851,17 +1318,9 @@ class SpaceStationGame(ItemInventoryMixin):
         nav_frame = tk.Frame(self.root, bg=hallway_bg)
         nav_frame.pack(pady=20)
         
-        # Determine available directions
         x = self.player_data["location"]["x"]
         y = self.player_data["location"]["y"]
-        
-        # Add an unlock door button if appropriate
-        if self.is_near_special_room():
-            unlock_btn = tk.Button(self.root, text="Unlock Door", font=("Arial", 14), width=15,
-                               command=self.unlock_door)
-            unlock_btn.pack(pady=10)
-        
-        # Updated movement logic for circuit and locked rooms:
+
         north_available = False
         south_available = False
         east_available = False
@@ -2077,23 +1536,12 @@ class SpaceStationGame(ItemInventoryMixin):
         # Check if the destination exists in the ship map
         loc_key = f"{x},{y}"
         if loc_key not in self.ship_map:
-            # For Security specifically, it needs a different handling from Northeast Corner
-            if x == 6 and y == 5 and self.ship_map.get("6,6", {}).get("name") == "Security":
-                # For the Security special case, jump directly to the security location
-                self.player_data["location"]["x"] = 6
-                self.player_data["location"]["y"] = 6
-            # Special case for Engineering Bay entrance
-            elif x == 5 and y == 3:
-                # This is handled by the check_special_room method
-                pass
-            else:
-                # Otherwise, revert to previous location for invalid moves
-                messagebox.showerror("Error", "You can't go that way!")
-                self.player_data["location"]["x"] = x - (1 if direction == "north" else -1 if direction == "south" else 0)
-                self.player_data["location"]["y"] = y - (1 if direction == "east" else -1 if direction == "west" else 0)
-        
-        # Random event check (40% chance) when moving through hallways
-        if random.random() < 0.20:  # Changed from 0.40 to 0.20 (20% chance)
+            messagebox.showerror("Error", "You can't go that way!")
+            self.player_data["location"]["x"] = x - (1 if direction == "north" else -1 if direction == "south" else 0)
+            self.player_data["location"]["y"] = y - (1 if direction == "east" else -1 if direction == "west" else 0)
+
+        # 20% chance of a random hallway event
+        if random.random() < 0.20:
             self.trigger_random_event()
         
         # Refresh hallway view
@@ -2311,15 +1759,10 @@ class SpaceStationGame(ItemInventoryMixin):
         # Apply the loaded data so all downstream logic (market, location, etc.)
         # reads the restored save rather than the default player state.
         self.player_data = loaded_data
+        self._load_crew_from_player_data()
 
-        # Update company data from saved game
-        self.load_market_data()
-        
-        # Start the market thread
-        self.start_market_thread()
-        
-        # Start the battery timer
-        self.start_battery_timer()
+        self.market_engine.load_from_player_data(self.player_data)
+        self._ensure_game_running()
         
         # Determine where to show the player based on saved location
         if "location" in self.player_data:
@@ -2345,106 +1788,25 @@ class SpaceStationGame(ItemInventoryMixin):
 
     def add_burn_damage(self, min_damage, max_damage):
         """Apply burn damage to the player"""
-        # Calculate damage
-        damage = random.randint(min_damage, max_damage)
-        
-        # Apply damage
-        original_damage = self.player_data["damage"].get("burn", 0)
-        self.player_data["damage"]["burn"] = min(100, original_damage + damage)
-        
-        # Show damage message
-        messagebox.showinfo("Burn Damage", f"You suffered {damage}% burn damage! Total burn damage: {self.player_data['damage']['burn']}%.")
-        
-        # Add note about the injury
-        self.add_note(f"Suffered burn damage: Took {damage}% damage (total now {self.player_data['damage']['burn']}%)")
-    
+        self._add_damage_type("burn", "Burn", min_damage, max_damage)
+
     def add_poison_damage(self, min_damage, max_damage):
         """Apply poison damage to the player"""
-        # Calculate damage
-        damage = random.randint(min_damage, max_damage)
-        
-        # Apply damage
-        original_damage = self.player_data["damage"].get("poison", 0)
-        self.player_data["damage"]["poison"] = min(100, original_damage + damage)
-        
-        # Show damage message
-        messagebox.showinfo("Poison Damage", f"You suffered {damage}% poison damage! Total poison damage: {self.player_data['damage']['poison']}%.")
-        
-        # Add note about the injury
-        self.add_note(f"Suffered poison damage: Took {damage}% damage (total now {self.player_data['damage']['poison']}%)")
-
-    def enter_special_room(self, room_name):
-        """Enter a special room on the station"""
-        # Import special room classes
-        from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany
-        from game.quarters import Quarters
-
-        # Add the ship_map to player_data temporarily for special rooms to access
-        self.player_data["ship_map"] = self.ship_map
-        
-        room_instance = None
-        if room_name == "MedBay":
-            # Pass station_crew as a separate argument
-            room_instance = MedBay(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
-        elif room_name == "Bridge":
-            room_instance = Bridge(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
-        elif room_name == "Security":
-            room_instance = Security(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
-        elif room_name == "Engineering":
-            room_instance = Engineering(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
-        elif room_name == "Bar":
-            room_instance = Bar(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
-        elif room_name == "Botany":
-            room_instance = Botany(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
-        elif room_name == "Quarters": # Quarters might not need crew data, adjust if needed
-            room_instance = Quarters(self.root, self.player_data, self.update_player_data_from_room) # Assuming Quarters doesn't need crew
-
-        # Clean up temporary data added to player_data after room is created
-        if "ship_map" in self.player_data:
-            del self.player_data["ship_map"]
+        self._add_damage_type("poison", "Poison", min_damage, max_damage)
 
     def enter_special_room_at(self, room_name, target_key):
         """Enter a special room at a specified target location"""
-        # Get room details
         room_details = self.ship_map.get(target_key)
         if not room_details:
-            return # Invalid target key
-        
-        # Check if room is locked
+            return
+
         if room_details.get("locked", False):
             messagebox.showinfo("Locked", f"The {room_name} door is locked.")
             return
-        
-        # Update player location to the special room's coordinates
-        self.player_data["location"] = {"x": int(target_key.split(',')[0]), "y": int(target_key.split(',')[1])}
-        
-        # Add ship_map temporarily
-        self.player_data["ship_map"] = self.ship_map
 
-        # Import special room classes
-        from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany
-        from game.quarters import Quarters
-
-        room_instance = None
-        # Create room instance (passing player_data and station_crew)
-        if room_name == "MedBay":
-            room_instance = MedBay(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
-        elif room_name == "Bridge":
-             room_instance = Bridge(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
-        elif room_name == "Security":
-            room_instance = Security(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
-        elif room_name == "Engineering":
-            room_instance = Engineering(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
-        elif room_name == "Bar":
-             room_instance = Bar(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
-        elif room_name == "Botany":
-             room_instance = Botany(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
-        elif room_name == "Quarters": # Quarters might not need crew data
-             room_instance = Quarters(self.root, self.player_data, self.update_player_data_from_room)
-
-        # Clean up temporary data
-        if "ship_map" in self.player_data:
-            del self.player_data["ship_map"]
+        x_str, y_str = target_key.split(",")
+        self.player_data["location"] = {"x": int(x_str), "y": int(y_str)}
+        self._instantiate_special_room(room_name)
 
     def update_player_data_from_room(self, updated_player_data, updated_station_crew=None):
         """Update player and crew data when returning from a room"""
@@ -2456,157 +1818,33 @@ class SpaceStationGame(ItemInventoryMixin):
 
         # Update station_crew ONLY if it was passed back
         if updated_station_crew is not None:
-             self.station_crew = updated_station_crew
+            self.station_crew = updated_station_crew
+        self._sync_crew_to_player_data()
 
-        # Update ship_map if it was modified in the special room
         if ship_map_from_room:
             self.ship_map = ship_map_from_room
-            
-        # Ensure market thread is running
-        if not self.market_running:
-            self.start_market_thread()
-            
-        # Ensure battery timer is running
-        if not self.battery_timer_running:
-            self.start_battery_timer()
-        
-        # Determine the correct hallway position based on the room exited
+
+        self._ensure_game_running()
+
         x = self.player_data["location"]["x"]
         y = self.player_data["location"]["y"]
-        
-        # Determine correct hallway return position
-        return_x, return_y = x, y # Default to current if not a special room exit
-        if x == 6 and y == 0: # Exited Bridge
-            return_x, return_y = 5, 0
-        elif x == 0 and y == 6: # Exited MedBay
-            return_x, return_y = 0, 5
-        elif x == 6 and y == 6: # Exited Security
-            return_x, return_y = 5, 5
-        elif x == 6 and y == 3: # Exited Engineering
-            return_x, return_y = 5, 3
-        elif x == 0 and y == -1: # Exited Bar
-            return_x, return_y = 0, 3
-        elif x == 3 and y == -1: # Exited Botany
-            return_x, return_y = 3, 0
-        elif x == -1 and y == 0: # Exited Quarters
+
+        return_x, return_y = x, y
+        loc_key = f"{x},{y}"
+        if loc_key in SPECIAL_ROOM_HALLWAY:
+            return_x, return_y = SPECIAL_ROOM_HALLWAY[loc_key]
+        elif x == -1 and y == 0:
             return_x, return_y = 0, 0
-        
-        # Set the player's location to the correct adjacent hallway tile
+
         self.player_data["location"]["x"] = return_x
         self.player_data["location"]["y"] = return_y
-        
-        # Show hallway screen at the new position
+
         self.show_hallway()
-
-    def unlock_door(self):
-        """Attempt to unlock a special room door"""
-        x = self.player_data["location"]["x"]
-        y = self.player_data["location"]["y"]
-        location_key = f"{x},{y}"
-        
-        # Check if there's an adjacent special room to unlock
-        special_rooms = {
-            "5,0": "Bridge",     # Adjacent to Bridge
-            "0,5": "MedBay",     # Adjacent to MedBay
-            "5,5": "Security",   # Adjacent to Security
-            "5,3": "Engineering", # Adjacent to Engineering
-            "0,3": "Bar"         # Adjacent to Bar
-        }
-        
-        if location_key in special_rooms:
-            room_name = special_rooms[location_key]
-            room_coords = {
-                "Bridge": "6,0", 
-                "MedBay": "0,6", 
-                "Security": "6,6",
-                "Engineering": "6,3",
-                "Bar": "0,-1"
-            }
-            room_key = room_coords[room_name]
-            
-            # Check if room is locked
-            if self.ship_map[room_key].get("locked", False):
-                # Unlock the room
-                self.ship_map[room_key]["locked"] = False
-                self.ship_map[room_key]["desc"] = f"The {room_name}. The door is unlocked."
-                
-                # Don't change the player's location, just open the room
-                self.enter_special_room(room_name)
-            else:
-                # Room is already unlocked, just enter it
-                self.enter_special_room(room_name)
-        else:
-            messagebox.showinfo("No Door Nearby", "There's no special room door nearby to unlock.")
-
-    def check_special_room(self):
-        """Check if we're at a special room and can enter it"""
-        x = self.player_data["location"]["x"]
-        y = self.player_data["location"]["y"]
-        location_key = f"{x},{y}"
-        
-        # Define special room coordinates and their names
-        special_rooms = {
-            "6,0": "Bridge",
-            "0,6": "MedBay",
-            "6,6": "Security"
-        }
-        
-        if location_key in special_rooms:
-            room_name = special_rooms[location_key]
-            
-            # If room is not locked, allow entry
-            if not self.ship_map[location_key].get("locked", False):
-                # Enter the special room
-                self.enter_special_room(room_name)
-                return True
-            else:
-                messagebox.showinfo("Locked Door", f"The {room_name} door is locked.")
-        
-        return False
-
-    def is_near_special_room(self):
-        """Check if we're near a special room that can be unlocked"""
-        x = self.player_data["location"]["x"]
-        y = self.player_data["location"]["y"]
-        location_key = f"{x},{y}"
-        
-        # Adjacent locations to special rooms
-        special_room_adjacents = {
-            "5,0": "Bridge",     # Adjacent to Bridge
-            "0,5": "MedBay",     # Adjacent to MedBay
-            "5,5": "Security",   # Adjacent to Security
-            "5,3": "Engineering", # Adjacent to Engineering Bay
-            "0,3": "Bar"         # Adjacent to Bar
-        }
-        
-        # Check if we're near a special room and if that room is locked
-        if location_key in special_room_adjacents:
-            room_name = special_room_adjacents[location_key]
-            room_coords = {
-                "Bridge": "6,0", 
-                "MedBay": "0,6", 
-                "Security": "6,6",
-                "Engineering": "6,3",
-                "Bar": "0,-1"
-            }
-            room_key = room_coords[room_name]
-            
-            # Only return True if the room is actually locked
-            return self.ship_map[room_key].get("locked", False)
-            
-        return False
 
     def save_and_exit(self):
         """Save the game and exit to main menu"""
-        # Update market data before saving
-        self.update_market_data()
-        
-        Game.save_game(self.player_data)
-        
-        # Stop the battery timer before returning to menu
+        self._save_game()
         self.stop_battery_timer()
-        
-        # Return to main menu
         self.show_main_menu()
 
     def add_random_item(self):
@@ -2641,22 +1879,12 @@ class SpaceStationGame(ItemInventoryMixin):
     
     def add_market_knowledge(self):
         """Add market knowledge to the player - reveals a tip about a stock"""
-        if not self.player_data["stock_market"]["companies"]:
+        message = generate_market_tip(self.player_data["stock_market"].get("companies", []))
+        if message is None:
             messagebox.showinfo("Market Tip", "You heard a stock tip, but don't understand the market yet.")
             return
-            
-        company = random.choice(self.player_data["stock_market"]["companies"])
-        direction = random.choice(["rise", "fall"])
-        
-        message = ""
-        if direction == "rise":
-            message = f"Overheard that {company['name']} stock is expected to rise soon!"
-            messagebox.showinfo("Market Tip", message)
-        else:
-            message = f"Overheard that {company['name']} stock might be dropping in value soon!"
-            messagebox.showinfo("Market Tip", message)
-        
-        # Add note about the market tip
+
+        messagebox.showinfo("Market Tip", message)
         self.add_note(f"Market Tip: {message}")
     
     def station_announcement(self):
@@ -2674,6 +1902,11 @@ class SpaceStationGame(ItemInventoryMixin):
         messagebox.showinfo("Station Announcement", f"The PA system crackles: '{announcement}'")
 
 if __name__ == "__main__":
+    if getattr(sys, "frozen", False):
+        base_path = os.path.dirname(sys.executable)
+    else:
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
     root = tk.Tk()
-    app = SpaceStationGame(root)
-    root.mainloop() 
+    app = SpaceStationGame(root, base_path)
+    root.mainloop()
