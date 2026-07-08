@@ -37,9 +37,6 @@ except ImportError as e:
 if __name__ == "__main__":
     # Create saves folder if it doesn't exist
     base_path = get_base_path()
-    saves_path = os.path.join(base_path, "saves")
-    
-    os.makedirs(saves_path, exist_ok=True)
     
     # Import and run the game
     try:
