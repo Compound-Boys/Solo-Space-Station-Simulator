@@ -27,6 +27,15 @@ from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botan
 # Import item helper
 from game.items import get_item_definition, ALL_ITEMS, ItemInventoryMixin
 
+# Import shared power constants
+from game.power_constants import (
+    SYSTEM_POWER_RATES,
+    LOW_POWER_SYSTEM_LEVELS,
+    HIGH_MODE_SOLAR_DRAIN,
+    calculate_discharge,
+    calculate_solar_charge,
+)
+
 # List of potential NPC names
 NPC_NAMES = [
     "Alex Chen", "Morgan Yu", "Sarah Connor", "John Shepard", "Ellen Ripley",
@@ -248,27 +257,7 @@ class SpaceStationGame(ItemInventoryMixin):
             
             # Get system power levels from player data
             system_levels = self.player_data["station_power"]["system_levels"]
-            
-            # Define power consumption rates for each system at max level (level 10)
-            # Values represent % battery drain per minute at max setting
-            system_power_rates = {
-                "life_support": 0.5,         # Higher power consumption
-                "hallway_lighting": 0.3,     # Medium power consumption
-                "security_systems": 0.3,     # Medium power consumption
-                "communication_array": 0.2    # Lower power consumption
-            }
-            
-            # Calculate total discharge rate based on system levels
-            # When level is 0, the system draws no power
-            # When level is 10, the system draws maximum power
-            # Linear scale in between
-            total_discharge_rate = 0
-            for system, base_rate in system_power_rates.items():
-                system_level = system_levels.get(system, 0)
-                # Scale the power consumption by the system level (0-10)
-                if system_level > 0:
-                    system_discharge = (base_rate * system_level / 10.0) * (elapsed_seconds / 60)
-                    total_discharge_rate += system_discharge
+            total_discharge_rate = calculate_discharge(system_levels, elapsed_seconds)
                     
             # Debug print
             # print(f"Power draw - Life support: {system_levels.get('life_support', 0)}/10, "
@@ -276,29 +265,27 @@ class SpaceStationGame(ItemInventoryMixin):
             #       f"Security: {system_levels.get('security_systems', 0)}/10, "
             #       f"Comms: {system_levels.get('communication_array', 0)}/10")
             
-            # If solar charging is active, calculate charging rate based on "sun position"
-            # Simple model: charge 3% per minute during peak hours, less during other times
-            if self.player_data["station_power"]["solar_charging"]:
-                # Use the current hour to simulate sun position (0-23)
-                hour = now.hour
-                
-                # Peak solar hours are 10am to 2pm (10-14), moderate 7am-10am and 2pm-5pm (7-10, 14-17)
-                if 10 <= hour < 14:
-                    charge_multiplier = 1.0  # Peak efficiency
-                elif (7 <= hour < 10) or (14 <= hour < 17):
-                    charge_multiplier = 0.6  # Moderate efficiency
-                elif (6 <= hour < 7) or (17 <= hour < 18):
-                    charge_multiplier = 0.3  # Low efficiency
-                else:
-                    charge_multiplier = 0.1  # Minimal efficiency (moonlight/starlight)
-                
-                # Calculate charge rate (% per minute)
-                charge_rate = (elapsed_seconds / 60) * 3 * charge_multiplier
-            else:
-                charge_rate = 0
+            # If solar charging is active, apply a flat charge rate
+            solar_charging = self.player_data["station_power"]["solar_charging"]
+            charge_rate = calculate_solar_charge(elapsed_seconds, solar_charging)
             
-            # Net change to battery level
-            net_change = charge_rate - total_discharge_rate
+            # Net change to battery level (power mode adjusts behavior when solar is on)
+            power_mode = self.player_data["station_power"].get("power_mode", "balanced")
+            if solar_charging:
+                if power_mode == "high":
+                    net_change = -(elapsed_seconds / 60) * HIGH_MODE_SOLAR_DRAIN
+                elif power_mode == "balanced":
+                    net_change = 0
+                elif power_mode == "low":
+                    net_change = charge_rate - total_discharge_rate
+                elif power_mode == "emergency":
+                    low_discharge = calculate_discharge(LOW_POWER_SYSTEM_LEVELS, elapsed_seconds)
+                    low_net = charge_rate - low_discharge
+                    net_change = 1.5 * low_net
+                else:
+                    net_change = charge_rate - total_discharge_rate
+            else:
+                net_change = charge_rate - total_discharge_rate
             
             # Update battery level
             current_level = self.player_data["station_power"]["battery_level"]
