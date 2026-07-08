@@ -3,6 +3,8 @@ import datetime
 import random
 from tkinter import messagebox
 
+from game.stock_market import default_stock_market_state, serialize_companies
+
 # List of potential NPC names
 NPC_NAMES = [
     "Alex Chen", "Morgan Yu", "Sarah Connor", "John Shepard", "Ellen Ripley",
@@ -398,23 +400,8 @@ class CharacterCreation:
 
         # Initialize stock market with starting values
         if "stock_market" not in self.player_data:
-            self.player_data["stock_market"] = {
-                "cycle_number": 1,
-                "day_number": 1,
-                "last_update_time": datetime.datetime.now().isoformat(),
-                "companies": [],
-                "trade_log": []
-            }
-
-            # Initialize company data in player data
-            for company in self.companies:
-                self.player_data["stock_market"]["companies"].append({
-                    "name": company.name,
-                    "current_value": company.current_value,
-                    "previous_value": company.previous_value,
-                    "price_history": company.price_history,
-                    "owned_shares": 0
-                })
+            self.player_data["stock_market"] = default_stock_market_state()
+            self.player_data["stock_market"]["companies"] = serialize_companies(self.companies)
 
         # Initialize station power - Solar panels default ON unless player can control them
         can_control_power = job in ["Engineer", "Captain"]
@@ -430,6 +417,8 @@ class CharacterCreation:
             },
             "power_mode": "balanced"
         }
+
+        self.player_data["station_crew"] = station_crew
 
         # Hand the finished character and crew back to the game
         self.on_complete(self.player_data, station_crew)

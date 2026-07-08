@@ -1,5 +1,24 @@
 """Shared power system constants and helpers."""
 
+import datetime
+
+
+def default_station_power():
+    """Return a fresh station_power dict for new games or missing save data."""
+    return {
+        "battery_level": 25.0,
+        "solar_charging": False,
+        "last_update_time": datetime.datetime.now().isoformat(),
+        "system_levels": {
+            "life_support": 10,
+            "hallway_lighting": 5,
+            "security_systems": 7,
+            "communication_array": 5,
+        },
+        "power_mode": "balanced",
+    }
+
+
 SYSTEM_POWER_RATES = {
     "life_support": 0.5,
     "hallway_lighting": 0.3,
