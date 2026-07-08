@@ -68,7 +68,7 @@ Or mark it executable in your file manager (Properties → Permissions →
   to another location or computer.
 - **Linux:** because an AppImage is mounted read-only, saves are stored in a
   per-user data directory instead:
-  `~/.local/share/SpaceStationExplorer/game/saves`
+  `~/.local/share/SpaceStationExplorer/saves`
   (honouring `$XDG_DATA_HOME` if set).
 
 ## Troubleshooting
