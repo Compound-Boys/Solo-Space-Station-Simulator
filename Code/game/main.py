@@ -27,6 +27,9 @@ from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botan
 # Import item helper
 from game.items import get_item_definition, ALL_ITEMS, ItemInventoryMixin
 
+# Import the character creation screen
+from game.character_creation import CharacterCreation
+
 # Import shared power constants
 from game.power_constants import (
     SYSTEM_POWER_RATES,
@@ -35,20 +38,6 @@ from game.power_constants import (
     calculate_discharge,
     calculate_solar_charge,
 )
-
-# List of potential NPC names
-NPC_NAMES = [
-    "Alex Chen", "Morgan Yu", "Sarah Connor", "John Shepard", "Ellen Ripley",
-    "Isaac Clarke", "Samantha Carter", "Jean-Luc Picard", "Nyota Uhura", "Malcolm Reynolds",
-    "River Tam", "Kaidan Alenko", "Liara T'Soni", "James Holden", "Naomi Nagata",
-    "Amos Burton", "Alex Kamal", "Camina Drummer", "Julie Mao", "Joe Miller",
-    "Kara Thrace", "William Adama", "Laura Roslin", "Gaius Baltar", "Sharon Valerii",
-    "David Bowman", "Frank Poole", "Chris Hadfield", "Valentina Tereshkova", "Yuri Gagarin",
-    "Sally Ride", "Neil Armstrong", "Mae Jemison", "Buzz Aldrin", "Alan Shepard",
-    "Jim Lovell", "John Glenn", "Peggy Whitson", "Scott Kelly", "Christina Koch",
-    "Anne McClain", "Jessica Meir", "Sunita Williams", "Mark Kelly", "Michael Collins",
-    "Helen Sharman", "Tim Peake", "Andreas Mogensen", "Thomas Pesquet", "Samantha Cristoforetti"
-]
 
 class SpaceStationGame(ItemInventoryMixin):
     def __init__(self, root, base_path):
@@ -102,6 +91,8 @@ class SpaceStationGame(ItemInventoryMixin):
         self.player_data = {
             "name": "",
             "job": "",
+            "department": "",
+            "subdepartment": "",
             "inventory": [],
             "credits": 1000,  # Add credits to player data
             "location": {"x": 0, "y": 0},  # Add location data for hallway navigation
@@ -694,289 +685,18 @@ class SpaceStationGame(ItemInventoryMixin):
         quit_btn.pack(pady=10)
     
     def show_character_creation(self):
-        # Clear the window
-        for widget in self.root.winfo_children():
-            widget.destroy()
-        
-        # Title
-        title_label = tk.Label(self.root, text="Character Creation", font=("Arial", 24), bg="black", fg="white")
-        title_label.pack(pady=30)
-        
-        # Character creation form
-        form_frame = tk.Frame(self.root, bg="black")
-        form_frame.pack(pady=20)
-        
-        # Name input
-        name_label = tk.Label(form_frame, text="Character Name:", font=("Arial", 14), bg="black", fg="white")
-        name_label.grid(row=0, column=0, sticky="w", pady=10)
-        
-        self.name_entry = tk.Entry(form_frame, font=("Arial", 14), width=25)
-        self.name_entry.grid(row=0, column=1, pady=10)
-        
-        # Random Name button
-        def set_random_name():
-            self.name_entry.delete(0, tk.END)
-            self.name_entry.insert(0, random.choice(NPC_NAMES))
-            
-        random_name_btn = tk.Button(form_frame, text="Random", font=("Arial", 12), command=set_random_name)
-        random_name_btn.grid(row=0, column=2, padx=(5, 0), pady=10)
-        
-        # Job selection
-        job_label = tk.Label(form_frame, text="Select Job:", font=("Arial", 14), bg="black", fg="white")
-        # Job selection
-        job_label = tk.Label(form_frame, text="Select Job:", font=("Arial", 14), bg="black", fg="white")
-        job_label.grid(row=1, column=0, sticky="w", pady=10)
-        
-        self.job_var = tk.StringVar(value="Staff Assistant")
-        
-        # Updated jobs list with new roles
-        jobs = ["Staff Assistant", "Engineer", "Security Guard", "Doctor", "Captain", "Bartender", "Head of Personnel", "Botanist"]
-        job_menu = tk.OptionMenu(form_frame, self.job_var, *jobs, command=self.update_job_information)
-        job_menu.config(font=("Arial", 14), width=20)
-        job_menu.grid(row=1, column=1, pady=10)
-        
-        # Credits display based on selected job
-        credits_label = tk.Label(form_frame, text="Starting Credits:", font=("Arial", 14), bg="black", fg="white")
-        credits_label.grid(row=2, column=0, sticky="w", pady=10)
-        
-        self.credits_value = tk.Label(form_frame, text="1000 cr", font=("Arial", 14), bg="black", fg="white")
-        self.credits_value.grid(row=2, column=1, sticky="w", pady=10)
-        
-        # Job description frame
-        desc_frame = tk.Frame(self.root, bg="black")
-        desc_frame.pack(pady=10, fill=tk.X, padx=50)
-        
-        desc_label = tk.Label(desc_frame, text="Job Description:", font=("Arial", 14, "bold"), bg="black", fg="white")
-        desc_label.pack(anchor=tk.W)
-        
-        self.job_description = tk.Label(desc_frame, text="", font=("Arial", 12), bg="black", fg="white", wraplength=700, justify=tk.LEFT)
-        self.job_description.pack(anchor=tk.W, pady=5)
-        
-        # Initialize the job description for the default job
-        self.update_job_information(self.job_var.get())
-        
-        # Buttons
-        button_frame = tk.Frame(self.root, bg="black")
-        button_frame.pack(pady=20)
-        
-        start_game_btn = tk.Button(button_frame, text="Start Game", font=("Arial", 14), width=15, command=self.start_game)
-        start_game_btn.pack(side=tk.LEFT, padx=10)
-        
-        back_btn = tk.Button(button_frame, text="Back", font=("Arial", 14), width=15, command=self.show_main_menu)
-        back_btn.pack(side=tk.LEFT, padx=10)
+        CharacterCreation(
+            self.root,
+            self.player_data,
+            self.companies,
+            on_back=self.show_main_menu,
+            on_complete=self._on_character_created
+        )
     
-    def update_job_information(self, job_name):
-        """Update the job description and credits display based on selected job"""
-        job = job_name
-        
-        # Set credit amount based on job
-        if job == "Staff Assistant":
-            credits = 1000
-            description = "Staff Assistants are the backbone of daily station operations. They handle various tasks as needed across the station. Starting with 1000 credits."
-        elif job == "Engineer":
-            credits = 2500
-            description = "Engineers are responsible for keeping the station's critical systems operational. They excel at repairing equipment and solving technical problems. Starting with 2500 credits and access to the Engineering Station."
-        elif job == "Security Guard":
-            credits = 5000
-            description = "Security Guards maintain order and protect the station from threats. They have access to security systems and equipment. Starting with 5000 credits and access to the Security Station."
-        elif job == "Doctor":
-            credits = 7500
-            description = "Doctors provide medical care to the station's crew. They can diagnose and treat a variety of conditions. Starting with 7500 credits and access to the MedBay Station."
-        elif job == "Captain":
-            credits = 10000
-            description = "The Captain is the highest authority on the station. They make critical decisions and coordinate all departments. Starting with 10000 credits and access to all station areas."
-        elif job == "Bartender":
-            credits = 3500
-            description = "Bartenders run the station's social hub, mixing drinks and providing a place for crew members to relax. They have deep knowledge of beverages and excellent social skills. Starting with 3500 credits and access to the Bar Station."
-        elif job == "Head of Personnel":
-            credits = 9000
-            description = "The Head of Personnel (HoP) is the second-in-command of the station. They manage crew assignments, access permissions, and administrative matters. Starting with 9000 credits and access to the HoP Station and Bar Station."
-        elif job == "Botanist":
-            credits = 3000
-            description = "Botanists cultivate and maintain the station's plant life. They grow food, medicinal herbs, and decorative plants in the Botany Lab. Starting with 3000 credits and access to the Botany Station."
-        else:
-            credits = 1000  # Default
-            description = "Select a job to see its description."
-            
-        # Update the credits display
-        self.credits_value.config(text=f"{credits} cr")
-        
-        # Update the job description
-        self.job_description.config(text=description)
-    
-    def start_game(self):
-        # Get player information
-        player_name = self.name_entry.get().strip()
-        
-        if not player_name:
-            messagebox.showerror("Error", "Please enter a character name.")
-            return
-        
-        # Save player data
-        self.player_data["name"] = player_name
-        self.player_data["job"] = self.job_var.get()
-        self.player_data["inventory"] = []
-        self.player_data["location"] = {"x": -1, "y": 0}
-        self.player_data["stock_holdings"] = {}
-        
-        # Initialize damage stats
-        self.player_data["damage"] = {
-            "burn": 0,
-            "poison": 0,
-            "oxygen": 0
-        }
-        
-        # Set starting credits based on job
-        job = self.job_var.get()
-        if job == "Staff Assistant":
-            self.player_data["credits"] = 1000
-        elif job == "Engineer":
-            self.player_data["credits"] = 2500
-        elif job == "Security Guard":
-            self.player_data["credits"] = 5000
-        elif job == "Doctor":
-            self.player_data["credits"] = 7500
-        elif job == "Captain":
-            self.player_data["credits"] = 10000
-        elif job == "Bartender":
-            self.player_data["credits"] = 3500
-        elif job == "Head of Personnel":
-            self.player_data["credits"] = 9000
-        elif job == "Botanist":
-            self.player_data["credits"] = 3000
-        else:
-            self.player_data["credits"] = 1000  # Default for Staff Assistant
-            
-        # Set job-specific permissions for room access
-        if job == "Captain":
-            # Captain has access to all stations
-            self.player_data["permissions"] = {
-                "security_station": True,
-                "medbay_station": True,
-                "bridge_station": True,
-                "engineering_station": True,
-                "bar_station": True,
-                "hop_station": True,
-                "botany_station": True
-            }
-        elif job == "Head of Personnel":
-            # HoP has access to HoP station, Bar station, and Botany station
-            self.player_data["permissions"] = {
-                "security_station": False,
-                "medbay_station": False,
-                "bridge_station": False,
-                "engineering_station": False,
-                "bar_station": True,
-                "hop_station": True,
-                "botany_station": True
-            }
-        elif job == "Botanist":
-            # Botanist has access to Botany station
-            self.player_data["permissions"] = {
-                "security_station": False,
-                "medbay_station": False,
-                "bridge_station": False,
-                "engineering_station": False,
-                "bar_station": False,
-                "hop_station": False,
-                "botany_station": True
-            }
-        else:
-            # Other jobs have specific access
-            self.player_data["permissions"] = {
-                "security_station": job == "Security Guard",
-                "medbay_station": job == "Doctor",
-                "bridge_station": job == "Captain",
-                "engineering_station": job == "Engineer",
-                "bar_station": job == "Bartender",
-                "hop_station": False,
-                "botany_station": job == "Botanist"
-            }
-        
-        # --- NPC Generation --- 
-        self.station_crew = [] # Reset crew list for new game
-        available_names = NPC_NAMES.copy()
-        if player_name in available_names:
-             available_names.remove(player_name) # Avoid duplicate names
-             
-        department_heads = {
-            "Captain": {"credits": 10000, "station": "bridge_station"},
-            "Head of Personnel": {"credits": 9000, "station": "hop_station"},
-            "Security Guard": {"credits": 5000, "station": "security_station"},
-            "Doctor": {"credits": 7500, "station": "medbay_station"},
-            "Engineer": {"credits": 2500, "station": "engineering_station"},
-            "Botanist": {"credits": 3000, "station": "botany_station"},
-            "Bartender": {"credits": 3500, "station": "bar_station"}
-        }
-
-        for npc_job, data in department_heads.items():
-            if npc_job != job: # If the player didn't take this job
-                if not available_names:
-                    npc_name = f"NPC_{npc_job.replace(' ', '')}" # Fallback name
-                else:
-                    npc_name = random.choice(available_names)
-                    available_names.remove(npc_name)
-
-                npc_data = {
-                    "name": npc_name,
-                    "job": npc_job,
-                    "credits": data["credits"], # Give them starting credits too
-                    "inventory": [], # Empty inventory for now
-                    "location": {"x": -1, "y": 0}, # Start in quarters for simplicity
-                    "limbs": { # Same starting health as player
-                        "left_arm": 100, "right_arm": 100, "left_leg": 100,
-                        "right_leg": 100, "chest": 100, "head": 100
-                    },
-                    "damage": {"burn": 0, "poison": 0, "oxygen": 0},
-                     "permissions": {s: (j == npc_job) for j, d in department_heads.items() for s in [d["station"]]} # Basic permission for their station
-                }
-                # Add special permissions for NPC Captain/HoP if generated
-                if npc_job == "Captain":
-                    npc_data["permissions"] = {d["station"]: True for d in department_heads.values()}
-                elif npc_job == "Head of Personnel":
-                    npc_data["permissions"]["bar_station"] = True
-                    npc_data["permissions"]["botany_station"] = True
-
-                self.station_crew.append(npc_data)
-                print(f"Generated NPC: {npc_name} ({npc_job})") # Debug print
-        # --- End NPC Generation ---
-
-        # Initialize stock market with starting values
-        if "stock_market" not in self.player_data:
-            self.player_data["stock_market"] = {
-                "cycle_number": 1,
-                "day_number": 1,
-                "last_update_time": datetime.datetime.now().isoformat(),
-                "companies": [],
-                "trade_log": []
-            }
-            
-            # Initialize company data in player data
-            for company in self.companies:
-                self.player_data["stock_market"]["companies"].append({
-                    "name": company.name,
-                    "current_value": company.current_value,
-                    "previous_value": company.previous_value,
-                    "price_history": company.price_history,
-                    "owned_shares": 0
-                })
-        
-        # Initialize station power - Solar panels default ON unless player can control them
-        can_control_power = job in ["Engineer", "Captain"]
-        self.player_data["station_power"] = {
-            "battery_level": 25.0,
-            "solar_charging": not can_control_power,  # True if player can't control, False otherwise
-            "last_update_time": datetime.datetime.now().isoformat(),
-            "system_levels": {
-                "life_support": 10,
-                "hallway_lighting": 5,
-                "security_systems": 7,
-                "communication_array": 5
-            },
-            "power_mode": "balanced"
-        }
-        
-        # Create or save character file 
+    def _on_character_created(self, player_data, station_crew):
+        """Receive the finished character and NPC crew from character creation"""
+        self.player_data = player_data
+        self.station_crew = station_crew
         self.save_and_start()
     
     def save_and_start(self):
@@ -1081,6 +801,10 @@ class SpaceStationGame(ItemInventoryMixin):
         
         job_label = tk.Label(info_frame, text=f"Job: {self.player_data['job']}", font=("Arial", 14), bg="black", fg="white")
         job_label.pack(anchor="w", padx=10, pady=5)
+
+        department = self.player_data.get("department", "Unknown")
+        department_label = tk.Label(info_frame, text=f"Department: {department}", font=("Arial", 14), bg="black", fg="white")
+        department_label.pack(anchor="w", padx=10, pady=5)
         
         # Credits (displayed to 2 decimal places)
         credits_label = tk.Label(info_frame, text=f"Credits: {self.player_data['credits']:.2f}", font=("Arial", 14), bg="black", fg="white")

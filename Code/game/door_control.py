@@ -4,38 +4,32 @@ SPECIAL_ROOM_DOORS = {
     "6,0": {
         "room_name": "Bridge",
         "desc_base": "The control center of the station.",
-        "permission": "bridge_station",
-        "extra_jobs": frozenset({"Head of Personnel"}),
+        "permission": frozenset({"Captain", "HoP"}),
     },
     "0,6": {
         "room_name": "MedBay",
         "desc_base": "The medical facility of the station.",
-        "permission": "medbay_station",
-        "extra_jobs": frozenset(),
+        "permission": frozenset({"Captain", "HoP", "Doctor"}),
     },
     "6,6": {
         "room_name": "Security",
         "desc_base": "The security center of the station.",
-        "permission": "security_station",
-        "extra_jobs": frozenset(),
+        "permission": frozenset({"Captain", "Security"}),
     },
     "6,3": {
         "room_name": "Engineering Bay",
         "desc_base": "The station's engineering and maintenance center.",
-        "permission": "engineering_station",
-        "extra_jobs": frozenset(),
+        "permission": frozenset({"Captain", "HoP", "Engineer"}),
     },
     "0,-1": {
         "room_name": "Bar",
         "desc_base": "The station's social hub where crew members can relax and enjoy drinks.",
-        "permission": "bar_station",
-        "extra_jobs": frozenset(),
+        "permission": frozenset({"Captain", "HoP", "Bar"}),
     },
     "3,-1": {
         "room_name": "Botany Lab",
         "desc_base": "The station's plant cultivation and research facility.",
-        "permission": "botany_station",
-        "extra_jobs": frozenset({"Head of Personnel"}),
+        "permission": frozenset({"Captain", "HoP", "Botany"}),
     },
 }
 
@@ -43,17 +37,10 @@ ACCESS_ERROR = "Unable to access door control system."
 
 
 def can_control_door(player_data, door_key):
-    if player_data.get("job") == "Captain":
-        return True
-
     door = SPECIAL_ROOM_DOORS.get(door_key)
     if not door:
         return False
-
-    if player_data.get("permissions", {}).get(door["permission"], False):
-        return True
-
-    return player_data.get("job") in door.get("extra_jobs", frozenset())
+    return player_data.get("subdepartment", "") in door.get("permission", frozenset())
 
 
 def is_door_locked(player_data, door_key):
