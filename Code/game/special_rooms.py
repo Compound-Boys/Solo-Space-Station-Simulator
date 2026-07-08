@@ -2620,7 +2620,6 @@ class Bar:
         # Create a popup for the drink menu
         menu_popup = tk.Toplevel(self.bar_window)
         menu_popup.title("Drink Menu")
-        menu_popup.geometry("700x600")  # Made wider to accommodate tab buttons
         menu_popup.configure(bg="black")
         menu_popup.transient(self.bar_window)
         menu_popup.grab_set()
@@ -2646,6 +2645,10 @@ class Bar:
         tab_frame = tk.Frame(menu_popup, bg="black")
         tab_frame.pack(fill=tk.X, padx=20, pady=10)
         
+        # Pin action buttons to the bottom so they stay visible
+        btn_frame = tk.Frame(menu_popup, bg="black")
+        btn_frame.pack(side=tk.BOTTOM, pady=10)
+        
         # Create frame for the menu
         menu_frame = tk.Frame(menu_popup, bg="black")
         menu_frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
@@ -2656,7 +2659,7 @@ class Bar:
         
         # Create listbox for the drinks
         drink_listbox = tk.Listbox(menu_frame, bg="black", fg="white", font=("Arial", 12),
-                                width=50, height=20, yscrollcommand=scrollbar.set)
+                                width=50, height=15, yscrollcommand=scrollbar.set)
         drink_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=drink_listbox.yview)
         
@@ -2746,10 +2749,6 @@ class Bar:
                     selected_drink["details"] = drink_details
             
         drink_listbox.bind('<<ListboxSelect>>', on_select)
-        
-        # Buttons frame
-        btn_frame = tk.Frame(menu_popup, bg="black")
-        btn_frame.pack(pady=10)
         
         # Order button
         order_btn = tk.Button(btn_frame, text="Order Selected Drink", font=("Arial", 12), 

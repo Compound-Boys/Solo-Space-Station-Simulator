@@ -16,6 +16,8 @@ class Game:
         # Save game to JSON file
         filename = f"saves/{player_data['name']}.json"
         try:
+            # Format credits to 2 decimal places for storing
+            player_data['credits'] = round(player_data['credits'], 2)
             with open(filename, "w") as f:
                 json.dump(player_data, f, indent=4)
             return True

@@ -1095,8 +1095,8 @@ class SpaceStationGame:
         job_label = tk.Label(info_frame, text=f"Job: {self.player_data['job']}", font=("Arial", 14), bg="black", fg="white")
         job_label.pack(anchor="w", padx=10, pady=5)
         
-        # Credits
-        credits_label = tk.Label(info_frame, text=f"Credits: {self.player_data['credits']}", font=("Arial", 14), bg="black", fg="white")
+        # Credits (displayed to 2 decimal places)
+        credits_label = tk.Label(info_frame, text=f"Credits: {self.player_data['credits']:.2f}", font=("Arial", 14), bg="black", fg="white")
         credits_label.pack(anchor="w", padx=10, pady=5)
         
         # Buttons for inventory, stock holdings, and notes
