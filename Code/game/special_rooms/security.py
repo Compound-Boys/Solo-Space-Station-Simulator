@@ -76,8 +76,6 @@ class Security:
         self.security_window.focus_force()
     
     def access_security_station(self):
-        # Show access confirmation for authorized personnel
-        self.security_window.after(10, lambda: messagebox.showinfo("Security Station", "Access granted. Welcome to the Security Station.", parent=self.security_window))
         # Make sure the window stays on top after dialog
         self.security_window.after(20, self.security_window.lift)
         self.security_window.focus_force()
