@@ -79,62 +79,23 @@ class StockMarket:
         self.left_frame = tk.Frame(self.stock_window, bg="black", width=300)
         self.left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
         
-        # Create a scrollable canvas for the left frame content
-        self.left_canvas = tk.Canvas(self.left_frame, bg="black", highlightthickness=0)
-        self.left_scrollbar = tk.Scrollbar(self.left_frame, orient="vertical", command=self.left_canvas.yview)
-        self.left_canvas.configure(yscrollcommand=self.left_scrollbar.set)
+        # Fixed bottom section for navigation buttons (aligns with trade controls)
+        self.left_bottom_frame = tk.Frame(self.left_frame, bg="black")
+        self.left_bottom_frame.pack(side=tk.BOTTOM, fill=tk.X)
         
-        # Pack the canvas and scrollbar
-        self.left_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.left_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.history_btn = tk.Button(self.left_bottom_frame, text="View Trade History", 
+                                   font=("Arial", 12), bg="#333333", fg="white",
+                                   command=self.show_trade_history)
+        self.history_btn.pack(pady=(5, 2), fill=tk.X)
         
-        # Create a frame inside the canvas to hold all left content
-        self.left_content = tk.Frame(self.left_canvas, bg="black")
-        self.left_canvas_window = self.left_canvas.create_window((0, 0), window=self.left_content, anchor="nw", width=280)
+        self.back_btn = tk.Button(self.left_bottom_frame, text="Back to Computer", 
+                                font=("Arial", 12), bg="#333333", fg="white",
+                                command=self.on_closing)
+        self.back_btn.pack(pady=(2, 5), fill=tk.X)
         
-        # Configure mousewheel scrolling for left frame
-        def _on_left_mousewheel(event):
-            try:
-                # Windows style scrolling
-                self.left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-            except Exception as e:
-                try:
-                    # Linux style scrolling
-                    if event.num == 4:
-                        self.left_canvas.yview_scroll(-1, "units")
-                    elif event.num == 5:
-                        self.left_canvas.yview_scroll(1, "units")
-                except:
-                    pass  # Ignore errors if the canvas was destroyed
-        
-        # Bind mousewheel to left canvas and content
-        self.left_canvas.bind("<MouseWheel>", _on_left_mousewheel)
-        self.left_canvas.bind("<Button-4>", _on_left_mousewheel)
-        self.left_canvas.bind("<Button-5>", _on_left_mousewheel)
-        self.left_content.bind("<MouseWheel>", _on_left_mousewheel)
-        self.left_content.bind("<Button-4>", _on_left_mousewheel)
-        self.left_content.bind("<Button-5>", _on_left_mousewheel)
-        
-        # Ensure scrolling works when mouse is over widgets in the left content
-        def _bind_mousewheel_to_children(widget):
-            widget.bind("<MouseWheel>", _on_left_mousewheel)
-            for child in widget.winfo_children():
-                _bind_mousewheel_to_children(child)
-        
-        # Function to update canvas scrolling configuration
-        def _configure_left_canvas(event=None):
-            # Update the scrollregion to encompass the inner frame
-            self.left_canvas.configure(scrollregion=self.left_canvas.bbox("all"))
-            
-            # Make sure the inner frame is wide enough
-            self.left_canvas.itemconfig(self.left_canvas_window, width=self.left_canvas.winfo_width())
-            
-            # After all widgets are added and configured, bind mousewheel to all children
-            _bind_mousewheel_to_children(self.left_content)
-            
-        # Bind canvas and window resize events
-        self.left_content.bind("<Configure>", _configure_left_canvas)
-        self.left_canvas.bind("<Configure>", lambda e: self.left_canvas.itemconfig(self.left_canvas_window, width=e.width))
+        # Main content area above the fixed bottom buttons
+        self.left_content = tk.Frame(self.left_frame, bg="black")
+        self.left_content.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         
         self.right_frame = tk.Frame(self.stock_window, bg="black")
         self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -242,24 +203,15 @@ class StockMarket:
         self.companies_listbox = tk.Listbox(self.left_content, 
                                          font=("Arial", 12), bg="black", fg="white",
                                          selectbackground="#333333", selectforeground="white",
-                                         width=30, height=15)
+                                         width=30)
         self.companies_listbox.pack(pady=10, fill=tk.BOTH, expand=True)
         
-        # Add Trade History button
-        self.history_btn = tk.Button(self.left_content, text="View Trade History", 
-                                   font=("Arial", 12), bg="#333333", fg="white",
-                                   command=self.show_trade_history)
-        self.history_btn.pack(pady=10, fill=tk.X)
-        
-        # Back button
-        self.back_btn = tk.Button(self.left_content, text="Back to Computer", 
-                                font=("Arial", 12), bg="#333333", fg="white",
-                                command=self.on_closing)
-        self.back_btn.pack(pady=10, fill=tk.X)
-        
         # Right frame contents (will be populated when company is selected)
+        self.trade_frame = tk.Frame(self.right_frame, bg="black")
+        self.trade_frame.pack(side=tk.BOTTOM, pady=(5, 0))
+        
         self.company_info_frame = tk.Frame(self.right_frame, bg="black")
-        self.company_info_frame.pack(fill=tk.X, pady=10)
+        self.company_info_frame.pack(side=tk.TOP, fill=tk.X, pady=10)
         
         # Set up the figure for the graph
         self.fig = plt.Figure(figsize=(5, 3), dpi=100)
@@ -275,11 +227,7 @@ class StockMarket:
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.right_frame)
         self.canvas_widget = self.canvas.get_tk_widget()
         self.canvas_widget.configure(bg="black", highlightbackground="black")
-        self.canvas_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Trade buttons frame
-        self.trade_frame = tk.Frame(self.right_frame, bg="black")
-        self.trade_frame.pack(fill=tk.X, pady=10)
+        self.canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Bind selection event for the listbox AFTER all frames are created
         self.companies_listbox.bind('<<ListboxSelect>>', self.on_company_select)
@@ -298,9 +246,6 @@ class StockMarket:
             
         # Start the timer
         self.update_timer()
-        
-        # Initial update of scrollable area
-        self.update_scrollable_area()
     
     def update_timer(self):
         """Update the countdown timer for next stock update"""
@@ -527,7 +472,7 @@ class StockMarket:
         # Shares to trade label and entry
         shares_label = tk.Label(self.trade_frame, text="Shares:", 
                               font=("Arial", 12), bg="black", fg="white")
-        shares_label.grid(row=0, column=0, padx=5, pady=10)
+        shares_label.grid(row=0, column=0, padx=5, pady=(5, 2))
         
         # Dropdown for predefined amounts
         share_options = [1, 5, 10, 25, 50, 100]
@@ -535,19 +480,24 @@ class StockMarket:
         
         shares_dropdown = ttk.Combobox(self.trade_frame, textvariable=self.shares_var, 
                                      values=share_options, width=5)
-        shares_dropdown.grid(row=0, column=1, padx=5, pady=10)
+        shares_dropdown.grid(row=0, column=1, padx=5, pady=(5, 2))
         
         # Make the dropdown user editable
         shares_dropdown.config(state="normal")
         
-        # Calculate max shares that can be bought
+        # Calculate max shares that can be bought or sold
         max_can_buy = int(self.player_data["credits"] / self.current_company.current_value)
+        max_can_sell = self.current_company.owned_shares
         
-        # Add max button
-        max_buy_btn = tk.Button(self.trade_frame, text=f"Max ({max_can_buy})", 
+        max_buy_btn = tk.Button(self.trade_frame, text=f"Max Buy ({max_can_buy})", 
                               font=("Arial", 10), bg="#333333", fg="white",
                               command=lambda: self.shares_var.set(str(max_can_buy)))
-        max_buy_btn.grid(row=0, column=2, padx=5, pady=10)
+        max_buy_btn.grid(row=1, column=0, padx=5, pady=5)
+        
+        max_sell_btn = tk.Button(self.trade_frame, text=f"Max Sell ({max_can_sell})", 
+                               font=("Arial", 10), bg="#333333", fg="white",
+                               command=lambda: self.shares_var.set(str(max_can_sell)))
+        max_sell_btn.grid(row=1, column=1, padx=5, pady=5)
         
         # Calculate total cost
         def update_total_cost(*args):
@@ -579,19 +529,19 @@ class StockMarket:
         # Total cost label
         total_label = tk.Label(self.trade_frame, text="Total: 0.00", 
                             font=("Arial", 12), bg="black", fg="white")
-        total_label.grid(row=0, column=3, padx=20, pady=10)
+        total_label.grid(row=0, column=2, padx=20, pady=(5, 2))
         
         # Buy button
         buy_btn = tk.Button(self.trade_frame, text="Buy", font=("Arial", 12), 
                          bg="green", fg="white", width=8,
                          command=self.buy_stock)
-        buy_btn.grid(row=1, column=0, padx=10, pady=10)
+        buy_btn.grid(row=2, column=0, padx=10, pady=10)
         
         # Sell button
         sell_btn = tk.Button(self.trade_frame, text="Sell", font=("Arial", 12), 
                           bg="red", fg="white", width=8,
                           command=self.sell_stock)
-        sell_btn.grid(row=1, column=1, padx=10, pady=10)
+        sell_btn.grid(row=2, column=1, padx=10, pady=10)
         
         # Initialize button states
         update_total_cost()
@@ -941,14 +891,6 @@ class StockMarket:
         if self.stock_transactions:
             self.player_data["stock_transactions"] = self.stock_transactions
         
-        # Cleanup any bindings to prevent errors
-        try:
-            self.left_canvas.unbind("<MouseWheel>")
-            self.left_canvas.unbind("<Button-4>")
-            self.left_canvas.unbind("<Button-5>")
-        except:
-            pass
-            
         # Release the grab and return control to the parent window
         self.stock_window.grab_release()
         
@@ -986,9 +928,6 @@ class StockMarket:
         # Repopulate the listbox with filtered companies
         self.populate_companies_listbox()
         
-        # Update scrollable area after UI changes
-        self.update_scrollable_area()
-        
         # Try to restore selection
         if selected_company:
             for i in range(self.companies_listbox.size()):
@@ -1025,9 +964,6 @@ class StockMarket:
         
         # Repopulate the listbox with sorted companies
         self.populate_companies_listbox()
-        
-        # Update scrollable area after UI changes
-        self.update_scrollable_area()
         
         # Try to restore selection
         if selected_company:
@@ -1069,9 +1005,6 @@ class StockMarket:
         
         # Repopulate the listbox with filtered companies
         self.populate_companies_listbox()
-        
-        # Update scrollable area after UI changes
-        self.update_scrollable_area()
         
         # Try to restore selection
         if selected_company:
@@ -1135,46 +1068,5 @@ class StockMarket:
             # Add company to listbox
             self.companies_listbox.insert(tk.END, company_name)
         
-        # Make sure all widgets are properly arranged for scrolling
-        self.left_content.update_idletasks()
-        self.left_canvas.configure(scrollregion=self.left_canvas.bbox("all"))
-        
         # Do NOT automatically select a company here - that happens in __init__ or filter_companies
     
-    def update_scrollable_area(self):
-        """Update the scrollable area to ensure all content is accessible"""
-        # Update the left content to get accurate sizes
-        self.left_content.update_idletasks()
-        
-        # Update the canvas scroll region
-        self.left_canvas.configure(scrollregion=self.left_canvas.bbox("all"))
-        
-        # Rebind mousewheel to all children
-        def _on_left_mousewheel(event):
-            try:
-                # Windows style scrolling
-                self.left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-            except Exception as e:
-                try:
-                    # Linux style scrolling
-                    if event.num == 4:
-                        self.left_canvas.yview_scroll(-1, "units")
-                    elif event.num == 5:
-                        self.left_canvas.yview_scroll(1, "units")
-                except:
-                    pass  # Ignore errors if the canvas was destroyed
-                
-        def _bind_mousewheel_to_children(widget):
-            widget.bind("<MouseWheel>", _on_left_mousewheel)
-            widget.bind("<Button-4>", _on_left_mousewheel)
-            widget.bind("<Button-5>", _on_left_mousewheel)
-            for child in widget.winfo_children():
-                _bind_mousewheel_to_children(child)
-                
-        # Bind to all children
-        _bind_mousewheel_to_children(self.left_content)
-        
-        # Make sure the canvas is properly sized
-        width = self.left_canvas.winfo_width()
-        if width > 0:  # Only update if we have a valid width
-            self.left_canvas.itemconfig(self.left_canvas_window, width=width)
