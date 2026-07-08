@@ -105,21 +105,6 @@ exe = EXE(
     # Create saves directory directly in the dist folder, not under a separate game_data folder
     # This matches how the game will create saves when run as an EXE
     dist_folder = os.path.join("dist", "SpaceStationExplorer")
-    saves_dir = os.path.join(dist_folder, "saves")
-    
-    os.makedirs(saves_dir, exist_ok=True)
-    
-    print("Created saves directory in the distribution folder.")
-    
-    # Copy any existing save files to the new location (optional)
-    old_saves_dir = os.path.join("game", "saves")
-    if os.path.exists(old_saves_dir):
-        for save_file in os.listdir(old_saves_dir):
-            if save_file.endswith(".json"):
-                old_file = os.path.join(old_saves_dir, save_file)
-                new_file = os.path.join(saves_dir, save_file)
-                shutil.copy2(old_file, new_file)
-        print("Copied existing save files to the new location.")
     
     # Success message
     print(f"\nBuild completed successfully!")

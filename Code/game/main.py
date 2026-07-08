@@ -993,18 +993,9 @@ class SpaceStationGame:
         self.save_and_start()
     
     def save_and_start(self):
+       
         """Save the character and start the game"""
-        # Update market data before saving
-        self.update_market_data()
-        
-        # Create saves directory if it doesn't exist
-        saves_path = os.path.join(self.base_path, "game", "saves")
-        os.makedirs(saves_path, exist_ok=True)
-        
-        # Save game to JSON file
-        filename = os.path.join(saves_path, f"{self.player_data['name']}.json")
-        with open(filename, "w") as f:
-            json.dump(self.player_data, f, indent=4)
+        Game.save_game(self.player_data)
         
         # Initialize stock market data
         self.update_market_data()
@@ -1653,14 +1644,7 @@ class SpaceStationGame:
         # Update market data before saving
         self.update_market_data()
         
-        # Create saves directory if it doesn't exist
-        saves_path = os.path.join(self.base_path, "game", "saves")
-        os.makedirs(saves_path, exist_ok=True)
-        
-        # Save game to JSON file
-        filename = os.path.join(saves_path, f"{self.player_data['name']}.json")
-        with open(filename, "w") as f:
-            json.dump(self.player_data, f, indent=4)
+        Game.save_game(self.player_data)
         
         # Close the save dialog without showing a confirmation
         save_window.destroy()
@@ -2412,7 +2396,7 @@ class SpaceStationGame:
         load_label.pack(pady=30)
         
         # Check if saves directory exists
-        saves_path = os.path.join(self.base_path, "game", "saves") # Updated path
+        saves_path = os.path.join(self.base_path, "saves") # Updated path
         os.makedirs(saves_path, exist_ok=True)
         
         # Get save files
@@ -2450,7 +2434,7 @@ class SpaceStationGame:
                 player_name = save_file[:-5]
                 
                 save_btn = tk.Button(saves_frame, text=player_name, font=("Arial", 14), width=20,
-                                     command=lambda name=player_name: self.load_game_file(name)) # Use load_game_file with base name
+                                     command=lambda name=player_name: self.load_game_file(name))
                 save_btn.pack(pady=5)
             
             # Update the scrollregion when the size of saves_frame changes
@@ -2502,50 +2486,38 @@ class SpaceStationGame:
         if filename.endswith(".json"):
             filename = filename[:-5]
             
-        # Load game data from the correct path
-        file_path = os.path.join(self.base_path, "game", "saves", filename + ".json") # Updated path
-        try:
-            with open(file_path, "r") as f:
-                self.player_data = json.load(f)
+        Game.load_game(filename)
                 
-            # Update company data from saved game
-            self.load_market_data()
+        # Update company data from saved game
+        self.load_market_data()
+        
+        # Start the market thread
+        self.start_market_thread()
+        
+        # Start the battery timer
+        self.start_battery_timer()
+        
+        # Determine where to show the player based on saved location
+        if "location" in self.player_data:
+            x = self.player_data["location"].get("x", 0)
+            y = self.player_data["location"].get("y", 0)
             
-            # Start the market thread
-            self.start_market_thread()
-            
-            # Start the battery timer
-            self.start_battery_timer()
-            
-            # Determine where to show the player based on saved location
-            if "location" in self.player_data:
-                x = self.player_data["location"].get("x", 0)
-                y = self.player_data["location"].get("y", 0)
-                
-                # Check if player is in a special room or hallway
-                if (x == 6 and y == 0) or (x == 0 and y == 6) or (x == 6 and y == 6) or (x == 6 and y == 3) or (x == 0 and y == -1) or (x == 3 and y == -1):
-                    # Player was in a special room, return to hallway entrance
-                    self.update_player_data_from_room(self.player_data) # Use the callback logic to place player correctly
-                elif x == -1 and y == 0:
-                    # Player was in quarters
-                    self.show_room()
-                else:
-                    # Player was in a hallway
-                    self.show_hallway()
-            else:
-                # Default to quarters if location is missing
-                self.player_data["location"] = {"x": -1, "y": 0}
+            # Check if player is in a special room or hallway
+            if (x == 6 and y == 0) or (x == 0 and y == 6) or (x == 6 and y == 6) or (x == 6 and y == 3) or (x == 0 and y == -1) or (x == 3 and y == -1):
+                # Player was in a special room, return to hallway entrance
+                self.update_player_data_from_room(self.player_data) # Use the callback logic to place player correctly
+            elif x == -1 and y == 0:
+                # Player was in quarters
                 self.show_room()
-            
-            return True
-        except FileNotFoundError:
-            messagebox.showerror("Error", f"Save file not found: {filename}.json")
-            self.show_load_game() # Return to load screen
-            return False
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to load game: {e}")
-            self.show_load_game() # Return to load screen
-            return False
+            else:
+                # Player was in a hallway
+                self.show_hallway()
+        else:
+            # Default to quarters if location is missing
+            self.player_data["location"] = {"x": -1, "y": 0}
+            self.show_room()
+        
+        return True
 
     def add_burn_damage(self, min_damage, max_damage):
         """Apply burn damage to the player"""
@@ -2805,14 +2777,7 @@ class SpaceStationGame:
         # Update market data before saving
         self.update_market_data()
         
-        # Create saves directory if it doesn't exist
-        saves_path = os.path.join(self.base_path, "game", "saves")
-        os.makedirs(saves_path, exist_ok=True)
-        
-        # Save game to JSON file
-        filename = os.path.join(saves_path, f"{self.player_data['name']}.json")
-        with open(filename, "w") as f:
-            json.dump(self.player_data, f, indent=4)
+        Game.save_game(self.player_data)
         
         # Stop the battery timer before returning to menu
         self.stop_battery_timer()
