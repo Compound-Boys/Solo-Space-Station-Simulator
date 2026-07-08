@@ -36,7 +36,7 @@ class StockMarket:
         # Create a new toplevel window
         self.stock_window = tk.Toplevel(parent_window)
         self.stock_window.title("Stock Market")
-        self.stock_window.geometry("1000x750")  # Increased height from 700 to 750 for more space
+        self.stock_window.geometry("1000x850") 
         self.stock_window.configure(bg="black")
         
         # Set a minimum window size to prevent UI elements from getting cut off

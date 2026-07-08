@@ -176,3 +176,6 @@ cython_debug/
 # Linux AppImage build venv (created by Code/build_appimage.sh)
 .buildvenv/
 *.AppImage
+
+# Pycharm 
+.idea/
