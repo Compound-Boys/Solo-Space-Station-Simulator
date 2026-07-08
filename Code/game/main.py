@@ -2399,10 +2399,6 @@ class SpaceStationGame(ItemInventoryMixin):
         elif room_name == "Quarters": # Quarters might not need crew data, adjust if needed
             room_instance = Quarters(self.root, self.player_data, self.update_player_data_from_room) # Assuming Quarters doesn't need crew
 
-        # Clean up temporary data added to player_data after room is created
-        if "ship_map" in self.player_data:
-            del self.player_data["ship_map"]
-
     def enter_special_room_at(self, room_name, target_key):
         """Enter a special room at a specified target location"""
         # Get room details
@@ -2441,10 +2437,6 @@ class SpaceStationGame(ItemInventoryMixin):
              room_instance = Botany(self.root, self.player_data, self.station_crew, self.update_player_data_from_room)
         elif room_name == "Quarters": # Quarters might not need crew data
              room_instance = Quarters(self.root, self.player_data, self.update_player_data_from_room)
-
-        # Clean up temporary data
-        if "ship_map" in self.player_data:
-            del self.player_data["ship_map"]
 
     def update_player_data_from_room(self, updated_player_data, updated_station_crew=None):
         """Update player and crew data when returning from a room"""
