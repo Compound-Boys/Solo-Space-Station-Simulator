@@ -8,6 +8,7 @@ import math
 from .items import get_item_definition, get_items_by_category
 from .power_constants import SYSTEM_POWER_RATES
 from .door_control import toggle_door_lock as toggle_room_door_lock, is_door_locked
+from .drinks import DRINKS_MENU, MIXED_DRINKS, DrinkMixer, is_drink_alcoholic
 
 class MedBay:
     def __init__(self, parent_window, player_data, station_crew, return_callback):
@@ -2294,151 +2295,9 @@ class Bar:
         self.station_crew = station_crew # Store crew data
         self.return_callback = return_callback
         
-        # Define drinks available in the bar
-        self.drinks_menu = {
-            "Beer": {"price": 10, "desc": "A refreshing glass of regular beer."},
-            "Whiskey": {"price": 20, "desc": "A shot of strong whiskey."},
-            "Wine": {"price": 15, "desc": "A fine glass of red wine."},
-            "Vodka": {"price": 15, "desc": "A shot of clear, strong vodka."},
-            "Gin": {"price": 15, "desc": "A botanical spirit with a distinctive flavor."},
-            "Rum": {"price": 15, "desc": "A sweet spirit distilled from sugarcane."},
-            "Tequila": {"price": 18, "desc": "A spirit made from the blue agave plant."},
-            "Brandy": {"price": 22, "desc": "A spirit distilled from wine or fermented fruit juice."},
-            "Scotch": {"price": 25, "desc": "A smoky whisky from Scotland."},
-            "Orange Juice": {"price": 5, "desc": "A glass of fresh orange juice."},
-            "Cranberry Juice": {"price": 5, "desc": "Tart and refreshing red juice."},
-            "Pineapple Juice": {"price": 6, "desc": "Sweet tropical juice."},
-            "Tonic Water": {"price": 4, "desc": "Carbonated water with quinine."},
-            "Soda Water": {"price": 3, "desc": "Simple carbonated water."},
-            "Cola": {"price": 4, "desc": "A sweet carbonated soft drink."},
-            "Lemon Juice": {"price": 4, "desc": "Fresh, sour citrus juice."},
-            "Lime Juice": {"price": 4, "desc": "Zesty green citrus juice."},
-            "Grenadine": {"price": 5, "desc": "Sweet red syrup made from pomegranate."},
-            "Water": {"price": 1, "desc": "A glass of water. Refreshing and healthy."}
-        }
-        
-        # Define mixed drinks that bartenders can make
-        self.mixed_drinks = {
-            "Screwdriver": {
-                "ingredients": ["Vodka", "Orange Juice"],
-                "price": 25,
-                "desc": "A classic mix of vodka and orange juice."
-            },
-            "Gin and Tonic": {
-                "ingredients": ["Gin", "Tonic Water"],
-                "price": 20,
-                "desc": "A refreshing mix of gin and tonic water."
-            },
-            "Rum and Cola": {
-                "ingredients": ["Rum", "Cola"],
-                "price": 20,
-                "desc": "A sweet mix of rum and cola."
-            },
-            "Whiskey Sour": {
-                "ingredients": ["Whiskey", "Lemon Juice", "Sugar"],
-                "price": 28,
-                "desc": "A perfect balance of sour and sweet with whiskey."
-            },
-            "Margarita": {
-                "ingredients": ["Tequila", "Lime Juice", "Triple Sec"],
-                "price": 30,
-                "desc": "A tangy, refreshing cocktail with a salt rim."
-            },
-            "Bloody Mary": {
-                "ingredients": ["Vodka", "Tomato Juice", "Hot Sauce", "Worcestershire Sauce"],
-                "price": 28,
-                "desc": "A savory, spicy morning cocktail."
-            },
-            "Mojito": {
-                "ingredients": ["Rum", "Lime Juice", "Mint", "Sugar", "Soda Water"],
-                "price": 32,
-                "desc": "A refreshing minty cocktail from Cuba."
-            },
-            "Piña Colada": {
-                "ingredients": ["Rum", "Coconut Cream", "Pineapple Juice"],
-                "price": 30,
-                "desc": "A tropical blend that tastes like vacation."
-            },
-            "Cosmopolitan": {
-                "ingredients": ["Vodka", "Triple Sec", "Cranberry Juice", "Lime Juice"],
-                "price": 30,
-                "desc": "A sophisticated, slightly tart cocktail."
-            },
-            "Old Fashioned": {
-                "ingredients": ["Whiskey", "Bitters", "Sugar", "Water"],
-                "price": 32,
-                "desc": "A timeless cocktail that never goes out of style."
-            },
-            "Negroni": {
-                "ingredients": ["Gin", "Vermouth", "Campari"],
-                "price": 30,
-                "desc": "A perfectly balanced bitter and sweet aperitif."
-            },
-            "Manhattan": {
-                "ingredients": ["Whiskey", "Vermouth", "Bitters"],
-                "price": 32,
-                "desc": "A sophisticated whiskey cocktail."
-            },
-            "Mai Tai": {
-                "ingredients": ["Rum", "Lime Juice", "Orange Curacao", "Orgeat Syrup"],
-                "price": 35,
-                "desc": "A complex tropical rum cocktail."
-            },
-            "Daiquiri": {
-                "ingredients": ["Rum", "Lime Juice", "Sugar"],
-                "price": 28,
-                "desc": "A simple, refreshing rum cocktail."
-            },
-            "Tom Collins": {
-                "ingredients": ["Gin", "Lemon Juice", "Sugar", "Soda Water"],
-                "price": 28,
-                "desc": "A refreshing gin cocktail served in a tall glass."
-            },
-            "Singapore Sling": {
-                "ingredients": ["Gin", "Cherry Brandy", "Pineapple Juice", "Lime Juice", "Grenadine"],
-                "price": 35,
-                "desc": "A complex, fruity gin cocktail."
-            },
-            "Long Island Iced Tea": {
-                "ingredients": ["Vodka", "Gin", "Rum", "Tequila", "Triple Sec", "Lemon Juice", "Cola"],
-                "price": 40,
-                "desc": "A potent mix of multiple spirits with a cola finish."
-            },
-            "Space Blaster": {
-                "ingredients": ["Vodka", "Blue Curacao", "Sprite", "Lemon Juice"],
-                "price": 35,
-                "desc": "A station specialty with an electric blue color."
-            },
-            "Quantum Fizz": {
-                "ingredients": ["Gin", "Lime Juice", "Sugar", "Mint", "Helium Gas"],
-                "price": 38,
-                "desc": "A unique drink that temporarily changes your voice."
-            },
-            "Nebula Cloud": {
-                "ingredients": ["Whiskey", "Honey", "Dry Ice", "Cinnamon"],
-                "price": 42,
-                "desc": "A smoky cocktail that mimics a space nebula."
-            }
-        }
-        
         # Track bartender mode
         self.bartender_mode = False
-        
-        # Define ingredients available for bartending
-        self.available_ingredients = [
-            # Spirits
-            "Vodka", "Gin", "Rum", "Whiskey", "Tequila", "Brandy", "Scotch", 
-            # Mixers and Juices
-            "Orange Juice", "Cranberry Juice", "Pineapple Juice", "Tomato Juice",
-            "Tonic Water", "Soda Water", "Cola", "Ginger Ale", "Sprite",
-            # Modifiers
-            "Lemon Juice", "Lime Juice", "Sugar", "Salt", "Honey", 
-            "Triple Sec", "Blue Curacao", "Orange Curacao", "Grenadine",
-            "Bitters", "Vermouth", "Campari", "Cherry Brandy",
-            # Special ingredients
-            "Mint", "Coconut Cream", "Hot Sauce", "Worcestershire Sauce", 
-            "Cinnamon", "Orgeat Syrup", "Dry Ice", "Helium Gas"
-        ]
+        self.drink_mixer = DrinkMixer(self.bar_window, self.player_data)
         
         # Bind window closing
         self.bar_window.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -2544,7 +2403,9 @@ class Bar:
         
         # Create menu tabs for different categories
         tab_frame = tk.Frame(menu_popup, bg="black")
-        tab_frame.pack(fill=tk.X, padx=20, pady=10)
+        tab_frame.pack(fill=tk.X, padx=20, pady=(10, 5))
+        alcohol_tab_frame = tk.Frame(menu_popup, bg="black")
+        alcohol_tab_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
         
         # Pin action buttons to the bottom so they stay visible
         btn_frame = tk.Frame(menu_popup, bg="black")
@@ -2579,13 +2440,22 @@ class Bar:
         all_drinks = {}
         
         # Copy the drinks to their respective categories
-        for name, details in self.drinks_menu.items():
+        for name, details in DRINKS_MENU.items():
             basic_drinks[name] = details
             all_drinks[name] = details
             
-        for name, details in self.mixed_drinks.items():
+        for name, details in MIXED_DRINKS.items():
             mixed_drinks[name] = details
             all_drinks[name] = details
+
+        alcoholic_drinks = {
+            name: details for name, details in all_drinks.items()
+            if is_drink_alcoholic(name, details)
+        }
+        non_alcoholic_drinks = {
+            name: details for name, details in all_drinks.items()
+            if not is_drink_alcoholic(name, details)
+        }
         
         # Track the current category and selected drink
         current_category = {"drinks": all_drinks, "name": "All Drinks"}
@@ -2622,6 +2492,14 @@ class Bar:
         mixed_btn = tk.Button(tab_frame, text="Mixed Drinks", font=("Arial", 12), width=12,
                            command=lambda: show_category(mixed_drinks, "Mixed Drinks"))
         mixed_btn.pack(side=tk.LEFT, padx=15)
+
+        alcoholic_btn = tk.Button(alcohol_tab_frame, text="Alcoholic", font=("Arial", 12), width=12,
+                               command=lambda: show_category(alcoholic_drinks, "Alcoholic"))
+        alcoholic_btn.pack(side=tk.LEFT, padx=15)
+
+        non_alcoholic_btn = tk.Button(alcohol_tab_frame, text="Non-Alcoholic", font=("Arial", 12), width=12,
+                                   command=lambda: show_category(non_alcoholic_drinks, "Non-Alcoholic"))
+        non_alcoholic_btn.pack(side=tk.LEFT, padx=15)
         
         # Show all drinks by default
         show_category(all_drinks, "All Drinks")
@@ -2746,593 +2624,12 @@ class Bar:
     
     def show_drink_mixer(self):
         """Show interface for mixing custom drinks"""
-        # Create a popup for mixing drinks
-        mixer_popup = tk.Toplevel(self.bar_window)
-        mixer_popup.title("Bartender's Drink Mixer")
-        mixer_popup.geometry("800x650")  # Made larger to accommodate all content
-        mixer_popup.configure(bg="black")
-        mixer_popup.transient(self.bar_window)
-        mixer_popup.grab_set()
-        
-        # Center the popup
-        mixer_popup.update_idletasks()
-        width = 800
-        height = 650
-        x = (mixer_popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (mixer_popup.winfo_screenheight() // 2) - (height // 2)
-        mixer_popup.geometry(f"{width}x{height}+{x}+{y}")
-        
-        # Create main canvas with scrollbar for the entire content
-        main_canvas = tk.Canvas(mixer_popup, bg="black", highlightthickness=0)
-        main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
-        # Add scrollbar to the main canvas
-        main_scrollbar = tk.Scrollbar(mixer_popup, orient=tk.VERTICAL, command=main_canvas.yview)
-        main_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        main_canvas.configure(yscrollcommand=main_scrollbar.set)
-        
-        # Create a frame inside the canvas to hold all content
-        content_frame = tk.Frame(main_canvas, bg="black")
-        content_frame.bind("<Configure>", lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all")))
-        main_canvas.create_window((0, 0), window=content_frame, anchor=tk.NW)
-        
-        # Title
-        title_label = tk.Label(content_frame, text="Bartender's Drink Mixer", font=("Arial", 18), bg="black", fg="white")
-        title_label.pack(pady=10)
-        
-        # Main frame containing left and right sections
-        main_frame = tk.Frame(content_frame, bg="black")
-        main_frame.pack(pady=10, fill=tk.BOTH, expand=True)
-        
-        # Left section: Ingredient selection
-        left_frame = tk.Frame(main_frame, bg="black", width=375)
-        left_frame.pack(side=tk.LEFT, padx=10, fill=tk.BOTH, expand=True)
-        
-        # Ingredient category frame
-        category_frame = tk.Frame(left_frame, bg="black")
-        category_frame.pack(fill=tk.X, pady=5)
-        
-        category_label = tk.Label(category_frame, text="Ingredient Categories:", font=("Arial", 14), bg="black", fg="white")
-        category_label.pack(anchor=tk.W, pady=5)
-        
-        # Ingredient category buttons
-        btn_frame = tk.Frame(category_frame, bg="black")
-        btn_frame.pack(fill=tk.X)
-        
-        # Group ingredients by category
-        spirits = [i for i in self.available_ingredients if i in ["Vodka", "Gin", "Rum", "Whiskey", "Tequila", "Brandy", "Scotch"]]
-        mixers = [i for i in self.available_ingredients if "Juice" in i or "Water" in i or "Cola" in i or "Ale" in i or "Sprite" in i]
-        modifiers = [i for i in self.available_ingredients if i in ["Lemon Juice", "Lime Juice", "Sugar", "Salt", "Honey", "Triple Sec", 
-                                                            "Blue Curacao", "Orange Curacao", "Grenadine", "Bitters", "Vermouth", 
-                                                            "Campari", "Cherry Brandy"]]
-        specials = [i for i in self.available_ingredients if i not in spirits and i not in mixers and i not in modifiers]
+        self.drink_mixer.show_mixer()
 
-        # Current category tracker
-        current_category = {"items": self.available_ingredients}
-
-        # Available ingredients frame with scrollbar
-        ing_frame = tk.LabelFrame(left_frame, text="Available Ingredients", font=("Arial", 12), bg="black", fg="white")
-        ing_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        # Scrollbar for ingredients
-        ing_scrollbar = tk.Scrollbar(ing_frame)
-        ing_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Listbox for ingredients
-        ing_listbox = tk.Listbox(ing_frame, bg="black", fg="white", font=("Arial", 12),
-                              width=20, height=12, yscrollcommand=ing_scrollbar.set)
-        ing_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        ing_scrollbar.config(command=ing_listbox.yview)
-        
-        # Function to update the ingredients listbox based on category
-        def show_category(items, category_name):
-            # Clear the listbox
-            ing_listbox.delete(0, tk.END)
-            
-            # Update current category
-            current_category["items"] = items
-            
-            # Add header
-            ing_listbox.insert(tk.END, f"--- {category_name} ---")
-            
-            # Add sorted ingredients to the listbox
-            for item in sorted(items):
-                ing_listbox.insert(tk.END, item)
-        
-        # Create category buttons
-        all_btn = tk.Button(btn_frame, text="All", font=("Arial", 10), 
-                         command=lambda: show_category(self.available_ingredients, "All Ingredients"))
-        all_btn.pack(side=tk.LEFT, padx=5, pady=5)
-        
-        spirits_btn = tk.Button(btn_frame, text="Spirits", font=("Arial", 10), 
-                             command=lambda: show_category(spirits, "Spirits"))
-        spirits_btn.pack(side=tk.LEFT, padx=5, pady=5)
-        
-        mixers_btn = tk.Button(btn_frame, text="Mixers", font=("Arial", 10), 
-                            command=lambda: show_category(mixers, "Mixers"))
-        mixers_btn.pack(side=tk.LEFT, padx=5, pady=5)
-        
-        modifiers_btn = tk.Button(btn_frame, text="Modifiers", font=("Arial", 10), 
-                               command=lambda: show_category(modifiers, "Modifiers"))
-        modifiers_btn.pack(side=tk.LEFT, padx=5, pady=5)
-        
-        specials_btn = tk.Button(btn_frame, text="Specials", font=("Arial", 10), 
-                              command=lambda: show_category(specials, "Special Ingredients"))
-        specials_btn.pack(side=tk.LEFT, padx=5, pady=5)
-        
-        # Show all ingredients by default
-        show_category(self.available_ingredients, "All Ingredients")
-        
-        # Add ingredient button
-        add_btn = tk.Button(left_frame, text="Add Ingredient →", font=("Arial", 12), 
-                         command=lambda: self.add_to_mix(ing_listbox, mix_listbox, current_category["items"]))
-        add_btn.pack(pady=10)
-        
-        # Right section: Mixing glass and results
-        right_frame = tk.Frame(main_frame, bg="black", width=375)
-        right_frame.pack(side=tk.RIGHT, padx=10, fill=tk.BOTH, expand=True)
-        
-        # Mixing glass frame with scrollbar
-        mix_frame = tk.LabelFrame(right_frame, text="Mixing Glass", font=("Arial", 12), bg="black", fg="white")
-        mix_frame.pack(fill=tk.BOTH, expand=True, pady=5)
-        
-        # Scrollbar for mixing glass
-        mix_scrollbar = tk.Scrollbar(mix_frame)
-        mix_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Listbox for mixing glass ingredients
-        mix_listbox = tk.Listbox(mix_frame, bg="black", fg="white", font=("Arial", 12),
-                              width=20, height=12, yscrollcommand=mix_scrollbar.set)
-        mix_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        mix_scrollbar.config(command=mix_listbox.yview)
-        
-        # Button to remove ingredient
-        remove_btn = tk.Button(right_frame, text="← Remove Ingredient", font=("Arial", 12), 
-                            command=lambda: self.remove_from_mix(mix_listbox))
-        remove_btn.pack(pady=5)
-        
-        # Clear glass button
-        clear_btn = tk.Button(right_frame, text="Clear Glass", font=("Arial", 12), 
-                           command=lambda: mix_listbox.delete(0, tk.END))
-        clear_btn.pack(pady=5)
-        
-        # Result frame
-        result_frame = tk.LabelFrame(content_frame, text="Mixing Result", font=("Arial", 12), bg="black", fg="white")
-        result_frame.pack(padx=20, pady=10, fill=tk.X)
-        
-        # Result label
-        result_label = tk.Label(result_frame, text="Mix ingredients to create a drink", 
-                            font=("Arial", 12), bg="black", fg="white", wraplength=700)
-        result_label.pack(pady=10, fill=tk.X)
-        
-        # Bottom buttons frame
-        bottom_frame = tk.Frame(content_frame, bg="black")
-        bottom_frame.pack(pady=10)
-        
-        # Mix button
-        mix_btn = tk.Button(bottom_frame, text="Mix Drink", font=("Arial", 14), bg="dark blue", fg="white",
-                         command=lambda: self.mix_drink(mix_listbox, result_label))
-        mix_btn.pack(side=tk.LEFT, padx=20)
-        
-        # Recipe reference button
-        recipe_btn = tk.Button(bottom_frame, text="Recipe Book", font=("Arial", 14),
-                            command=self.show_recipes)
-        recipe_btn.pack(side=tk.LEFT, padx=20)
-        
-        # Close button
-        close_btn = tk.Button(bottom_frame, text="Close", font=("Arial", 14), 
-                           command=mixer_popup.destroy)
-        close_btn.pack(side=tk.LEFT, padx=20)
-
-        # Function to handle mousewheel scrolling
-        def _on_mousewheel(event):
-            main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
-        # Bind mousewheel to the mixer popup window
-        mixer_popup.bind("<MouseWheel>", _on_mousewheel)
-        
-        # Override the destroy method to unbind the mousewheel event
-        orig_destroy = mixer_popup.destroy
-        def _destroy_and_cleanup():
-            mixer_popup.unbind("<MouseWheel>")
-            orig_destroy()
-        
-        mixer_popup.destroy = _destroy_and_cleanup
-        
-        # Configure the window close action to call our custom destroy method
-        mixer_popup.protocol("WM_DELETE_WINDOW", mixer_popup.destroy)
-    
-    def add_to_mix(self, ing_listbox, mix_listbox, available_items):
-        """Add an ingredient to the mixing glass"""
-        selection = ing_listbox.curselection()
-        if not selection or selection[0] == 0:  # Skip header
-            return
-        
-        index = selection[0]
-        entry = ing_listbox.get(index)
-        
-        # Skip if it's a category header
-        if entry.startswith("---"):
-            return
-            
-        # Add to mixing glass
-        mix_listbox.insert(tk.END, entry)
-    
-    def mix_drink(self, mix_listbox, result_label):
-        """Mix ingredients and determine the result"""
-        # Get all ingredients from the mixing glass
-        ingredients = [mix_listbox.get(i) for i in range(mix_listbox.size())]
-        
-        if not ingredients:
-            result_label.config(text="You need to add ingredients first!")
-            return
-        
-        # Sort ingredients for consistent matching
-        ingredients.sort()
-        
-        # Check if the mix matches any known recipes
-        drink_match = None
-        for drink_name, drink_data in self.mixed_drinks.items():
-            recipe_ingredients = sorted(drink_data["ingredients"])
-            if ingredients == recipe_ingredients:
-                drink_match = drink_name
-                break
-        
-        if drink_match:
-            # Successfully mixed a known drink
-            drink_data = self.mixed_drinks[drink_match]
-            result_text = f"Success! You've mixed a {drink_match}.\n{drink_data['desc']}"
-            result_label.config(text=result_text, fg="light green")
-            
-            # Add note about the successful mix
-            if "notes" not in self.player_data:
-                self.player_data["notes"] = []
-            
-            self.player_data["notes"].append({
-                "timestamp": datetime.datetime.now().isoformat(),
-                "text": f"Successfully mixed a {drink_match} at the bar."
-            })
-        else:
-            # Define spirits for feedback
-            spirits = ["Vodka", "Gin", "Rum", "Whiskey", "Tequila", "Brandy", "Scotch"]
-            
-            # Analyze the mix to give feedback
-            if len(ingredients) > 5:
-                feedback = "This has too many ingredients - most cocktails use 2-5 ingredients."
-            elif not any(item in spirits for item in ingredients):
-                feedback = "Most mixed drinks need a spirit as the base (like Vodka, Rum, or Whiskey)."
-            elif all(item in spirits for item in ingredients):
-                feedback = "This is just a mix of different spirits. Try adding some mixers or modifiers."
-            else:
-                feedback = "This combination doesn't match any known recipe. Try a different mix."
-                
-            # Unknown mixture
-            result_text = f"You've created an unknown concoction. {feedback}"
-            result_label.config(text=result_text, fg="red")
-    
     def show_recipes(self):
         """Show a list of known drink recipes"""
-        recipes_popup = tk.Toplevel(self.bar_window)
-        recipes_popup.title("Drink Recipes")
-        recipes_popup.geometry("700x600")  # Made larger for more recipes
-        recipes_popup.configure(bg="black")
-        recipes_popup.transient(self.bar_window)
-        recipes_popup.grab_set()
-        
-        # Center the popup
-        recipes_popup.update_idletasks()
-        width = 700
-        height = 600
-        x = (recipes_popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (recipes_popup.winfo_screenheight() // 2) - (height // 2)
-        recipes_popup.geometry(f"{width}x{height}+{x}+{y}")
-        
-        # Title
-        title_label = tk.Label(recipes_popup, text="Bartender's Recipe Book", font=("Arial", 18), bg="black", fg="white")
-        title_label.pack(pady=10)
-        
-        # Recipe navigation frame
-        nav_frame = tk.Frame(recipes_popup, bg="black")
-        nav_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        # Recipe category buttons
-        all_btn = tk.Button(nav_frame, text="All Recipes", font=("Arial", 10),
-                         command=lambda: show_recipe_category("all"))
-        all_btn.pack(side=tk.LEFT, padx=5)
-        
-        basic_btn = tk.Button(nav_frame, text="Basic Recipes", font=("Arial", 10),
-                           command=lambda: show_recipe_category("basic"))
-        basic_btn.pack(side=tk.LEFT, padx=5)
-        
-        advanced_btn = tk.Button(nav_frame, text="Advanced Recipes", font=("Arial", 10),
-                          command=lambda: show_recipe_category("advanced"))
-        advanced_btn.pack(side=tk.LEFT, padx=5)
-        
-        special_btn = tk.Button(nav_frame, text="Station Specials", font=("Arial", 10),
-                         command=lambda: show_recipe_category("special"))
-        special_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Recipe categories
-        basic_recipes = ["Screwdriver", "Gin and Tonic", "Rum and Cola", "Whiskey Sour", "Daiquiri"]
-        special_recipes = ["Space Blaster", "Quantum Fizz", "Nebula Cloud"]
-        
-        # Create scrollable frame for recipes
-        frame = tk.Frame(recipes_popup, bg="black")
-        frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
-        
-        # Add scrollbar
-        scrollbar = tk.Scrollbar(frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Create text widget for recipes
-        recipe_text = tk.Text(frame, bg="black", fg="white", font=("Arial", 12),
-                           width=60, height=25, yscrollcommand=scrollbar.set, wrap=tk.WORD)
-        recipe_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=recipe_text.yview)
-        
-        # Mouse wheel binding for scrolling
-        def _on_recipe_mousewheel(event):
-            try:
-                recipe_text.yview_scroll(int(-1*(event.delta/120)), "units")
-            except tk.TclError:
-                pass  # Ignore errors if the text widget was destroyed
-        
-        # Bind mousewheel to recipe text
-        recipes_popup.bind("<MouseWheel>", _on_recipe_mousewheel)
-        
-        # Override destroy method to cleanup bindings
-        orig_destroy = recipes_popup.destroy
-        def _destroy_and_cleanup():
-            try:
-                recipes_popup.unbind("<MouseWheel>")
-            except:
-                pass
-            orig_destroy()
-        
-        recipes_popup.destroy = _destroy_and_cleanup
-        
-        # Format and display recipes by category
-        def show_recipe_category(category):
-            # Clear the text widget
-            recipe_text.config(state=tk.NORMAL)
-            recipe_text.delete(1.0, tk.END)
-            
-            # Add a header
-            recipe_text.insert(tk.END, "BARTENDER'S RECIPE BOOK\n", "header")
-            recipe_text.insert(tk.END, "------------------------\n\n", "header")
-            
-            # Create a sorted list of drink names
-            sorted_drinks = sorted(self.mixed_drinks.keys())
-            
-            # Filter by category if needed
-            if category == "basic":
-                sorted_drinks = [drink for drink in sorted_drinks if drink in basic_recipes]
-                recipe_text.insert(tk.END, "BASIC COCKTAILS\n\n", "category")
-            elif category == "special":
-                sorted_drinks = [drink for drink in sorted_drinks if drink in special_recipes]
-                recipe_text.insert(tk.END, "STATION SPECIALTIES\n\n", "category")
-            elif category == "advanced":
-                sorted_drinks = [drink for drink in sorted_drinks if drink not in basic_recipes and drink not in special_recipes]
-                recipe_text.insert(tk.END, "ADVANCED COCKTAILS\n\n", "category")
-            else:
-                # Add all categories with headers
-                recipe_text.insert(tk.END, "BASIC COCKTAILS\n\n", "category")
-                for drink in sorted(basic_recipes):
-                    add_recipe(drink)
-                
-                recipe_text.insert(tk.END, "\nADVANCED COCKTAILS\n\n", "category")
-                for drink in sorted([d for d in sorted_drinks if d not in basic_recipes and d not in special_recipes]):
-                    add_recipe(drink)
-                
-                recipe_text.insert(tk.END, "\nSTATION SPECIALTIES\n\n", "category")
-                for drink in sorted(special_recipes):
-                    add_recipe(drink)
-                
-                # Make text widget read-only
-                recipe_text.config(state=tk.DISABLED)
-                return
-            
-            # Add recipes for the selected category
-            for drink in sorted_drinks:
-                add_recipe(drink)
-            
-            # Make text widget read-only
-            recipe_text.config(state=tk.DISABLED)
-        
-        # Helper function to add a recipe
-        def add_recipe(drink_name):
-            if drink_name in self.mixed_drinks:
-                drink_data = self.mixed_drinks[drink_name]
-                
-                # Add drink name
-                recipe_text.insert(tk.END, f"{drink_name}:\n", "drink_name")
-                
-                # Add ingredients
-                recipe_text.insert(tk.END, f"  Ingredients: ", "label")
-                recipe_text.insert(tk.END, f"{', '.join(drink_data['ingredients'])}\n", "ingredients")
-                
-                # Add price
-                recipe_text.insert(tk.END, f"  Price: ", "label")
-                recipe_text.insert(tk.END, f"{drink_data['price']} credits\n", "value")
-                
-                # Add description
-                recipe_text.insert(tk.END, f"  Description: ", "label")
-                recipe_text.insert(tk.END, f"{drink_data['desc']}\n\n", "value")
-        
-        # Configure text tags for formatting
-        recipe_text.tag_configure("header", font=("Arial", 14, "bold"))
-        recipe_text.tag_configure("category", font=("Arial", 13, "bold"), foreground="yellow")
-        recipe_text.tag_configure("drink_name", font=("Arial", 12, "bold"), foreground="light blue")
-        recipe_text.tag_configure("label", font=("Arial", 11, "bold"))
-        recipe_text.tag_configure("ingredients", font=("Arial", 11), foreground="light green")
-        recipe_text.tag_configure("value", font=("Arial", 11))
-        
-        # Show all recipes by default
-        show_recipe_category("all")
-        
-        # Search frame
-        search_frame = tk.Frame(recipes_popup, bg="black")
-        search_frame.pack(fill=tk.X, padx=20, pady=5)
-        
-        search_label = tk.Label(search_frame, text="Search: ", font=("Arial", 11), bg="black", fg="white")
-        search_label.pack(side=tk.LEFT, padx=5)
-        
-        search_entry = tk.Entry(search_frame, bg="dark gray", fg="white", font=("Arial", 11), width=20)
-        search_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        
-        # Function to search recipes
-        def search_recipes(event=None):
-            query = search_entry.get().lower().strip()
-            if not query:
-                show_recipe_category("all")
-                return
-                
-            # Clear the text widget
-            recipe_text.config(state=tk.NORMAL)
-            recipe_text.delete(1.0, tk.END)
-            
-            # Add a header
-            recipe_text.insert(tk.END, f"SEARCH RESULTS FOR '{query}'\n", "header")
-            recipe_text.insert(tk.END, "------------------------\n\n", "header")
-            
-            # Search through drinks and ingredients
-            results_found = False
-            for drink_name, drink_data in self.mixed_drinks.items():
-                # Check if query matches drink name or ingredients
-                if (query in drink_name.lower() or 
-                    any(query in ingredient.lower() for ingredient in drink_data["ingredients"]) or
-                    query in drink_data["desc"].lower()):
-                    add_recipe(drink_name)
-                    results_found = True
-            
-            if not results_found:
-                recipe_text.insert(tk.END, "No recipes found matching your search.")
-                
-            # Make text widget read-only
-            recipe_text.config(state=tk.DISABLED)
-        
-        # Bind search function to entry
-        search_entry.bind("<Return>", search_recipes)
-        
-        search_btn = tk.Button(search_frame, text="Search", font=("Arial", 10), command=search_recipes)
-        search_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Ingredient list button
-        ing_btn = tk.Button(search_frame, text="Ingredients List", font=("Arial", 10),
-                         command=self.show_ingredients_list)
-        ing_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Close button
-        close_btn = tk.Button(recipes_popup, text="Close", font=("Arial", 12), command=recipes_popup.destroy)
-        close_btn.pack(pady=10)
-    
-    def show_ingredients_list(self):
-        """Show a list of all available ingredients"""
-        ing_popup = tk.Toplevel(self.bar_window)
-        ing_popup.title("Available Ingredients")
-        ing_popup.geometry("400x500")
-        ing_popup.configure(bg="black")
-        ing_popup.transient(self.bar_window)
-        ing_popup.grab_set()
-        
-        # Center the popup
-        ing_popup.update_idletasks()
-        width = 400
-        height = 500
-        x = (ing_popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (ing_popup.winfo_screenheight() // 2) - (height // 2)
-        ing_popup.geometry(f"{width}x{height}+{x}+{y}")
-        
-        # Title
-        title_label = tk.Label(ing_popup, text="Available Ingredients", font=("Arial", 18), bg="black", fg="white")
-        title_label.pack(pady=10)
-        
-        # Group ingredients by category
-        spirits = []
-        mixers = []
-        modifiers = []
-        specials = []
-        
-        # Organize ingredients into categories
-        for ingredient in sorted(self.available_ingredients):
-            if ingredient in ["Vodka", "Gin", "Rum", "Whiskey", "Tequila", "Brandy", "Scotch"]:
-                spirits.append(ingredient)
-            elif "Juice" in ingredient or "Water" in ingredient or "Cola" in ingredient or "Ale" in ingredient or "Sprite" in ingredient:
-                mixers.append(ingredient)
-            elif ingredient in ["Lemon Juice", "Lime Juice", "Sugar", "Salt", "Honey", "Triple Sec", 
-                              "Blue Curacao", "Orange Curacao", "Grenadine", "Bitters", "Vermouth", 
-                              "Campari", "Cherry Brandy"]:
-                modifiers.append(ingredient)
-            else:
-                specials.append(ingredient)
-        
-        # Create scrollable frame for ingredients
-        frame = tk.Frame(ing_popup, bg="black")
-        frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
-        
-        # Add scrollbar
-        scrollbar = tk.Scrollbar(frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Create text widget for ingredients
-        ing_text = tk.Text(frame, bg="black", fg="white", font=("Arial", 12),
-                        width=40, height=20, yscrollcommand=scrollbar.set, wrap=tk.WORD)
-        ing_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=ing_text.yview)
-        
-        # Mouse wheel binding for scrolling
-        def _on_ing_mousewheel(event):
-            try:
-                ing_text.yview_scroll(int(-1*(event.delta/120)), "units")
-            except tk.TclError:
-                pass  # Ignore errors if the text widget was destroyed
-        
-        # Bind mousewheel to ingredients text
-        ing_popup.bind("<MouseWheel>", _on_ing_mousewheel)
-        
-        # Override destroy method to cleanup bindings
-        orig_destroy = ing_popup.destroy
-        def _destroy_and_cleanup():
-            try:
-                ing_popup.unbind("<MouseWheel>")
-            except:
-                pass
-            orig_destroy()
-        
-        ing_popup.destroy = _destroy_and_cleanup
-        
-        # Add ingredients by category
-        ing_text.insert(tk.END, "SPIRITS\n", "header")
-        ing_text.insert(tk.END, "-------\n", "header")
-        for ingredient in spirits:
-            ing_text.insert(tk.END, f"• {ingredient}\n", "ingredient")
-        
-        ing_text.insert(tk.END, "\nMIXERS\n", "header")
-        ing_text.insert(tk.END, "------\n", "header")
-        for ingredient in mixers:
-            ing_text.insert(tk.END, f"• {ingredient}\n", "ingredient")
-        
-        ing_text.insert(tk.END, "\nMODIFIERS\n", "header")
-        ing_text.insert(tk.END, "---------\n", "header")
-        for ingredient in modifiers:
-            ing_text.insert(tk.END, f"• {ingredient}\n", "ingredient")
-        
-        ing_text.insert(tk.END, "\nSPECIAL INGREDIENTS\n", "header")
-        ing_text.insert(tk.END, "------------------\n", "header")
-        for ingredient in specials:
-            ing_text.insert(tk.END, f"• {ingredient}\n", "ingredient")
-        
-        # Configure text tags for formatting
-        ing_text.tag_configure("header", font=("Arial", 14, "bold"))
-        ing_text.tag_configure("ingredient", font=("Arial", 11))
-        
-        # Make text widget read-only
-        ing_text.config(state=tk.DISABLED)
-        
-        # Close button
-        close_btn = tk.Button(ing_popup, text="Close", font=("Arial", 12), command=ing_popup.destroy)
-        close_btn.pack(pady=10)
-    
+        self.drink_mixer.show_recipes()
+
     def toggle_door_lock(self):
         toggle_room_door_lock(self.player_data, "0,-1", self.bar_window)
     
@@ -3387,15 +2684,6 @@ class Bar:
         else:
             # Show regular options for unauthorized personnel
             self.show_room_options() 
-
-    def remove_from_mix(self, mix_listbox):
-        """Remove an ingredient from the mixing glass"""
-        selection = mix_listbox.curselection()
-        if not selection:
-            return
-        
-        index = selection[0]
-        mix_listbox.delete(index)
 
 class Botany:
     def __init__(self, parent_window, player_data, station_crew, return_callback):
