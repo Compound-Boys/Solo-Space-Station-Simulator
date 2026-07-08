@@ -2102,11 +2102,6 @@ class Engineering:
             # Bind the mousewheel event for scrolling
             panel_window.bind("<MouseWheel>", on_mousewheel)
             
-            # Close button at the bottom of the scrollable content
-            close_btn = tk.Button(scrollable_frame, text="Close Panel", font=("Arial", 14), bg="#333333", fg="white",
-                                command=panel_window.destroy)
-            close_btn.pack(pady=15)
-            
             # Configure the canvas to scroll properly
             scrollable_frame.update_idletasks()
             canvas.config(scrollregion=canvas.bbox("all"))
