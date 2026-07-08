@@ -43,10 +43,11 @@ except ImportError as e:
 if __name__ == "__main__":
     base_path = get_data_path()
 
-    # main.py writes to base_path/game/saves; game.py's on-close autosave writes
-    # to a CWD-relative game/saves. Create the dir and cd into the data dir so
-    # every save path resolves to the same writable location.
-    os.makedirs(os.path.join(base_path, "game", "saves"), exist_ok=True)
+    # All saving/loading goes through game.py's Game.save_game/Game.load_game,
+    # which use a CWD-relative "saves/" dir; the load-list screen scans
+    # base_path/"saves". Chdir into the writable data dir so CWD == base_path and
+    # every save/load path resolves to the same writable location.
+    os.makedirs(os.path.join(base_path, "saves"), exist_ok=True)
     os.chdir(base_path)
 
     try:
