@@ -1,3 +1,4 @@
+import random
 import tkinter as tk
 from tkinter import messagebox
 
@@ -56,13 +57,284 @@ class Bridge:
                                command=self.show_station_menu)
             back_btn.pack(pady=10)
     
+    def _leadership_present(self):
+        """Return which leadership jobs exist on the station (player + NPCs)."""
+        all_crew = [self.player_data] + self.station_crew
+        jobs = {member.get("job") for member in all_crew}
+        return {
+            "captain": "Captain" in jobs,
+            "hop": "Head of Personnel" in jobs,
+        }
+
     def talk_to_leadership(self):
-        # Show dialog with the room window as parent to keep focus within the room
-        self.bridge_window.after(10, lambda: messagebox.showinfo("Bridge", "Captain and Department Heads are not in.", parent=self.bridge_window))
-        # Make sure the window stays on top after dialog
+        """Show Captain/HoP talk options when leadership is present on the station."""
+        present = self._leadership_present()
+        if not present["captain"] and not present["hop"]:
+            self.bridge_window.after(
+                10,
+                lambda: messagebox.showinfo(
+                    "Bridge",
+                    "Captain and Department Heads are not in.",
+                    parent=self.bridge_window,
+                ),
+            )
+            self.bridge_window.after(20, self.bridge_window.lift)
+            self.bridge_window.focus_force()
+            return
+
+        for widget in self.button_frame.winfo_children():
+            widget.destroy()
+
+        title = tk.Label(
+            self.button_frame,
+            text="Ship Leadership",
+            font=("Arial", 16, "bold"),
+            bg="black",
+            fg="white",
+        )
+        title.pack(pady=10)
+
+        if present["captain"]:
+            captain_btn = tk.Button(
+                self.button_frame,
+                text="Talk to Captain",
+                font=("Arial", 14),
+                width=20,
+                command=self.talk_to_captain,
+            )
+            captain_btn.pack(pady=5)
+
+        if present["hop"]:
+            hop_btn = tk.Button(
+                self.button_frame,
+                text="Talk to HoP",
+                font=("Arial", 14),
+                width=20,
+                command=self.show_hop_talk_menu,
+            )
+            hop_btn.pack(pady=5)
+
+        return_btn = tk.Button(
+            self.button_frame,
+            text="Return to Bridge",
+            font=("Arial", 14),
+            width=20,
+            command=self.show_room_options,
+        )
+        return_btn.pack(pady=15)
+
+    def talk_to_captain(self):
+        """Captain is always too busy for casual conversation."""
+        messagebox.showinfo(
+            "Captain",
+            "The Captain is too busy for your chats.",
+            parent=self.bridge_window,
+        )
         self.bridge_window.after(20, self.bridge_window.lift)
         self.bridge_window.focus_force()
-    
+
+    def show_hop_talk_menu(self):
+        """HoP interaction menu for non-command crew."""
+        for widget in self.button_frame.winfo_children():
+            widget.destroy()
+
+        title = tk.Label(
+            self.button_frame,
+            text="Head of Personnel",
+            font=("Arial", 16, "bold"),
+            bg="black",
+            fg="white",
+        )
+        title.pack(pady=10)
+
+        access_btn = tk.Button(
+            self.button_frame,
+            text="Access Control",
+            font=("Arial", 14),
+            width=20,
+            command=self.show_access_control,
+        )
+        access_btn.pack(pady=5)
+
+        talk_btn = tk.Button(
+            self.button_frame,
+            text="Talk to HoP",
+            font=("Arial", 14),
+            width=20,
+            command=self.resolve_hop_access_request,
+        )
+        talk_btn.pack(pady=5)
+
+        return_btn = tk.Button(
+            self.button_frame,
+            text="Return to Bridge",
+            font=("Arial", 14),
+            width=20,
+            command=self.show_room_options,
+        )
+        return_btn.pack(pady=15)
+
+    def show_access_control(self):
+        """Job request terminal: submit a non-Admin job request for HoP approval."""
+        panel, popup = open_modal_panel(self.bridge_window, title="Access Control")
+        popup.configure(bg="black")
+
+        title_label = tk.Label(
+            popup, text="Access Control", font=("Arial", 18, "bold"), bg="black", fg="white"
+        )
+        title_label.pack(pady=10)
+
+        job_outer = tk.LabelFrame(
+            popup, text="Requestable Jobs", font=("Arial", 12), bg="black", fg="white"
+        )
+        job_outer.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        job_scrollbar = tk.Scrollbar(job_outer, orient=tk.VERTICAL)
+        job_listbox = tk.Listbox(
+            job_outer,
+            bg="black",
+            fg="white",
+            font=("Arial", 12),
+            width=40,
+            height=12,
+            exportselection=False,
+            yscrollcommand=job_scrollbar.set,
+        )
+        job_scrollbar.config(command=job_listbox.yview)
+        job_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        job_listbox.pack(side=tk.LEFT, pady=5, padx=5, fill=tk.BOTH, expand=True)
+
+        requestable_jobs = [
+            job_name
+            for job_name, info in JOBS.items()
+            if info.get("department") != "Administration"
+        ]
+        for job_name in requestable_jobs:
+            job_listbox.insert(tk.END, job_name)
+
+        selection = {"job": None}
+        player_name = self.player_data.get("name", "Unknown")
+
+        result_frame = tk.LabelFrame(
+            popup, text="Result", font=("Arial", 12), bg="black", fg="white"
+        )
+        result_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        result_label = tk.Label(
+            result_frame,
+            text="Select a job to request.",
+            font=("Arial", 12),
+            bg="black",
+            fg="cyan",
+            wraplength=600,
+        )
+        result_label.pack(pady=10, padx=10)
+
+        feedback_label = tk.Label(popup, text="", font=("Arial", 12), bg="black", fg="cyan")
+        feedback_label.pack(pady=(0, 5))
+
+        def update_result(_event=None):
+            job_indices = job_listbox.curselection()
+            if job_indices:
+                selection["job"] = job_listbox.get(job_indices[0])
+            job = selection["job"]
+            if job:
+                result_label.config(text=f"{player_name} → {job}", fg="white")
+            else:
+                result_label.config(text="Select a job to request.", fg="cyan")
+
+        job_listbox.bind("<<ListboxSelect>>", update_result)
+
+        def submit_request():
+            job = selection["job"]
+            if not job:
+                feedback_label.config(text="Select a job first.", fg="orange")
+                popup.after(3000, lambda: feedback_label.config(text=""))
+                return
+            if job not in JOBS or JOBS[job].get("department") == "Administration":
+                feedback_label.config(text="That job cannot be requested here.", fg="red")
+                popup.after(3000, lambda: feedback_label.config(text=""))
+                return
+
+            self.player_data["access_request"] = {
+                "requested_job": job,
+                "requester_name": player_name,
+            }
+            result_label.config(text=f"{player_name} → {job}", fg="light green")
+            feedback_label.config(
+                text=f"Request for {job} submitted for HoP approval.", fg="cyan"
+            )
+            popup.after(3000, lambda: feedback_label.config(text=""))
+
+        button_frame = tk.Frame(popup, bg="black")
+        button_frame.pack(pady=10)
+
+        exit_btn = tk.Button(
+            button_frame, text="Exit", font=("Arial", 12), width=12, command=panel.close
+        )
+        exit_btn.pack(side=tk.LEFT, padx=10)
+
+        assign_btn = tk.Button(
+            button_frame, text="Assign", font=("Arial", 12), width=12, command=submit_request
+        )
+        assign_btn.pack(side=tk.LEFT, padx=10)
+
+    def resolve_hop_access_request(self):
+        """Talk to HoP: resolve a pending access request with a 50/50 approve/deny."""
+        request = self.player_data.get("access_request")
+        if not request or not request.get("requested_job"):
+            messagebox.showinfo(
+                "Head of Personnel",
+                "The HoP is busy. Use the Access Control terminal to put in a request.",
+                parent=self.bridge_window,
+            )
+            self.bridge_window.after(20, self.bridge_window.lift)
+            self.bridge_window.focus_force()
+            return
+
+        job = request["requested_job"]
+        job_info = JOBS.get(job)
+        if not job_info or job_info.get("department") == "Administration":
+            self.player_data.pop("access_request", None)
+            messagebox.showinfo(
+                "Head of Personnel",
+                "Your access request was invalid and has been cleared.",
+                parent=self.bridge_window,
+            )
+            self.bridge_window.after(20, self.bridge_window.lift)
+            self.bridge_window.focus_force()
+            return
+
+        approved = random.random() < 0.5
+        if approved:
+            self.player_data["job"] = job
+            self.player_data["department"] = job_info["department"]
+            self.player_data["subdepartment"] = job_info["subdepartment"]
+            self.player_data["permissions"] = permissions_for_job(job)
+
+            solar_activated = False
+            if job == "Engineer":
+                power = self.player_data.setdefault("station_power", {})
+                if not power.get("solar_charging"):
+                    power["solar_charging"] = True
+                    solar_activated = True
+
+            self.player_data.pop("access_request", None)
+            message = f"The HoP approved your request. You are now {job}."
+            if solar_activated:
+                message += " Solar arrays are now active."
+            messagebox.showinfo("Head of Personnel", message, parent=self.bridge_window)
+        else:
+            self.player_data.pop("access_request", None)
+            messagebox.showinfo(
+                "Head of Personnel",
+                f"The HoP denied your request for {job}.",
+                parent=self.bridge_window,
+            )
+
+        self.bridge_window.after(20, self.bridge_window.lift)
+        self.bridge_window.focus_force()
+
     def access_captain_station(self):
         """Access the Captain's Station interface"""      
         # Clear existing buttons
