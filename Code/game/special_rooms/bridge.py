@@ -4,8 +4,10 @@ from tkinter import messagebox
 
 from game.character_methods.character_creation import JOBS, permissions_for_job
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
+from game.helper_methods.npc_movement import reassign_npc_post
 from game.helper_methods.ui_panels import open_modal_panel
 from game.special_rooms.shared import (
+    build_npc_contact_section,
     build_room_shell,
     open_room_in_main_window,
     show_crew_manifest as render_crew_manifest,
@@ -90,24 +92,30 @@ class Bridge:
         title.pack(pady=10)
 
         if present["captain"]:
-            captain_btn = tk.Button(
+            build_npc_contact_section(
                 self.button_frame,
-                text="Talk to Captain",
-                font=("Arial", 14),
-                width=20,
-                command=self.talk_to_captain,
+                self.player_data,
+                self.station_crew,
+                "Captain",
+                self.bridge_window,
+                talk_label="Talk to Captain",
+                talk_command=self.talk_to_captain,
+                refresh_callback=self.talk_to_leadership,
+                absent_flavor="The Captain is away from the bridge.",
             )
-            captain_btn.pack(pady=5)
 
         if present["hop"]:
-            hop_btn = tk.Button(
+            build_npc_contact_section(
                 self.button_frame,
-                text="Talk to HoP",
-                font=("Arial", 14),
-                width=20,
-                command=self.show_hop_talk_menu,
+                self.player_data,
+                self.station_crew,
+                "Head of Personnel",
+                self.bridge_window,
+                talk_label="Talk to HoP",
+                talk_command=self.show_hop_talk_menu,
+                refresh_callback=self.talk_to_leadership,
+                absent_flavor="The Head of Personnel is away from the bridge.",
             )
-            hop_btn.pack(pady=5)
 
         return_btn = tk.Button(
             self.button_frame,
@@ -621,6 +629,11 @@ class Bridge:
             member["department"] = job_info["department"]
             member["subdepartment"] = job_info["subdepartment"]
             member["permissions"] = permissions_for_job(job)
+
+            # NPCs (not the player) immediately report to their new post
+            # rather than lingering at their old one.
+            if crew_index != PLAYER_INDEX:
+                reassign_npc_post(member, job)
 
             solar_activated = False
             if job == "Engineer":

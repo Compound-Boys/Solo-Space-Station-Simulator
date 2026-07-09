@@ -365,9 +365,9 @@ def medical_bot_heal(game):
 
     choice = random.choice(candidates)
     if choice[0] == "limb":
-        heal_limb(game, choice[1], 5, 10)
+        heal_limb(game, choice[1], 1, 5)
     else:
-        heal_damage_type(game, choice[1], choice[2], 5, 10)
+        heal_damage_type(game, choice[1], choice[2], 1, 5)
 
 
 def bot_moves_by(game):
@@ -381,13 +381,28 @@ def bot_moves_by(game):
             "A maintenance bot rolls past, scrubbing the floor as it goes.",
         )
     elif bot == "security":
-        if game.player_data.get("warrant", False):
+        from game.helper_methods.jail import arrest_member, is_jailed
+
+        if is_jailed(game.player_data):
             _report_effect(
                 game,
                 "Security Bot",
-                "A security bot locks onto you. You are wanted.",
+                "A security bot rolls past your cell without stopping.",
             )
-            game.add_note("Encountered a security bot while wanted.")
+        elif game.player_data.get("warrant", False):
+            _report_effect(
+                game,
+                "Security Bot",
+                "A security bot locks onto you. You are wanted — you are under arrest!",
+            )
+            arrest_member(
+                game.player_data,
+                reason="A security bot locks onto you. You are wanted — you are under arrest!",
+                game=game,
+                is_player=True,
+                show_message=False,
+            )
+            game.add_note("Arrested by a security bot while wanted.")
         else:
             _report_effect(
                 game,

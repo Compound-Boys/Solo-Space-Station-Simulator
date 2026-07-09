@@ -8,6 +8,7 @@ from game.helper_methods.lighting_helper import (
     ensure_station_power_lighting,
     lighting_style,
 )
+from game.helper_methods.npc_movement import any_npc_for_job, call_npc, on_duty_npc_for_job
 from game.helper_methods.ui_panels import open_modal_panel
 
 ROOM_GEOMETRY = "1012x759"
@@ -90,7 +91,24 @@ def open_room_in_main_window(parent_window, title, player_data, station_crew, re
 
 
 def try_leave_through_door(room_window, player_data, door_key, return_callback, station_crew):
-    """Leave a special room unless its door is locked."""
+    """Leave a special room unless its door is locked or the player is jailed."""
+    from game.helper_methods.jail import format_jail_time, is_jailed, jail_seconds_remaining
+    from game.maps.donut import SECURITY_KEY
+
+    if is_jailed(player_data) and door_key == SECURITY_KEY:
+        remaining = format_jail_time(jail_seconds_remaining(player_data))
+        room_window.after(
+            10,
+            lambda: messagebox.showinfo(
+                "In Jail",
+                f"You are in jail. Time remaining: {remaining}.",
+                parent=room_window,
+            ),
+        )
+        room_window.after(20, room_window.lift)
+        room_window.focus_force()
+        return False
+
     if is_door_locked(player_data, door_key):
         room_window.after(
             10,
@@ -178,7 +196,13 @@ def show_crew_manifest(parent_window, player_data, station_crew):
                 is_player = name == player_name and job == player_job
                 tag = "player" if is_player else "npc"
                 player_tag = " (YOU)" if is_player else ""
-                manifest_text.insert(tk.END, f"- {job}: {name}{player_tag}\n", tag)
+                wanted_tag = " [WANTED]" if crew_member.get("warrant", False) else ""
+                jailed_tag = " [JAILED]" if crew_member.get("in_jail", False) else ""
+                manifest_text.insert(
+                    tk.END,
+                    f"- {job}: {name}{player_tag}{wanted_tag}{jailed_tag}\n",
+                    tag,
+                )
 
         if not found_in_dept:
             manifest_text.insert(tk.END, "- (No personnel assigned)\n", "name")
@@ -208,6 +232,85 @@ def show_crew_manifest(parent_window, player_data, station_crew):
         command=_close,
     )
     close_btn.pack(pady=10)
+
+
+def is_players_own_job(player_data, job_name):
+    """Return True if the player themself currently holds job_name.
+
+    Shared by every "Talk to X" / NPC-contact button so nobody can talk to
+    or call themselves (e.g. a Captain player never sees "Talk to Captain").
+    """
+    return player_data.get("job") == job_name
+
+
+def build_npc_contact_section(
+    button_frame,
+    player_data,
+    station_crew,
+    job_name,
+    room_window,
+    *,
+    talk_label,
+    talk_command,
+    refresh_callback,
+    absent_flavor=None,
+):
+    """Pack an NPC-dependent action button, gated on that NPC being present.
+
+    - If the player themself holds job_name, nothing is packed - there's no
+      one to talk to/call, since the player fills that role themself.
+    - If an on-duty NPC holds job_name, pack the normal action button.
+    - If an NPC holds job_name but is off duty (away from their post), pack a
+      status label plus a "Call {name}" button that rolls a chance to bring
+      them back, then rebuilds the room via refresh_callback.
+    - If nobody holds job_name at all, pack nothing.
+
+    Returns True if something was packed, False otherwise.
+    """
+    if is_players_own_job(player_data, job_name):
+        return False
+
+    on_duty_npc = on_duty_npc_for_job(station_crew, job_name)
+    if on_duty_npc is not None:
+        tk.Button(
+            button_frame,
+            text=talk_label,
+            font=("Arial", 14),
+            width=20,
+            command=talk_command,
+        ).pack(pady=10)
+        return True
+
+    away_npc = any_npc_for_job(station_crew, job_name)
+    if away_npc is None:
+        return False
+
+    flavor = absent_flavor or f"The {job_name} is away from their post."
+    tk.Label(
+        button_frame,
+        text=flavor,
+        font=("Arial", 11, "italic"),
+        bg=button_frame.cget("bg"),
+        fg="light gray",
+        wraplength=300,
+    ).pack(pady=(10, 2))
+
+    def _call_and_refresh():
+        success, message = call_npc(away_npc)
+        title = "Call Successful" if success else "No Answer"
+        messagebox.showinfo(title, message, parent=room_window)
+        refresh_callback()
+        room_window.after(20, room_window.lift)
+        room_window.focus_force()
+
+    tk.Button(
+        button_frame,
+        text=f"Call {away_npc.get('name', job_name)}",
+        font=("Arial", 14),
+        width=20,
+        command=_call_and_refresh,
+    ).pack(pady=10)
+    return True
 
 
 def show_station_menu(

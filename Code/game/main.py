@@ -15,6 +15,20 @@ from game.helper_methods.stock_market import (
 )
 from game.helper_methods.game import Game
 from game.helper_methods.random_events import maybe_trigger_hallway_event
+from game.helper_methods.npc_movement import (
+    ensure_npc_movement_fields,
+    find_hall_passersby,
+    roll_departures,
+    step_wanderers,
+)
+from game.helper_methods.jail import (
+    arrest_member,
+    ensure_crew_jail_fields,
+    format_jail_time,
+    is_jailed,
+    jail_seconds_remaining,
+    tick_jail_releases,
+)
 from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany, Quarters
 from game.objects.items import ItemInventoryMixin
 from game.character_methods.character_creation import CharacterCreation
@@ -108,6 +122,8 @@ class SpaceStationGame(ItemInventoryMixin):
             },
             "alcohol_percent": 0,
             "warrant": False,
+            "in_jail": False,
+            "jail_release_at": None,
             "station_power": default_station_power(),
             "notes": []
         }
@@ -127,6 +143,8 @@ class SpaceStationGame(ItemInventoryMixin):
     def _load_crew_from_player_data(self):
         """Restore crew list from loaded player_data."""
         self.station_crew = self.player_data.get("station_crew", [])
+        ensure_npc_movement_fields(self.station_crew)
+        ensure_crew_jail_fields(self.player_data, self.station_crew)
 
     def _save_game(self):
         """Update market state, sync crew, and persist the save file."""
@@ -241,6 +259,12 @@ class SpaceStationGame(ItemInventoryMixin):
             
             # Check oxygen levels based on life support setting
             self.check_life_support_status(elapsed_seconds)
+
+            # Release anyone whose jail sentence has expired
+            try:
+                tick_jail_releases(self)
+            except Exception as e:
+                print(f"Error ticking jail releases: {e}")
             
             # If battery level reaches critical point, trigger effects
             if 0 < new_level <= 10:
@@ -549,6 +573,14 @@ class SpaceStationGame(ItemInventoryMixin):
 
         self._ensure_game_running()
 
+        if is_jailed(self.player_data):
+            self.player_data["location"] = {
+                "x": int(donut.SECURITY_KEY.split(",")[0]),
+                "y": int(donut.SECURITY_KEY.split(",")[1]),
+            }
+            self._instantiate_special_room("Security")
+            return
+
         loc_key = self.get_location_key()
 
         if loc_key not in self.ship_map:
@@ -772,6 +804,14 @@ class SpaceStationGame(ItemInventoryMixin):
     
     def move_direction(self, direction):
         """Move in the specified direction with random event chance"""
+        if is_jailed(self.player_data):
+            remaining = format_jail_time(jail_seconds_remaining(self.player_data))
+            messagebox.showinfo(
+                "In Jail",
+                f"You are in jail. Time remaining: {remaining}.",
+            )
+            return
+
         x = self.player_data["location"]["x"]
         y = self.player_data["location"]["y"]
         
@@ -798,9 +838,203 @@ class SpaceStationGame(ItemInventoryMixin):
             self.player_data["location"]["x"] = x - (1 if direction == "north" else -1 if direction == "south" else 0)
             self.player_data["location"]["y"] = y - (1 if direction == "east" else -1 if direction == "west" else 0)
 
+        # NPCs move independently of the player's own random hallway events:
+        # posted NPCs may leave/return, and wandering NPCs take a step.
+        roll_departures(self.station_crew)
+        step_wanderers(
+            self.station_crew,
+            self.ship_map,
+            game=self,
+            player_data=self.player_data,
+        )
+
+        # If a room-entry warrant sweep just jailed the player, stop here.
+        if is_jailed(self.player_data):
+            return
+
         maybe_trigger_hallway_event(self)
-        
+
+        if is_jailed(self.player_data):
+            return
+
+        # Unconditional (not gated by the random-event roll above): if a
+        # wandering NPC happens to be standing on the player's new tile,
+        # they cross paths in the hallway — and security may arrest.
+        for npc in find_hall_passersby(self.player_data, self.station_crew):
+            if self._handle_hallway_security_encounter(npc):
+                if is_jailed(self.player_data):
+                    return
+                continue
+            messagebox.showinfo(
+                "Crew Encounter",
+                f"{npc.get('name', 'A crew member')} ({npc.get('job', 'Crew')}) passes you in the hall.",
+            )
+
         # Refresh hallway view
+        self.show_hallway()
+
+    def _handle_hallway_security_encounter(self, npc):
+        """Arrest on hallway pass-by if one party is Security and the other is wanted.
+
+        Returns True if an arrest (or security-specific handling) occurred.
+        """
+        npc_is_guard = npc.get("job") == "Security Guard"
+        player_is_guard = self.player_data.get("job") == "Security Guard"
+
+        if npc_is_guard and self.player_data.get("warrant", False) and not is_jailed(self.player_data):
+            arrest_member(
+                self.player_data,
+                reason=(
+                    f"{npc.get('name', 'A security guard')} stops you in the hall. "
+                    "You are under arrest!"
+                ),
+                game=self,
+                is_player=True,
+                show_message=True,
+            )
+            return True
+
+        if (
+            player_is_guard
+            and npc.get("warrant", False)
+            and not is_jailed(npc)
+        ):
+            self._offer_player_arrest_choice(npc)
+            return True
+
+        return False
+
+    def _offer_player_arrest_choice(self, npc):
+        """Let a Security Guard player Arrest or Let Go a wanted hallway passerby."""
+        name = npc.get("name", "A crew member")
+        job = npc.get("job", "Crew")
+        bribe_amount = None
+        if random.random() < 0.50:
+            bribe_amount = random.randint(5, 50)
+
+        lines = [
+            f"You stop {name} ({job}) in the hall.",
+            "They have an active warrant.",
+        ]
+        if bribe_amount is not None:
+            lines.append(
+                f'{name} leans in and whispers, "Look the other way and I\'ll make it '
+                f'worth your while — {bribe_amount} credits."'
+            )
+        lines.append("\nWhat do you do?")
+
+        choice = self._ask_arrest_or_let_go("\n".join(lines))
+        if choice == "arrest":
+            arrest_member(
+                npc,
+                reason=f"You arrest {name} in the hallway and send them to jail.",
+                game=self,
+                is_player=False,
+                show_message=True,
+            )
+            return
+
+        # Let Go
+        if bribe_amount is not None:
+            self.player_data["credits"] = self.player_data.get("credits", 0) + bribe_amount
+            messagebox.showinfo(
+                "Let Go",
+                f"You look the other way. {name} slips you {bribe_amount} credits and hurries off.",
+                parent=self.root,
+            )
+            self.add_note(f"Accepted a {bribe_amount}-credit bribe from {name} and let them go.")
+        else:
+            messagebox.showinfo(
+                "Let Go",
+                f"You wave {name} on. They disappear down the hallway.",
+                parent=self.root,
+            )
+            self.add_note(f"Let wanted crew member {name} go in the hallway.")
+
+    def _ask_arrest_or_let_go(self, message):
+        """Modal with Arrest / Let Go. Returns 'arrest' or 'let_go'."""
+        result = {"choice": "let_go"}
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Wanted Crew")
+        dialog.configure(bg="black")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+
+        label = tk.Label(
+            dialog,
+            text=message,
+            font=("Arial", 12),
+            bg="black",
+            fg="white",
+            justify=tk.LEFT,
+            wraplength=420,
+        )
+        label.pack(padx=20, pady=20)
+
+        button_frame = tk.Frame(dialog, bg="black")
+        button_frame.pack(pady=(0, 16))
+
+        def choose(choice):
+            result["choice"] = choice
+            dialog.destroy()
+
+        arrest_btn = tk.Button(
+            button_frame,
+            text="Arrest",
+            font=("Arial", 12),
+            width=12,
+            command=lambda: choose("arrest"),
+        )
+        arrest_btn.pack(side=tk.LEFT, padx=8)
+
+        let_go_btn = tk.Button(
+            button_frame,
+            text="Let Go",
+            font=("Arial", 12),
+            width=12,
+            command=lambda: choose("let_go"),
+        )
+        let_go_btn.pack(side=tk.LEFT, padx=8)
+
+        dialog.update_idletasks()
+        width = dialog.winfo_reqwidth()
+        height = dialog.winfo_reqheight()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - width) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - height) // 2
+        dialog.geometry(f"+{x}+{y}")
+
+        dialog.protocol("WM_DELETE_WINDOW", lambda: choose("let_go"))
+        self.root.wait_window(dialog)
+        return result["choice"]
+
+    def handle_player_arrest(self, message, show_message=True):
+        """Teleport the jailed player into the Security room UI."""
+        from tkinter import messagebox as mb
+
+        if show_message:
+            mb.showinfo("Arrested", message, parent=self.root)
+        self.player_data["location"] = {
+            "x": int(donut.SECURITY_KEY.split(",")[0]),
+            "y": int(donut.SECURITY_KEY.split(",")[1]),
+        }
+        self.player_data["ship_map"] = self.ship_map
+        # Drop any hallway UI and open Security so the player is stuck there.
+        self._instantiate_special_room("Security")
+
+    def handle_player_release(self):
+        """Return the player to the Security hallway after their sentence ends."""
+        from tkinter import messagebox as mb
+        from game.helper_methods.jail import security_hallway_location
+
+        self.player_data["location"] = security_hallway_location()
+        mb.showinfo(
+            "Released",
+            "Your sentence is over. You are free to go.",
+            parent=self.root,
+        )
+        # If they were viewing Security as a prisoner, bounce them to the hallway.
         self.show_hallway()
     
     def show_load_game(self):
@@ -927,7 +1161,14 @@ class SpaceStationGame(ItemInventoryMixin):
             
             # Check if player is in a special room or hallway
             loc_key = f"{x},{y}"
-            if loc_key in SPECIAL_ROOM_TILES and loc_key != donut.QUARTERS_KEY:
+            if is_jailed(self.player_data):
+                # Keep jailed players locked in the Security room UI
+                self.player_data["location"] = {
+                    "x": int(donut.SECURITY_KEY.split(",")[0]),
+                    "y": int(donut.SECURITY_KEY.split(",")[1]),
+                }
+                self._instantiate_special_room("Security")
+            elif loc_key in SPECIAL_ROOM_TILES and loc_key != donut.QUARTERS_KEY:
                 # Player was in a special room, return to hallway entrance
                 self.update_player_data_from_room(self.player_data)
             elif x == -1 and y == 0:
