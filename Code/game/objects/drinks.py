@@ -3,6 +3,8 @@
 import datetime
 import tkinter as tk
 
+from game.helper_methods.ui_panels import open_modal_panel
+
 DRINKS_MENU = {
     "Beer": {"price": 10, "desc": "A refreshing glass of regular beer."},
     "Whiskey": {"price": 20, "desc": "A shot of strong whiskey."},
@@ -241,20 +243,7 @@ class DrinkMixer:
 
     def show_mixer(self):
         """Show interface for mixing custom drinks."""
-        mixer_popup = tk.Toplevel(self.parent_window)
-        mixer_popup.title("Bartender's Drink Mixer")
-        mixer_popup.geometry("800x650")
-        mixer_popup.configure(bg="black")
-        mixer_popup.transient(self.parent_window)
-        mixer_popup.grab_set()
-
-        mixer_popup.update_idletasks()
-        width = 800
-        height = 650
-        x = (mixer_popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (mixer_popup.winfo_screenheight() // 2) - (height // 2)
-        mixer_popup.geometry(f"{width}x{height}+{x}+{y}")
-
+        _panel, mixer_popup = open_modal_panel(self.parent_window, title="Bartender's Drink Mixer")
         main_canvas = tk.Canvas(mixer_popup, bg="black", highlightthickness=0)
         main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -386,7 +375,6 @@ class DrinkMixer:
             orig_destroy()
 
         mixer_popup.destroy = _destroy_and_cleanup
-        mixer_popup.protocol("WM_DELETE_WINDOW", mixer_popup.destroy)
 
     def _add_to_mix(self, ing_listbox, mix_listbox, available_items):
         """Add an ingredient to the mixing glass."""
@@ -422,7 +410,15 @@ class DrinkMixer:
         drink_match, drink_data = match_recipe(ingredients)
 
         if drink_match:
-            result_text = f"Success! You've mixed a {drink_match}.\n{drink_data['desc']}"
+            stock = self.player_data.setdefault("bar_mixed_stock", {})
+            stock[drink_match] = stock.get(drink_match, 0) + 1
+            qty = stock[drink_match]
+
+            result_text = (
+                f"Success! You've mixed a {drink_match}.\n"
+                f"{drink_data['desc']}\n"
+                f"(Qty: {qty})"
+            )
             result_label.config(text=result_text, fg="light green")
 
             if "notes" not in self.player_data:
@@ -439,20 +435,7 @@ class DrinkMixer:
 
     def show_recipes(self):
         """Show a list of known drink recipes."""
-        recipes_popup = tk.Toplevel(self.parent_window)
-        recipes_popup.title("Drink Recipes")
-        recipes_popup.geometry("700x600")
-        recipes_popup.configure(bg="black")
-        recipes_popup.transient(self.parent_window)
-        recipes_popup.grab_set()
-
-        recipes_popup.update_idletasks()
-        width = 700
-        height = 600
-        x = (recipes_popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (recipes_popup.winfo_screenheight() // 2) - (height // 2)
-        recipes_popup.geometry(f"{width}x{height}+{x}+{y}")
-
+        _panel, recipes_popup = open_modal_panel(self.parent_window, title="Drink Recipes")
         title_label = tk.Label(recipes_popup, text="Bartender's Recipe Book", font=("Arial", 18), bg="black", fg="white")
         title_label.pack(pady=10)
 
@@ -614,20 +597,7 @@ class DrinkMixer:
 
     def show_ingredients_list(self):
         """Show a list of all available ingredients."""
-        ing_popup = tk.Toplevel(self.parent_window)
-        ing_popup.title("Available Ingredients")
-        ing_popup.geometry("400x500")
-        ing_popup.configure(bg="black")
-        ing_popup.transient(self.parent_window)
-        ing_popup.grab_set()
-
-        ing_popup.update_idletasks()
-        width = 400
-        height = 500
-        x = (ing_popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (ing_popup.winfo_screenheight() // 2) - (height // 2)
-        ing_popup.geometry(f"{width}x{height}+{x}+{y}")
-
+        _panel, ing_popup = open_modal_panel(self.parent_window, title="Available Ingredients")
         title_label = tk.Label(ing_popup, text="Available Ingredients", font=("Arial", 18), bg="black", fg="white")
         title_label.pack(pady=10)
 

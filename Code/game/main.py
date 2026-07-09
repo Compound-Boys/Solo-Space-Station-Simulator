@@ -2,11 +2,13 @@ import tkinter as tk
 import os
 import sys
 import time
+import copy
 import threading
 import datetime
 import random
 from tkinter import messagebox
 
+from game.maps import donut
 from game.helper_methods.stock_market import (
     StockMarketEngine,
     default_stock_market_state,
@@ -24,6 +26,11 @@ from game.helper_methods.power_constants import (
     calculate_solar_charge,
     default_station_power,
 )
+from game.helper_methods.ui_panels import (
+    open_modal_panel,
+    configure_message_buffer,
+    report_message,
+)
 
 SPECIAL_ROOM_CLASSES = {
     "Bridge": Bridge,
@@ -35,33 +42,21 @@ SPECIAL_ROOM_CLASSES = {
     "Quarters": Quarters,
 }
 
-SPECIAL_ROOM_TILES = {
-    "6,0": "Bridge",
-    "0,6": "MedBay",
-    "6,6": "Security",
-    "6,3": "Engineering",
-    "0,-1": "Bar",
-    "3,-1": "Botany",
-    "-1,0": "Quarters",
-}
-
-SPECIAL_ROOM_HALLWAY = {
-    "6,0": (5, 0),
-    "0,6": (0, 5),
-    "6,6": (5, 5),
-    "6,3": (5, 3),
-    "0,-1": (0, 3),
-    "3,-1": (3, 0),
-    "-1,0": (0, 0),
-}
+SPECIAL_ROOM_TILES = donut.SPECIAL_ROOM_TILES
+SPECIAL_ROOM_HALLWAY = donut.SPECIAL_ROOM_HALLWAY
 
 class SpaceStationGame(ItemInventoryMixin):
     def __init__(self, root, base_path):
         self.root = root
         self.base_path = base_path
         self.root.title("Space Station 13 Text Clone")
-        self.root.geometry("800x600")
+        width, height = 1012, 759
+        self.root.update_idletasks()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
         self.root.configure(bg="black")
+        configure_message_buffer(self.root)
 
         self.market_running = False
         self.market_thread = None
@@ -69,6 +64,7 @@ class SpaceStationGame(ItemInventoryMixin):
 
         self.battery_timer_running = False
         self.battery_timer_id = None
+        self._event_effect_messages = None
 
         # Stock market background tracking
         self.market_engine = StockMarketEngine()
@@ -97,46 +93,13 @@ class SpaceStationGame(ItemInventoryMixin):
                 "poison": 0,
                 "oxygen": 0
             },
+            "alcohol_percent": 0,
             "station_power": default_station_power(),
             "notes": []
         }
 
-        # Ship map configuration
-        self.ship_map = {
-            "-1,0": {"name": "Quarters", "desc": "Your personal quarters on the station."},
-            "0,0": {"name": "Hallway Junction", "desc": "A junction in the hallway. Your quarters are nearby."},
-            "1,0": {"name": "North Hallway", "desc": "A long hallway stretching north."},
-            "2,0": {"name": "North Hallway", "desc": "A long hallway stretching north."},
-            "3,0": {"name": "North Hallway", "desc": "A long hallway stretching north. You notice a door labeled 'Botany Lab' on the west wall."},
-            "4,0": {"name": "North Hallway", "desc": "A long hallway stretching north."},
-            "5,0": {"name": "North End", "desc": "The northern end of the hallway. The bridge is nearby."},
-            "0,1": {"name": "East Hallway", "desc": "A long hallway stretching east."},
-            "0,2": {"name": "East Hallway", "desc": "A long hallway stretching east."},
-            "0,3": {"name": "Bar Entrance", "desc": "This hallway leads to the station Bar. Soft music can be heard from inside."},
-            "0,4": {"name": "East Hallway", "desc": "A long hallway stretching east."},
-            "0,5": {"name": "East End", "desc": "The eastern end of the hallway. The medbay is nearby."},
-            
-            # Northeast Corridors
-            "5,1": {"name": "Northeast Hallway", "desc": "A hallway connecting the north and east corridors."},
-            "5,2": {"name": "Northeast Hallway", "desc": "A hallway connecting the north and east corridors."},
-            "5,3": {"name": "Engineering Bay Entrance", "desc": "This hallway leads to the Engineering Bay."},
-            "5,4": {"name": "Northeast Hallway", "desc": "A hallway connecting the north and east corridors."},
-            "5,5": {"name": "Northeast Corner", "desc": "The far corner of the station. Security is nearby."},
-            
-            # East Section
-            "4,5": {"name": "East Section", "desc": "A hallway along the eastern side of the station."},
-            "3,5": {"name": "East Section", "desc": "A hallway along the eastern side of the station."},
-            "2,5": {"name": "East Section", "desc": "A hallway along the eastern side of the station."},
-            "1,5": {"name": "East Section", "desc": "A hallway connecting back to the main hallways."},
-            
-            # Special room tiles
-            "6,0": {"name": "Bridge", "desc": "The control center of the station. The door is unlocked.", "locked": False},
-            "0,6": {"name": "MedBay", "desc": "The medical facility of the station. The door is unlocked.", "locked": False},
-            "6,6": {"name": "Security", "desc": "The security center of the station. The door is unlocked.", "locked": False},
-            "6,3": {"name": "Engineering Bay", "desc": "The station's engineering and maintenance center. The door is unlocked.", "locked": False},
-            "0,-1": {"name": "Bar", "desc": "The station's social hub where crew members can relax and enjoy drinks. The door is unlocked.", "locked": False},
-            "3,-1": {"name": "Botany Lab", "desc": "The station's plant cultivation and research facility. The door is unlocked.", "locked": False}
-        }
+        # Ship map configuration (see game/maps/donut.py for the layout data)
+        self.ship_map = copy.deepcopy(donut.SHIP_MAP)
         
         # Bind the window close event to stop the market thread
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -164,13 +127,20 @@ class SpaceStationGame(ItemInventoryMixin):
         if not self.battery_timer_running:
             self.start_battery_timer()
 
+    def _report_effect(self, title, message):
+        """Show an effect popup, or buffer the message during a random event."""
+        if self._event_effect_messages is not None:
+            self._event_effect_messages.append(message)
+        else:
+            report_message(title, message, kind="info", parent=self.root)
+
     def _add_damage_type(self, damage_key, label, min_damage, max_damage):
         """Apply incremental damage of a given type to the player."""
         damage = random.randint(min_damage, max_damage)
         original_damage = self.player_data["damage"].get(damage_key, 0)
         self.player_data["damage"][damage_key] = min(100, original_damage + damage)
         total = self.player_data["damage"][damage_key]
-        messagebox.showinfo(
+        self._report_effect(
             f"{label} Damage",
             f"You suffered {damage}% {label.lower()} damage! Total {label.lower()} damage: {total}%.",
         )
@@ -363,13 +333,7 @@ class SpaceStationGame(ItemInventoryMixin):
         }
         
         try:
-            window = self.root.focus_get()
-            if window:
-                messagebox.showwarning("Oxygen Warning", warnings[threshold], parent=window)
-            else:
-                messagebox.showwarning("Oxygen Warning", warnings[threshold], parent=self.root)
-                
-            # Add note about oxygen damage
+            report_message("Oxygen Warning", warnings[threshold], kind="warning", parent=self.root)
             self.add_note(f"Suffered {threshold}% oxygen damage due to life support failure.")
         except Exception as e:
             print(f"Error showing oxygen warning: {e}")
@@ -377,10 +341,12 @@ class SpaceStationGame(ItemInventoryMixin):
     def handle_oxygen_death(self):
         """Handle player death from oxygen deprivation"""
         try:
-            # Show death message
-            messagebox.showerror("CRITICAL: Oxygen Depleted", 
-                              "You have succumbed to oxygen deprivation. Emergency medical protocols have been activated, and you have been revived at minimal health levels.",
-                              parent=self.root)
+            report_message(
+                "CRITICAL: Oxygen Depleted",
+                "You have succumbed to oxygen deprivation. Emergency medical protocols have been activated, and you have been revived at minimal health levels.",
+                kind="error",
+                parent=self.root,
+            )
             
             # Reset oxygen damage
             self.player_data["damage"]["oxygen"] = 50
@@ -393,41 +359,31 @@ class SpaceStationGame(ItemInventoryMixin):
             self.add_note("CRITICAL EVENT: Nearly died from oxygen deprivation. Emergency medical systems intervened.")
             
             # Return player to quarters
-            self.player_data["location"] = {"x": -1, "y": 0}
+            self.player_data["location"] = dict(donut.QUARTERS_LOCATION)
             self.show_hallway()
         except Exception as e:
             print(f"Error handling oxygen death: {e}")
     
     def show_low_power_warning(self):
         """Show warning about low battery power"""
-        try:
-            window = self.root.focus_get()
-            if window:
-                messagebox.showwarning("Low Power Warning", 
-                                     "Warning: Station battery power low. Emergency lighting active. Please activate solar panels.",
-                                     parent=window)
-        except:
-            # Fall back to main window if there's an error
-            messagebox.showwarning("Low Power Warning", 
-                                 "Warning: Station battery power low. Emergency lighting active. Please activate solar panels.",
-                                 parent=self.root)
+        report_message(
+            "Low Power Warning",
+            "Warning: Station battery power low. Emergency lighting active. Please activate solar panels.",
+            kind="warning",
+            parent=self.root,
+        )
     
     def trigger_power_outage(self):
         """Trigger effects of a complete power outage"""
         try:
             # Set battery to minimum level to prevent multiple outage triggers
             self.player_data["station_power"]["battery_level"] = 0.1
-            
-            window = self.root.focus_get()
-            if window:
-                messagebox.showerror("Power Outage", 
-                                   "CRITICAL: Station power failure! Emergency systems active. Activate solar arrays immediately!",
-                                   parent=window)
-            else:
-                messagebox.showerror("Power Outage", 
-                                   "CRITICAL: Station power failure! Emergency systems active. Activate solar arrays immediately!",
-                                   parent=self.root)
-
+            report_message(
+                "Power Outage",
+                "CRITICAL: Station power failure! Emergency systems active. Activate solar arrays immediately!",
+                kind="error",
+                parent=self.root,
+            )
             self.add_note("CRITICAL: Station suffered complete power failure. Emergency systems active.")
 
         except Exception as e:
@@ -490,12 +446,12 @@ class SpaceStationGame(ItemInventoryMixin):
         self.save_and_start()
 
     def save_and_start(self):
-        """Save the character and start the game"""
+        """Save the character and start the game in quarters."""
+        self.player_data["location"] = dict(donut.QUARTERS_LOCATION)
         self._save_game()
         self.start_market_thread()
         self.start_battery_timer()
-        self.player_data["location"] = {"x": -1, "y": 0}
-        self.show_hallway()
+        self.enter_special_room_at("Quarters", donut.QUARTERS_KEY)
     
     def show_character_sheet(self):
         """Show the character sheet window"""
@@ -504,8 +460,13 @@ class SpaceStationGame(ItemInventoryMixin):
 
         self._ensure_game_running()
 
-        # Configure window size
-        self.root.geometry("800x700")  # Increased height to accommodate all content
+        # Store the previous screen to return to
+        self.previous_screen = getattr(self, 'previous_screen', 'show_hallway')
+
+        # Pack Return at the bottom first so it stays visible above tall sheet content
+        return_btn = tk.Button(self.root, text="Return", font=("Arial", 14), width=15,
+                             command=lambda: getattr(self, self.previous_screen)())
+        return_btn.pack(side=tk.BOTTOM, pady=20)
 
         render_character_sheet(
             self.root,
@@ -514,196 +475,121 @@ class SpaceStationGame(ItemInventoryMixin):
             on_holdings=self.show_holdings_popup,
             on_notes=self.show_notes_popup,
         )
-
-        # Store the previous screen to return to
-        self.previous_screen = getattr(self, 'previous_screen', 'show_hallway')
-
-        # Return button that goes back to the previous screen
-        return_btn = tk.Button(self.root, text="Return", font=("Arial", 14), width=15,
-                             command=lambda: getattr(self, self.previous_screen)())
-        return_btn.pack(pady=30)  # Increased padding to ensure button is visible
     
     def show_notes_popup(self):
-        """Show a popup window with the player's notes"""
-        popup = tk.Toplevel(self.root)
-        popup.title("Character Notes")
-        popup.geometry("600x500")
-        popup.configure(bg="black")
-        
-        # Ensure this window stays on top
-        popup.transient(self.root)
-        popup.grab_set()
-        
-        # Center the popup window
-        popup.update_idletasks()
-        width = 600
-        height = 500
-        x = (popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (popup.winfo_screenheight() // 2) - (height // 2)
-        popup.geometry(f"{width}x{height}+{x}+{y}")
-        
-        # Title
+        """Show character notes as an in-main-window overlay."""
+        panel, popup = open_modal_panel(self.root, title="Character Notes")
+
         title_label = tk.Label(popup, text="Character Notes", font=("Arial", 18), bg="black", fg="white")
         title_label.pack(pady=10)
-        
-        # Create a frame for the scrollable notes
+
         frame = tk.Frame(popup, bg="black")
         frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
-        
-        # Add a scrollbar
+
         scrollbar = tk.Scrollbar(frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Create a text widget for notes
+
         notes_text = tk.Text(frame, bg="black", fg="white", font=("Arial", 12),
                            width=60, height=20, yscrollcommand=scrollbar.set, wrap=tk.WORD)
         notes_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=notes_text.yview)
-        
-        # Disable editing
+
         notes_text.config(state=tk.DISABLED)
-        
-        # Load notes
+
         if "notes" in self.player_data and self.player_data["notes"]:
-            # Re-enable text widget temporarily to insert text
             notes_text.config(state=tk.NORMAL)
-            
-            # Insert notes in reverse order (newest first)
+
             for note in reversed(self.player_data["notes"]):
-                # Format the note
                 if "timestamp" in note and "text" in note:
                     timestamp = note["timestamp"]
                     text = note["text"]
-                    
-                    # Format the timestamp for display
+
                     try:
-                        # Parse ISO format timestamp
                         dt = datetime.datetime.fromisoformat(timestamp)
                         formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
                     except (ValueError, TypeError):
-                        # If timestamp format is invalid, use it as is
                         formatted_time = timestamp
-                    
-                    # Insert the formatted note
+
                     notes_text.insert(tk.END, f"{formatted_time}:\n{text}\n\n")
                 else:
-                    # If note doesn't have proper structure, just insert the text
                     notes_text.insert(tk.END, f"{str(note)}\n\n")
-            
-            # Disable editing again
+
             notes_text.config(state=tk.DISABLED)
         else:
-            # If no notes, show a message
             notes_text.config(state=tk.NORMAL)
             notes_text.insert(tk.END, "No notes recorded yet.")
             notes_text.config(state=tk.DISABLED)
-        
-        # Mouse wheel binding for scrolling
+
         def _on_notes_mousewheel(event):
             try:
                 notes_text.yview_scroll(int(-1*(event.delta/120)), "units")
             except tk.TclError:
-                pass  # Ignore errors if the text widget was destroyed
-        
-        # Bind mousewheel to notes text widget
+                pass
+
         popup.bind("<MouseWheel>", _on_notes_mousewheel)
-        
-        # Override destroy method to cleanup bindings
-        orig_destroy = popup.destroy
-        def _destroy_and_cleanup():
+
+        def _close():
             try:
                 popup.unbind("<MouseWheel>")
-            except:
+            except tk.TclError:
                 pass
-            orig_destroy()
-        
-        popup.destroy = _destroy_and_cleanup
-        
-        # Close button
-        close_btn = tk.Button(popup, text="Close", font=("Arial", 12), width=10, command=popup.destroy)
+            panel.close()
+
+        close_btn = tk.Button(popup, text="Close", font=("Arial", 12), width=10, command=_close)
         close_btn.pack(pady=10)
-    
+
     def add_note(self, text):
         """Add a note to the player's notes"""
         if "notes" not in self.player_data:
             self.player_data["notes"] = []
-        
-        # Create a new note with timestamp
+
         note = {
             "timestamp": datetime.datetime.now().isoformat(),
             "text": text
         }
-        
-        # Add the note to the player's notes
+
         self.player_data["notes"].append(note)
-    
+
     def show_holdings_popup(self):
-        """Show a popup window with the player's stock holdings"""
-        popup = tk.Toplevel(self.root)
-        popup.title("Stock Holdings")
-        popup.geometry("400x400")
-        popup.configure(bg="black")
-        
-        # Ensure this window stays on top
-        popup.transient(self.root)
-        popup.grab_set()
-        
-        # Center the popup window
-        popup.update_idletasks()
-        width = 400
-        height = 400
-        x = (popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (popup.winfo_screenheight() // 2) - (height // 2)
-        popup.geometry(f"{width}x{height}+{x}+{y}")
-        
-        # Title
+        """Show stock holdings as an in-main-window overlay."""
+        panel, popup = open_modal_panel(self.root, title="Stock Holdings")
+
         title_label = tk.Label(popup, text="Stock Holdings", font=("Arial", 18), bg="black", fg="white")
         title_label.pack(pady=10)
-        
-        # Create a frame for the scrollable holdings list
+
         frame = tk.Frame(popup, bg="black")
         frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
-        
-        # Add a scrollbar
+
         scrollbar = tk.Scrollbar(frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Create a listbox for holdings
+
         holdings_list = tk.Listbox(frame, bg="black", fg="white", font=("Arial", 12),
                                  width=30, height=15, yscrollcommand=scrollbar.set)
         holdings_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=holdings_list.yview)
-        
-        # Add holdings to the listbox
+
         if not self.player_data.get('stock_holdings', {}):
             holdings_list.insert(tk.END, "You don't own any company stocks.")
         else:
             for company, shares in self.player_data['stock_holdings'].items():
                 holdings_list.insert(tk.END, f"{company}: {shares} shares")
-        
-        # Mouse wheel binding for scrolling
+
         def _on_holdings_mousewheel(event):
             try:
                 holdings_list.yview_scroll(int(-1*(event.delta/120)), "units")
             except tk.TclError:
-                pass  # Ignore errors if the widget was destroyed
-        
-        # Bind mousewheel to holdings list
+                pass
+
         popup.bind("<MouseWheel>", _on_holdings_mousewheel)
-        
-        # Override destroy method to cleanup bindings
-        orig_destroy = popup.destroy
-        def _destroy_and_cleanup():
+
+        def _close():
             try:
                 popup.unbind("<MouseWheel>")
-            except:
+            except tk.TclError:
                 pass
-            orig_destroy()
-        
-        popup.destroy = _destroy_and_cleanup
-        
-        # Close button
-        close_btn = tk.Button(popup, text="Close", font=("Arial", 12), width=10, command=popup.destroy)
+            panel.close()
+
+        close_btn = tk.Button(popup, text="Close", font=("Arial", 12), width=10, command=_close)
         close_btn.pack(pady=10)
     
     def use_door(self):
@@ -712,10 +598,11 @@ class SpaceStationGame(ItemInventoryMixin):
         y = self.player_data["location"]["y"]
         
         if x == -1 and y == 0:  # In quarters, move to hallway
-            self.player_data["location"] = {"x": 0, "y": 0}
+            hallway_x, hallway_y = donut.SPECIAL_ROOM_HALLWAY[donut.QUARTERS_KEY]
+            self.player_data["location"] = {"x": hallway_x, "y": hallway_y}
             self.show_hallway()
         else:  # In hallway, move to quarters
-            self.enter_special_room_at("Quarters", "-1,0")
+            self.enter_special_room_at("Quarters", donut.QUARTERS_KEY)
     
     def get_location_key(self):
         x = self.player_data["location"]["x"]
@@ -804,45 +691,21 @@ class SpaceStationGame(ItemInventoryMixin):
         x = self.player_data["location"]["x"]
         y = self.player_data["location"]["y"]
 
-        north_available = False
-        south_available = False
-        east_available = False
-        west_available = False
-        
-        # Standard hallway directions
-        # North hallway section (0-5, 0)
-        if y == 0 and x < 5:
-            north_available = True
-        if y == 0 and x > 0:
-            south_available = True
-            
-        # East hallway section (0, 0-5)
-        if x == 0 and y < 5:
-            east_available = True
-        if x == 0 and y > 0:
-            west_available = True
-            
-        # North end - can go east
-        if x == 5 and y < 5:
-            east_available = True
-        if x == 5 and y > 0:
-            west_available = True
-            
-        # East end - can go north
-        if y == 5 and x < 5:
-            north_available = True
-        if y == 5 and x > 0:
-            south_available = True
-        
+        directions = donut.get_available_directions(x, y)
+        north_available = directions["north"]
+        south_available = directions["south"]
+        east_available = directions["east"]
+        west_available = directions["west"]
+
         # Special cases for room access points
         is_special_location = False
         
         # Bridge access from north end
-        if x == 5 and y == 0:
+        if (x, y) == SPECIAL_ROOM_HALLWAY[donut.BRIDGE_KEY]:
             is_special_location = True
             # Add the Bridge access button
             bridge_btn = tk.Button(nav_frame, text="Bridge", font=("Arial", 14), width=15,
-                                command=lambda: self.enter_special_room_at("Bridge", "6,0"))
+                                command=lambda: self.enter_special_room_at("Bridge", donut.BRIDGE_KEY))
             bridge_btn.grid(row=0, column=1, padx=10, pady=10)
             
             # Also add regular east button for the corridor
@@ -858,11 +721,11 @@ class SpaceStationGame(ItemInventoryMixin):
                 south_btn.grid(row=2, column=1, padx=10, pady=10)
             
         # MedBay access from east end
-        elif x == 0 and y == 5:
+        elif (x, y) == SPECIAL_ROOM_HALLWAY[donut.MEDBAY_KEY]:
             is_special_location = True
             # Add MedBay access button
             medbay_btn = tk.Button(nav_frame, text="MedBay", font=("Arial", 14), width=15,
-                              command=lambda: self.enter_special_room_at("MedBay", "0,6"))
+                              command=lambda: self.enter_special_room_at("MedBay", donut.MEDBAY_KEY))
             medbay_btn.grid(row=1, column=2, padx=10, pady=10)
             
             # Add north button for the corridor
@@ -878,11 +741,11 @@ class SpaceStationGame(ItemInventoryMixin):
                 west_btn.grid(row=1, column=0, padx=10, pady=10)
             
         # Security access from northeast corner
-        elif x == 5 and y == 5:
+        elif (x, y) == SPECIAL_ROOM_HALLWAY[donut.SECURITY_KEY]:
             is_special_location = True
             # Just one button for Security access
             security_btn = tk.Button(nav_frame, text="Security", font=("Arial", 14), width=15,
-                                 command=lambda: self.enter_special_room_at("Security", "6,6"))
+                                 command=lambda: self.enter_special_room_at("Security", donut.SECURITY_KEY))
             security_btn.grid(row=0, column=1, padx=10, pady=10)
             
             # Add west and south buttons for the corridors
@@ -895,11 +758,11 @@ class SpaceStationGame(ItemInventoryMixin):
             south_btn.grid(row=2, column=1, padx=10, pady=10)
 
         # Engineering Bay access from engineering hallway
-        elif x == 5 and y == 3:
+        elif (x, y) == SPECIAL_ROOM_HALLWAY[donut.ENGINEERING_KEY]:
             is_special_location = True
             # Add Engineering Bay access button
             eng_bay_btn = tk.Button(nav_frame, text="Engineering Bay", font=("Arial", 14), width=15,
-                                command=lambda: self.enter_special_room_at("Engineering", "6,3"))
+                                command=lambda: self.enter_special_room_at("Engineering", donut.ENGINEERING_KEY))
             eng_bay_btn.grid(row=0, column=1, padx=10, pady=10)
             
             # Add west and east buttons for the corridors
@@ -912,12 +775,12 @@ class SpaceStationGame(ItemInventoryMixin):
             east_btn.grid(row=1, column=2, padx=10, pady=10)
         
         # Bar access from bar entrance
-        elif x == 0 and y == 3:
+        elif (x, y) == SPECIAL_ROOM_HALLWAY[donut.BAR_KEY]:
             is_special_location = True
             # Add Bar access button
             bar_btn = tk.Button(nav_frame, text="Bar", font=("Arial", 14), width=15,
-                             command=lambda: self.enter_special_room_at("Bar", "0,-1"))
-            bar_btn.grid(row=0, column=1, padx=10, pady=10)
+                             command=lambda: self.enter_special_room_at("Bar", donut.BAR_KEY))
+            bar_btn.grid(row=2, column=1, padx=10, pady=10)
             
             # Add west and east buttons for the corridors
             west_btn = tk.Button(nav_frame, text="Go West", font=("Arial", 14), width=15,
@@ -950,14 +813,14 @@ class SpaceStationGame(ItemInventoryMixin):
                                    command=lambda: self.move_direction("west"))
                 west_btn.grid(row=1, column=0, padx=10, pady=10)
             
-            # Special case for the Botany Lab entrance at (3,0)
-            if x == 3 and y == 0:
+            # Special case for the Botany Lab entrance
+            if (x, y) == SPECIAL_ROOM_HALLWAY[donut.BOTANY_KEY]:
                 botany_btn = tk.Button(nav_frame, text="Botany Lab", font=("Arial", 14), width=15,
-                                     command=lambda: self.enter_special_room_at("Botany", "3,-1"))
+                                     command=lambda: self.enter_special_room_at("Botany", donut.BOTANY_KEY))
                 botany_btn.grid(row=1, column=0, padx=10, pady=10)
         
         # Only show return to quarters at the starting junction
-        if x == 0 and y == 0:
+        if (x, y) == SPECIAL_ROOM_HALLWAY[donut.QUARTERS_KEY]:
             quarters_btn = tk.Button(nav_frame, text="Quarters", font=("Arial", 14), width=15,
                                    command=self.use_door)
             quarters_btn.grid(row=3, column=1, columnspan=1, padx=10, pady=20)
@@ -1076,12 +939,16 @@ class SpaceStationGame(ItemInventoryMixin):
         
         # Pick a random event
         event = random.choice(events)
-        
-        # Show the event
-        messagebox.showinfo(event["title"], event["desc"])
-        
-        # Apply the effect
-        event["effect"]()
+
+        self._event_effect_messages = []
+        try:
+            event["effect"]()
+            body = event["desc"]
+            if self._event_effect_messages:
+                body = body + "\n\n" + "\n".join(self._event_effect_messages)
+            messagebox.showinfo(event["title"], body)
+        finally:
+            self._event_effect_messages = None
     
     def combined_effect(self, effect_functions):
         """Apply multiple effects in sequence"""
@@ -1108,7 +975,10 @@ class SpaceStationGame(ItemInventoryMixin):
             limb_name = limb.replace('_', ' ').title()
             
             # Show damage message
-            messagebox.showinfo("Blunt Injury", f"Your {limb_name} took {damage}% blunt damage and is now at {self.player_data['limbs'][limb]}%.")
+            self._report_effect(
+                "Blunt Injury",
+                f"Your {limb_name} took {damage}% blunt damage and is now at {self.player_data['limbs'][limb]}%.",
+            )
             
             # Add note about the injury
             self.add_note(f"Suffered blunt damage to {limb_name}: Took {damage}% damage (from {original_health}% to {self.player_data['limbs'][limb]}%)")
@@ -1116,7 +986,7 @@ class SpaceStationGame(ItemInventoryMixin):
     def add_credits(self, amount):
         """Add credits to the player"""
         self.player_data["credits"] += amount
-        messagebox.showinfo("Credits Added", f"You gained {amount} credits.")
+        self._report_effect("Credits Added", f"You gained {amount} credits.")
         
         # Add note about credits gained
         self.add_note(f"Found {amount} credits. New balance: {self.player_data['credits']} credits.")
@@ -1125,7 +995,7 @@ class SpaceStationGame(ItemInventoryMixin):
         """Subtract credits from the player (min 0)"""
         old_credits = self.player_data["credits"]
         self.player_data["credits"] = max(0, old_credits - amount)
-        messagebox.showinfo("Credits Lost", f"You lost {amount} credits.")
+        self._report_effect("Credits Lost", f"You lost {amount} credits.")
         
         # Add note about credits lost
         self.add_note(f"Lost {amount} credits. New balance: {self.player_data['credits']} credits.")
@@ -1254,19 +1124,19 @@ class SpaceStationGame(ItemInventoryMixin):
             
             # Check if player is in a special room or hallway
             loc_key = f"{x},{y}"
-            if loc_key in SPECIAL_ROOM_TILES and loc_key != "-1,0":
+            if loc_key in SPECIAL_ROOM_TILES and loc_key != donut.QUARTERS_KEY:
                 # Player was in a special room, return to hallway entrance
                 self.update_player_data_from_room(self.player_data)
             elif x == -1 and y == 0:
-                # Player was in quarters
-                self.show_hallway()
+                # Player was in quarters — open the quarters room UI
+                self.enter_special_room_at("Quarters", donut.QUARTERS_KEY)
             else:
                 # Player was in a hallway
                 self.show_hallway()
         else:
             # Default to quarters if location is missing
-            self.player_data["location"] = {"x": -1, "y": 0}
-            self.show_hallway()
+            self.player_data["location"] = dict(donut.QUARTERS_LOCATION)
+            self.enter_special_room_at("Quarters", donut.QUARTERS_KEY)
         
         return True
 
@@ -1297,6 +1167,7 @@ class SpaceStationGame(ItemInventoryMixin):
         # Remove temporary keys from player data if they exist
         ship_map_from_room = updated_player_data.pop("ship_map", None)
         exit_to_menu = updated_player_data.pop("_exit_to_menu", False)
+        quit_without_save = updated_player_data.pop("_quit_without_save", False)
 
         # Update player data
         self.player_data = updated_player_data
@@ -1310,6 +1181,12 @@ class SpaceStationGame(ItemInventoryMixin):
             self.ship_map = ship_map_from_room
 
         self._ensure_game_running()
+
+        if quit_without_save:
+            self.stop_market_thread()
+            self.stop_battery_timer()
+            self.root.destroy()
+            return
 
         if exit_to_menu:
             self._save_game()
@@ -1361,7 +1238,7 @@ class SpaceStationGame(ItemInventoryMixin):
         # Add the item dictionary to inventory
         self.player_data["inventory"].append(item_def)
         item_name = item_def.get("name", "an item")
-        messagebox.showinfo("Item Found", f"You found {item_name} and added it to your inventory.")
+        self._report_effect("Item Found", f"You found {item_name} and added it to your inventory.")
         
         # Add note about the item found
         self.add_note(f"Found {item_name} ({item_id}) and added it to inventory.")
@@ -1370,10 +1247,10 @@ class SpaceStationGame(ItemInventoryMixin):
         """Add market knowledge to the player - reveals a tip about a stock"""
         message = generate_market_tip(self.player_data["stock_market"].get("companies", []))
         if message is None:
-            messagebox.showinfo("Market Tip", "You heard a stock tip, but don't understand the market yet.")
+            self._report_effect("Market Tip", "You heard a stock tip, but don't understand the market yet.")
             return
 
-        messagebox.showinfo("Market Tip", message)
+        self._report_effect("Market Tip", message)
         self.add_note(f"Market Tip: {message}")
     
     def station_announcement(self):
@@ -1388,7 +1265,7 @@ class SpaceStationGame(ItemInventoryMixin):
         ]
         
         announcement = random.choice(announcements)
-        messagebox.showinfo("Station Announcement", f"The PA system crackles: '{announcement}'")
+        self._report_effect("Station Announcement", f"The PA system crackles: '{announcement}'")
 
 if __name__ == "__main__":
     if getattr(sys, "frozen", False):

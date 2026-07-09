@@ -4,9 +4,10 @@ from tkinter import messagebox
 
 from game.character_methods.character_sheet import render_character_sheet
 from game.helper_methods.game import Game
+from game.helper_methods.ui_panels import open_modal_panel
 from game.objects.items import ItemInventoryMixin, ensure_locker_inventory, get_item_definition
 from game.special_rooms.shared import add_note, leave_room, open_room_in_main_window
-from game.helper_methods.stock_market import StockMarket, sync_holdings_to_companies
+from game.helper_methods.stock_market import StockMarket
 
 
 class Quarters(ItemInventoryMixin):
@@ -16,7 +17,7 @@ class Quarters(ItemInventoryMixin):
         self.station_crew = station_crew
         self.return_callback = return_callback
 
-        self.quarters_window = open_room_in_main_window(parent_window, "Your Quarters", self.on_closing)
+        self.quarters_window = open_room_in_main_window(parent_window, "Your Quarters", self.quit_without_save)
         self.root = self.quarters_window
 
         room_label = tk.Label(
@@ -123,19 +124,7 @@ class Quarters(ItemInventoryMixin):
         add_note(self.player_data, text)
 
     def interact_with_bed(self):
-        save_window = tk.Toplevel(self.quarters_window)
-        save_window.title("Bed")
-        save_window.geometry("300x150")
-        save_window.configure(bg="black")
-        save_window.transient(self.quarters_window)
-        save_window.grab_set()
-        save_window.geometry(
-            "+%d+%d"
-            % (
-                self.quarters_window.winfo_rootx() + 250,
-                self.quarters_window.winfo_rooty() + 200,
-            )
-        )
+        panel, save_window = open_modal_panel(self.quarters_window, title="Bed")
 
         save_frame = tk.Frame(save_window, bg="black")
         save_frame.pack(fill=tk.BOTH, expand=True)
@@ -155,14 +144,14 @@ class Quarters(ItemInventoryMixin):
             buttons_frame,
             text="Yes",
             font=("Arial", 12),
-            command=lambda: self._save_game_and_close(save_window),
+            command=lambda: self._save_game_and_close(panel),
         ).pack(side=tk.LEFT, padx=10)
 
         tk.Button(
             buttons_frame,
             text="No",
             font=("Arial", 12),
-            command=save_window.destroy,
+            command=panel.close,
         ).pack(side=tk.LEFT, padx=10)
 
     def _save_game_and_close(self, save_window):
@@ -172,22 +161,15 @@ class Quarters(ItemInventoryMixin):
                 "Your game has been saved successfully.",
                 parent=self.quarters_window,
             )
-        save_window.destroy()
+        if hasattr(save_window, "close"):
+            save_window.close()
+        else:
+            save_window.destroy()
 
     def show_storage(self):
-        storage_window = tk.Toplevel(self.quarters_window)
-        storage_window.title("Storage Locker")
-        storage_window.geometry("800x600")
-        storage_window.configure(bg="black")
-        storage_window.transient(self.quarters_window)
-        storage_window.grab_set()
-
-        storage_window.update_idletasks()
-        width = 800
-        height = 600
-        x = (storage_window.winfo_screenwidth() // 2) - (width // 2)
-        y = (storage_window.winfo_screenheight() // 2) - (height // 2)
-        storage_window.geometry(f"{width}x{height}+{x}+{y}")
+        panel, storage_window = open_modal_panel(self.quarters_window, title="Storage Locker")
+        # Keep a close handle for take/store refresh
+        storage_window._panel = panel
 
         tk.Label(
             storage_window,
@@ -363,8 +345,15 @@ class Quarters(ItemInventoryMixin):
             text="Close",
             font=("Arial", 14),
             width=15,
-            command=storage_window.destroy,
+            command=panel.close,
         ).pack(pady=20)
+
+    def _close_storage_panel(self, storage_window):
+        panel = getattr(storage_window, "_panel", None)
+        if panel is not None:
+            panel.close()
+        else:
+            storage_window.destroy()
 
     def _take_item(self, locker_index, storage_window):
         locker_inventory = ensure_locker_inventory(self.player_data)
@@ -400,14 +389,9 @@ class Quarters(ItemInventoryMixin):
         else:
             player_inventory.append(taken_item)
 
-        messagebox.showinfo(
-            "Item Taken",
-            f"You took the {item_name}.",
-            parent=self.quarters_window,
-        )
         note_text = f"Took {item_name}" + (f" ({item_id})" if item_id else "") + " from locker."
         add_note(self.player_data, note_text)
-        storage_window.destroy()
+        self._close_storage_panel(storage_window)
         self.show_storage()
 
     def _store_item(self, item_index, storage_window):
@@ -427,36 +411,19 @@ class Quarters(ItemInventoryMixin):
 
         del player_inventory[item_index]
         if isinstance(item_to_store, dict):
-            locker_inventory.append(item_to_store.copy())
+            locker_inventory.insert(0, item_to_store.copy())
         else:
-            locker_inventory.append(item_to_store)
-
-        messagebox.showinfo(
-            "Item Stored",
-            f"You placed the {item_name} in the storage locker.",
-            parent=self.quarters_window,
-        )
+            locker_inventory.insert(0, item_to_store)
 
         note_text = f"Stored {item_name}" + (f" ({item_id})" if item_id else "") + " in locker."
         add_note(self.player_data, note_text)
 
-        storage_window.destroy()
+        self._close_storage_panel(storage_window)
         self.show_storage()
 
     def show_computer(self):
-        computer_window = tk.Toplevel(self.quarters_window)
-        computer_window.title("Computer Terminal")
-        computer_window.geometry("400x300")
-        computer_window.configure(bg="black")
-        computer_window.transient(self.quarters_window)
-        computer_window.grab_set()
-
-        computer_window.update_idletasks()
-        width = 400
-        height = 300
-        x = (computer_window.winfo_screenwidth() // 2) - (width // 2)
-        y = (computer_window.winfo_screenheight() // 2) - (height // 2)
-        computer_window.geometry(f"{width}x{height}+{x}+{y}")
+        panel, computer_window = open_modal_panel(self.quarters_window, title="Computer Terminal")
+        computer_window._panel = panel
 
         tk.Label(
             computer_window,
@@ -482,7 +449,7 @@ class Quarters(ItemInventoryMixin):
             text="Turn Off Computer",
             font=("Arial", 14),
             width=15,
-            command=computer_window.destroy,
+            command=panel.close,
         ).pack(pady=10)
 
     def _open_stock_market(self, computer_window):
@@ -528,27 +495,24 @@ class Quarters(ItemInventoryMixin):
 
         self.player_data = updated_data
 
-        if "stock_holdings" in updated_data:
-            companies = self.player_data.get("stock_market", {}).get("companies", [])
-            sync_holdings_to_companies(companies, updated_data["stock_holdings"])
+        # Holdings are already on player_data; skip syncing onto serialized company dicts
 
-        if computer_window.winfo_exists():
-            computer_window.lift()
-
+        try:
+            if computer_window.winfo_exists():
+                computer_window.lift()
+                computer_window.focus_force()
+        except tk.TclError:
+            pass
     def view_character_sheet(self):
-        sheet_window = tk.Toplevel(self.quarters_window)
-        sheet_window.title("Character Sheet")
-        sheet_window.geometry("800x700")
-        sheet_window.configure(bg="black")
-        sheet_window.transient(self.quarters_window)
-        sheet_window.grab_set()
+        panel, sheet_window = open_modal_panel(self.quarters_window, title="Character Sheet")
 
-        sheet_window.update_idletasks()
-        width = 800
-        height = 700
-        x = (sheet_window.winfo_screenwidth() // 2) - (width // 2)
-        y = (sheet_window.winfo_screenheight() // 2) - (height // 2)
-        sheet_window.geometry(f"{width}x{height}+{x}+{y}")
+        tk.Button(
+            sheet_window,
+            text="Close",
+            font=("Arial", 14),
+            width=15,
+            command=panel.close,
+        ).pack(side=tk.BOTTOM, pady=20)
 
         render_character_sheet(
             sheet_window,
@@ -558,28 +522,8 @@ class Quarters(ItemInventoryMixin):
             on_notes=self._show_notes_popup,
         )
 
-        tk.Button(
-            sheet_window,
-            text="Close",
-            font=("Arial", 14),
-            width=15,
-            command=sheet_window.destroy,
-        ).pack(pady=30)
-
     def show_holdings_popup(self):
-        popup = tk.Toplevel(self.quarters_window)
-        popup.title("Stock Holdings")
-        popup.geometry("400x400")
-        popup.configure(bg="black")
-        popup.transient(self.quarters_window)
-        popup.grab_set()
-
-        popup.update_idletasks()
-        width = 400
-        height = 400
-        x = (popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (popup.winfo_screenheight() // 2) - (height // 2)
-        popup.geometry(f"{width}x{height}+{x}+{y}")
+        panel, popup = open_modal_panel(self.quarters_window, title="Stock Holdings")
 
         tk.Label(
             popup,
@@ -618,23 +562,11 @@ class Quarters(ItemInventoryMixin):
             text="Close",
             font=("Arial", 12),
             width=10,
-            command=popup.destroy,
+            command=panel.close,
         ).pack(pady=10)
 
     def _show_notes_popup(self):
-        popup = tk.Toplevel(self.quarters_window)
-        popup.title("Character Notes")
-        popup.geometry("600x500")
-        popup.configure(bg="black")
-        popup.transient(self.quarters_window)
-        popup.grab_set()
-
-        popup.update_idletasks()
-        width = 600
-        height = 500
-        x = (popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (popup.winfo_screenheight() // 2) - (height // 2)
-        popup.geometry(f"{width}x{height}+{x}+{y}")
+        panel, popup = open_modal_panel(self.quarters_window, title="Character Notes")
 
         tk.Label(
             popup,
@@ -687,12 +619,17 @@ class Quarters(ItemInventoryMixin):
             text="Close",
             font=("Arial", 12),
             width=10,
-            command=popup.destroy,
+            command=panel.close,
         ).pack(pady=10)
 
     def save_and_exit(self):
         self.player_data["_exit_to_menu"] = True
         self.on_closing()
+
+    def quit_without_save(self):
+        """Window X: quit the app without persisting."""
+        self.player_data["_quit_without_save"] = True
+        leave_room(self.return_callback, self.player_data, self.station_crew)
 
     def on_closing(self):
         leave_room(self.return_callback, self.player_data, self.station_crew)

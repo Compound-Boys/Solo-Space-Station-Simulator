@@ -4,8 +4,9 @@ import tkinter as tk
 from tkinter import messagebox
 
 from game.helper_methods.door_control import can_control_door, is_door_locked
+from game.helper_methods.ui_panels import open_modal_panel
 
-ROOM_GEOMETRY = "800x600"
+ROOM_GEOMETRY = "1012x759"
 
 
 def add_note(player_data, text):
@@ -58,21 +59,8 @@ def player_has_subdepartment_access(player_data, allowed_subdepartments):
 
 
 def show_crew_manifest(parent_window, player_data, station_crew):
-    """Display the crew manifest with department listings, including NPCs."""
-    manifest_window = tk.Toplevel(parent_window)
-    manifest_window.title("Crew Manifest")
-    manifest_window.geometry("600x500")
-    manifest_window.configure(bg="black")
-    manifest_window.transient(parent_window)
-    manifest_window.grab_set()
-
-    # Center the popup
-    manifest_window.update_idletasks()
-    width = 600
-    height = 500
-    x = (manifest_window.winfo_screenwidth() // 2) - (width // 2)
-    y = (manifest_window.winfo_screenheight() // 2) - (height // 2)
-    manifest_window.geometry(f"{width}x{height}+{x}+{y}")
+    """Display the crew manifest as an in-main-window overlay."""
+    panel, manifest_window = open_modal_panel(parent_window, title="Crew Manifest")
 
     title_label = tk.Label(
         manifest_window,
@@ -152,22 +140,18 @@ def show_crew_manifest(parent_window, player_data, station_crew):
 
     manifest_window.bind("<MouseWheel>", _on_manifest_mousewheel)
 
-    orig_destroy = manifest_window.destroy
-
-    def _destroy_and_cleanup():
+    def _close():
         try:
             manifest_window.unbind("<MouseWheel>")
-        except Exception:
+        except tk.TclError:
             pass
-        orig_destroy()
-
-    manifest_window.destroy = _destroy_and_cleanup
+        panel.close()
 
     close_btn = tk.Button(
         manifest_window,
         text="Close",
         font=("Arial", 12),
-        command=manifest_window.destroy,
+        command=_close,
     )
     close_btn.pack(pady=10)
 

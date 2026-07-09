@@ -6,8 +6,8 @@ from game.helper_methods.door_control import can_control_door, toggle_door_lock 
 from game.objects.items import get_item_definition
 from game.helper_methods.power_constants import SYSTEM_POWER_RATES
 from game.special_rooms.shared import add_note, open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
-
-DOOR_KEY = "6,3"
+from game.helper_methods.ui_panels import open_modal_panel, report_message
+from game.maps.donut import ENGINEERING_KEY as DOOR_KEY
 
 class Engineering:
     def __init__(self, parent_window, player_data, station_crew, return_callback):
@@ -55,21 +55,9 @@ class Engineering:
     
     def access_fabricator(self):
         """Open the fabricator interface using the new item system"""
-        fab_popup = tk.Toplevel(self.engineering_window)
-        fab_popup.title("Fabricator")
-        fab_popup.geometry("600x450") # Adjusted height slightly
+        _panel, fab_popup = open_modal_panel(self.engineering_window, title="Fabricator")
         fab_popup.configure(bg="black")
-        fab_popup.transient(self.engineering_window)
-        fab_popup.grab_set()
-        fab_popup.focus_force() # Ensure focus
 
-        # Center the popup
-        fab_popup.update_idletasks()
-        width = 600
-        height = 450
-        x = (fab_popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (fab_popup.winfo_screenheight() // 2) - (height // 2)
-        fab_popup.geometry(f"{width}x{height}+{x}+{y}")
 
         # Title
         title_label = tk.Label(fab_popup, text="Station Fabricator", font=("Arial", 18), bg="black", fg="white")
@@ -327,14 +315,7 @@ class Engineering:
         
         if has_engineering_access:
             # Show specialized toolbox for authorized personnel
-            toolbox_window = tk.Toplevel(self.engineering_window)
-            toolbox_window.title("Engineering Toolbox")
-            toolbox_window.geometry("600x500")
-            toolbox_window.configure(bg="black")
-            
-            # Ensure this window stays on top
-            toolbox_window.transient(self.engineering_window)
-            toolbox_window.grab_set()
+            _panel, toolbox_window = open_modal_panel(self.engineering_window, title="Engineering Toolbox")
             
             # Title
             title_label = tk.Label(toolbox_window, text="Specialized Engineering Tools", font=("Arial", 18, "bold"), bg="black", fg="white")
@@ -464,14 +445,7 @@ class Engineering:
         
         if has_engineering_access:
             # Show specialized engineering panel for authorized personnel
-            panel_window = tk.Toplevel(self.engineering_window)
-            panel_window.title("Engineering Panel")
-            panel_window.geometry("600x500")
-            panel_window.configure(bg="black")
-            
-            # Ensure this window stays on top
-            panel_window.transient(self.engineering_window)
-            panel_window.grab_set()
+            _panel, panel_window = open_modal_panel(self.engineering_window, title="Engineering Panel")
             
             # Create main frame for the entire content
             main_frame = tk.Frame(panel_window, bg="black")
@@ -1007,28 +981,22 @@ class Engineering:
             self.announcement_active = True
             
             # Create the emergency announcement window
-            pa_window = tk.Toplevel(self.engineering_window)
-            pa_window.title("STATION-WIDE EMERGENCY ANNOUNCEMENT")
-            pa_window.geometry("700x600") 
+            _panel, pa_window = open_modal_panel(self.engineering_window, title="STATION-WIDE EMERGENCY ANNOUNCEMENT")
             pa_window.configure(bg="#990000")  # Red background for emergency
-            # Ensure this window stays on top
-            pa_window.transient(self.engineering_window)
-            pa_window.grab_set()
-            
             # Handle closing properly
             def close_announcement(*args):
-                # Destroy the window
+                self.announcement_active = False
                 pa_window.destroy()
-                
-                # Make sure the engineering panel is visible and focused
+
                 if hasattr(self, 'engineering_window') and self.engineering_window.winfo_exists():
-                    self.engineering_window.lift()
                     self.engineering_window.focus_force()
-                
-                # Show follow-up warning
-                messagebox.showwarning("CRITICAL SYSTEM ALERT", 
-                                     "STATION ALERT: Life support systems have been deactivated!\n\nOxygen levels will rapidly deplete. All crew will begin to suffer oxygen damage in approximately 1 minute.", 
-                                     parent=self.engineering_window)
+
+                report_message(
+                    "CRITICAL SYSTEM ALERT",
+                    "STATION ALERT: Life support systems have been deactivated!\n\nOxygen levels will rapidly deplete. All crew will begin to suffer oxygen damage in approximately 1 minute.",
+                    kind="warning",
+                    parent=self.engineering_window,
+                )
             
             # Function for blinking effect
             def toggle_bg():
@@ -1078,18 +1046,7 @@ class Engineering:
             # Bind keyboard events
             pa_window.bind("<Escape>", close_announcement)
             pa_window.bind("<Return>", close_announcement)
-            
-            # Bind window close button
-            pa_window.protocol("WM_DELETE_WINDOW", close_announcement)
-            
-            # Center the window
-            pa_window.update_idletasks()
-            width = 700  # Make sure this matches the new geometry width
-            height = 500  # Make sure this matches the new geometry height
-            x = (pa_window.winfo_screenwidth() // 2) - (width // 2)
-            y = (pa_window.winfo_screenheight() // 2) - (height // 2)
-            pa_window.geometry(f"{width}x{height}+{x}+{y}")
-            
+
             # Start blinking effect
             pa_window.after(100, toggle_bg)
             

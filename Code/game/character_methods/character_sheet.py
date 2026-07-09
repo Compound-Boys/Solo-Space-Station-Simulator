@@ -57,6 +57,22 @@ def render_character_sheet(
     )
     credits_label.pack(anchor="w", padx=10, pady=5)
 
+    alcohol_value = player_data.setdefault("alcohol_percent", 0)
+    alcohol_color = (
+        "green" if alcohol_value < 10
+        else "yellow" if alcohol_value < 30
+        else "orange" if alcohol_value < 60
+        else "red"
+    )
+    alcohol_label = tk.Label(
+        info_frame,
+        text=f"Alcohol: {alcohol_value:.1f}%",
+        font=("Arial", 14),
+        bg="black",
+        fg=alcohol_color,
+    )
+    alcohol_label.pack(anchor="w", padx=10, pady=5)
+
     button_frame = tk.Frame(info_frame, bg="black")
     button_frame.pack(anchor="w", padx=10, pady=5, fill=tk.X)
 
@@ -99,9 +115,9 @@ def render_character_sheet(
     damage_frame.pack(fill=tk.X, padx=20, pady=5)
 
     damage_types = [
-        {"name": "Burn", "key": "burn", "icon": "🔥"},
-        {"name": "Poison", "key": "poison", "icon": "☣️"},
-        {"name": "Oxygen", "key": "oxygen", "icon": "💨"},
+        {"name": "Burn", "key": "burn"},
+        {"name": "Poison", "key": "poison"},
+        {"name": "Oxygen", "key": "oxygen"},
     ]
 
     for damage_type in damage_types:
@@ -122,12 +138,14 @@ def render_character_sheet(
 
         type_label = tk.Label(
             type_frame,
-            text=f"{damage_type['icon']} {damage_type['name']}: ",
+            text=f"{damage_type['name']}:",
             font=("Arial", 12),
             bg="black",
             fg="white",
+            width=10,
+            anchor="w",
         )
-        type_label.pack(side=tk.LEFT, padx=5)
+        type_label.grid(row=0, column=0, sticky="w", padx=(5, 0))
 
         value_label = tk.Label(
             type_frame,
@@ -136,7 +154,7 @@ def render_character_sheet(
             bg="black",
             fg=color,
         )
-        value_label.pack(side=tk.LEFT)
+        value_label.grid(row=0, column=1, sticky="w")
 
         if damage_value >= 30:
             effect_text = (
@@ -153,7 +171,7 @@ def render_character_sheet(
                 bg="black",
                 fg=color,
             )
-            effect_label.pack(side=tk.LEFT, padx=5)
+            effect_label.grid(row=0, column=2, sticky="w", padx=5)
 
     limb_label = tk.Label(
         info_frame,
@@ -166,73 +184,84 @@ def render_character_sheet(
 
     limb_container = tk.Frame(info_frame, bg="black")
     limb_container.pack(fill=tk.X, padx=20, pady=5)
-
-    row1_frame = tk.Frame(limb_container, bg="black")
-    row1_frame.pack(fill=tk.X, pady=2)
-
-    row2_frame = tk.Frame(limb_container, bg="black")
-    row2_frame.pack(fill=tk.X, pady=2)
+    for col in range(3):
+        limb_container.columnconfigure(col, weight=1)
 
     limb_order = ["head", "chest", "left_arm", "right_arm", "left_leg", "right_leg"]
 
-    for limb_name in limb_order[:3]:
-        if limb_name in player_data["limbs"]:
-            health = player_data["limbs"][limb_name]
-            display_name = limb_name.replace("_", " ").title()
-            color = "green" if health > 75 else "yellow" if health > 40 else "red"
+    for index, limb_name in enumerate(limb_order):
+        if limb_name not in player_data["limbs"]:
+            continue
+        health = player_data["limbs"][limb_name]
+        display_name = limb_name.replace("_", " ").title()
+        color = "green" if health > 75 else "yellow" if health > 40 else "red"
 
-            cell = tk.Frame(row1_frame, bg="black", width=200)
-            cell.pack(side=tk.LEFT, padx=10, expand=True)
-
-            limb_health_label = tk.Label(
-                cell,
-                text=f"{display_name}: {health}%",
-                font=("Arial", 12),
-                bg="black",
-                fg=color,
-            )
-            limb_health_label.pack(side=tk.LEFT)
-
-    for limb_name in limb_order[3:]:
-        if limb_name in player_data["limbs"]:
-            health = player_data["limbs"][limb_name]
-            display_name = limb_name.replace("_", " ").title()
-            color = "green" if health > 75 else "yellow" if health > 40 else "red"
-
-            cell = tk.Frame(row2_frame, bg="black", width=200)
-            cell.pack(side=tk.LEFT, padx=10, expand=True)
-
-            limb_health_label = tk.Label(
-                cell,
-                text=f"{display_name}: {health}%",
-                font=("Arial", 12),
-                bg="black",
-                fg=color,
-            )
-            limb_health_label.pack(side=tk.LEFT)
-
-    overall_label = tk.Label(
-        info_frame, text="Overall Health:", font=("Arial", 14), bg="black", fg="white"
-    )
-    overall_label.pack(anchor="w", padx=10, pady=5)
+        limb_health_label = tk.Label(
+            limb_container,
+            text=f"{display_name}: {health}%",
+            font=("Arial", 12),
+            bg="black",
+            fg=color,
+            anchor="center",
+        )
+        limb_health_label.grid(
+            row=index // 3,
+            column=index % 3,
+            sticky="ew",
+            pady=2,
+        )
 
     limb_health = sum(player_data["limbs"].values()) / len(player_data["limbs"])
     damage_health = 100 - (
         sum(player_data["damage"].values()) / len(player_data["damage"])
     )
-    overall_health = (limb_health + damage_health) / 2
 
-    overall_color = (
-        "green" if overall_health > 75 else "yellow" if overall_health > 40 else "red"
+    def _health_color(value):
+        return "green" if value > 75 else "yellow" if value > 40 else "red"
+
+    totals_frame = tk.Frame(info_frame, bg="black")
+    totals_frame.pack(anchor="w", fill=tk.X, padx=10, pady=5)
+
+    non_limb_col = tk.Frame(totals_frame, bg="black")
+    non_limb_col.pack(side=tk.LEFT, padx=(0, 40))
+
+    non_limb_label = tk.Label(
+        non_limb_col,
+        text="Non-Limb Health:",
+        font=("Arial", 14),
+        bg="black",
+        fg="white",
     )
+    non_limb_label.pack(anchor="w")
 
-    overall_health_label = tk.Label(
-        info_frame,
-        text=f"{overall_health:.1f}%",
+    non_limb_health_label = tk.Label(
+        non_limb_col,
+        text=f"{damage_health:.1f}%",
         font=("Arial", 16, "bold"),
         bg="black",
-        fg=overall_color,
+        fg=_health_color(damage_health),
     )
-    overall_health_label.pack(anchor="w", padx=10, pady=5)
+    non_limb_health_label.pack(anchor="w", pady=5)
+
+    limb_col = tk.Frame(totals_frame, bg="black")
+    limb_col.pack(side=tk.LEFT)
+
+    limb_total_label = tk.Label(
+        limb_col,
+        text="Limb Health:",
+        font=("Arial", 14),
+        bg="black",
+        fg="white",
+    )
+    limb_total_label.pack(anchor="w")
+
+    limb_health_total_label = tk.Label(
+        limb_col,
+        text=f"{limb_health:.1f}%",
+        font=("Arial", 16, "bold"),
+        bg="black",
+        fg=_health_color(limb_health),
+    )
+    limb_health_total_label.pack(anchor="w", pady=5)
 
     return info_frame

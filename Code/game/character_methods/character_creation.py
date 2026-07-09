@@ -150,7 +150,7 @@ class CharacterCreation:
         name_label.grid(row=0, column=0, sticky="w", pady=10)
 
         self.name_entry = tk.Entry(form_frame, font=("Arial", 14), width=25)
-        self.name_entry.grid(row=0, column=1, pady=10)
+        self.name_entry.grid(row=0, column=1, sticky="w", pady=10)
 
         # Random Name button
         def set_random_name():
@@ -173,8 +173,8 @@ class CharacterCreation:
             *department_names,
             command=self.on_department_selected,
         )
-        department_menu.config(font=("Arial", 14), width=20)
-        department_menu.grid(row=1, column=1, pady=10)
+        department_menu.config(font=("Arial", 14), width=25)
+        department_menu.grid(row=1, column=1, sticky="w", pady=10)
 
         # Job selection
         job_label = tk.Label(form_frame, text="Select Job:", font=("Arial", 14), bg="black", fg="white")
@@ -230,7 +230,7 @@ class CharacterCreation:
             *options,
             command=self.update_job_information,
         )
-        job_menu.config(font=("Arial", 14), width=20)
+        job_menu.config(font=("Arial", 14), width=25)
         job_menu.pack()
 
         if select_first and options and options[0] in JOBS:
@@ -296,6 +296,7 @@ class CharacterCreation:
         self.player_data["locker_inventory"] = build_default_locker_inventory()
         self.player_data["location"] = {"x": -1, "y": 0}
         self.player_data["stock_holdings"] = {}
+        self.player_data["bar_mixed_stock"] = {}
 
         # Initialize damage stats
         self.player_data["damage"] = {
@@ -303,6 +304,7 @@ class CharacterCreation:
             "poison": 0,
             "oxygen": 0
         }
+        self.player_data["alcohol_percent"] = 0
 
         self.player_data["credits"] = job_info["credits"]
 
@@ -405,11 +407,15 @@ class CharacterCreation:
             self.player_data["stock_market"] = default_stock_market_state()
             self.player_data["stock_market"]["companies"] = serialize_companies(self.companies)
 
-        # Initialize station power - Solar panels default ON unless player can control them
-        can_control_power = job in ["Engineer", "Captain"]
+        # Solar ON when an NPC Engineer is present; OFF if the player is the Engineer
+        player_is_engineer = job == "Engineer"
+        station_has_engineer = player_is_engineer or any(
+            npc.get("job") == "Engineer" for npc in station_crew
+        )
+        solar_charging = station_has_engineer and not player_is_engineer
         self.player_data["station_power"] = {
             "battery_level": 25.0,
-            "solar_charging": not can_control_power,  # True if player can't control, False otherwise
+            "solar_charging": solar_charging,
             "last_update_time": datetime.datetime.now().isoformat(),
             "system_levels": {
                 "life_support": 10,
