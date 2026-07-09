@@ -6,7 +6,7 @@ from tkinter import messagebox
 from game.helper_methods.door_control import can_control_door, is_door_locked
 from game.helper_methods.ui_panels import open_modal_panel
 
-ROOM_GEOMETRY = "1012x759"  # 920x690 + 10%
+ROOM_GEOMETRY = "1012x759"
 
 
 def add_note(player_data, text):

@@ -50,7 +50,7 @@ class SpaceStationGame(ItemInventoryMixin):
         self.root = root
         self.base_path = base_path
         self.root.title("Space Station 13 Text Clone")
-        width, height = 1012, 759  # 920x690 + 10%
+        width, height = 1012, 759
         self.root.update_idletasks()
         x = (self.root.winfo_screenwidth() // 2) - (width // 2)
         y = (self.root.winfo_screenheight() // 2) - (height // 2)
@@ -93,6 +93,7 @@ class SpaceStationGame(ItemInventoryMixin):
                 "poison": 0,
                 "oxygen": 0
             },
+            "alcohol_percent": 0,
             "station_power": default_station_power(),
             "notes": []
         }
@@ -458,9 +459,6 @@ class SpaceStationGame(ItemInventoryMixin):
             widget.destroy()
 
         self._ensure_game_running()
-
-        # Configure window size
-        self.root.geometry("1012x886")  # 920x805 + 10%
 
         # Store the previous screen to return to
         self.previous_screen = getattr(self, 'previous_screen', 'show_hallway')

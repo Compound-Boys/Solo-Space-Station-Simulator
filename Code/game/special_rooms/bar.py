@@ -290,20 +290,39 @@ class Bar:
         # Process the order
         self.player_data['credits'] -= drink_details['price']
 
+        # Add the drink to inventory
+        drink_item = {
+            "id": f"drink_{drink_name.lower().replace(' ', '_')}",
+            "name": drink_name,
+            "description": drink_details["desc"],
+            "category": "Drink",
+            "attributes": {
+                "alcoholic": is_drink_alcoholic(drink_name, drink_details),
+            },
+            "actions": ["examine", "drink", "drop"],
+        }
+        self.player_data.setdefault("inventory", []).append(drink_item)
+
         # Update the credits display
         credits_label.config(text=f"Your credits: {self.player_data['credits']}")
 
         # Add a note about the purchase
-        add_note(self.player_data, f"Purchased {drink_name} at the bar for {drink_details['price']} credits.")
+        add_note(
+            self.player_data,
+            f"Purchased {drink_name} at the bar for {drink_details['price']} credits. Added to inventory.",
+        )
 
         # Refresh menu so quantity updates or the drink is removed
         if refresh_menu:
             refresh_menu()
 
         # Show confirmation message
-        tk.messagebox.showinfo("Order Successful",
-                           f"You've ordered a {drink_name} for {drink_details['price']} credits. Enjoy!",
-                           parent=popup)
+        tk.messagebox.showinfo(
+            "Order Successful",
+            f"You've ordered a {drink_name} for {drink_details['price']} credits. "
+            f"It has been added to your inventory.",
+            parent=popup,
+        )
     
     def socialize(self):
         """Interact with other crew members in the bar"""

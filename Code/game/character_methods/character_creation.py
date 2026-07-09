@@ -304,6 +304,7 @@ class CharacterCreation:
             "poison": 0,
             "oxygen": 0
         }
+        self.player_data["alcohol_percent"] = 0
 
         self.player_data["credits"] = job_info["credits"]
 

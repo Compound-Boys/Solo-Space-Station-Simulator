@@ -57,6 +57,22 @@ def render_character_sheet(
     )
     credits_label.pack(anchor="w", padx=10, pady=5)
 
+    alcohol_value = player_data.setdefault("alcohol_percent", 0)
+    alcohol_color = (
+        "green" if alcohol_value < 10
+        else "yellow" if alcohol_value < 30
+        else "orange" if alcohol_value < 60
+        else "red"
+    )
+    alcohol_label = tk.Label(
+        info_frame,
+        text=f"Alcohol: {alcohol_value:.1f}%",
+        font=("Arial", 14),
+        bg="black",
+        fg=alcohol_color,
+    )
+    alcohol_label.pack(anchor="w", padx=10, pady=5)
+
     button_frame = tk.Frame(info_frame, bg="black")
     button_frame.pack(anchor="w", padx=10, pady=5, fill=tk.X)
 
