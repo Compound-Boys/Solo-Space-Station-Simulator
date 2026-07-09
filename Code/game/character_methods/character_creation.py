@@ -3,7 +3,8 @@ import datetime
 import random
 from tkinter import messagebox
 
-from game.stock_market import default_stock_market_state, serialize_companies
+from game.objects.items import build_default_locker_inventory
+from game.helper_methods.stock_market import default_stock_market_state, serialize_companies
 
 # List of potential NPC names
 NPC_NAMES = [
@@ -187,7 +188,7 @@ class CharacterCreation:
         credits_label = tk.Label(form_frame, text="Starting Credits:", font=("Arial", 14), bg="black", fg="white")
         credits_label.grid(row=3, column=0, sticky="w", pady=10)
 
-        self.credits_value = tk.Label(form_frame, text="—", font=("Arial", 14), bg="black", fg="white")
+        self.credits_value = tk.Label(form_frame, text="-", font=("Arial", 14), bg="black", fg="white")
         self.credits_value.grid(row=3, column=1, sticky="w", pady=10)
 
         # Job description frame
@@ -253,7 +254,7 @@ class CharacterCreation:
         """Show placeholder text when no valid job is selected."""
         if not hasattr(self, "credits_value") or not hasattr(self, "job_description"):
             return
-        self.credits_value.config(text="—")
+        self.credits_value.config(text="-")
         self.job_description.config(text="Select a department and job to see details.")
 
     def update_job_information(self, job_name):
@@ -292,6 +293,7 @@ class CharacterCreation:
         self.player_data["department"] = job_info["department"]
         self.player_data["subdepartment"] = job_info["subdepartment"]
         self.player_data["inventory"] = []
+        self.player_data["locker_inventory"] = build_default_locker_inventory()
         self.player_data["location"] = {"x": -1, "y": 0}
         self.player_data["stock_holdings"] = {}
 

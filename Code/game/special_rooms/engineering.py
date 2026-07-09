@@ -2,10 +2,12 @@ import tkinter as tk
 from tkinter import messagebox
 import datetime
 
-from game.door_control import toggle_door_lock as toggle_room_door_lock
-from game.items import get_item_definition
-from game.power_constants import SYSTEM_POWER_RATES
-from game.special_rooms.shared import add_note, open_room_in_main_window, try_leave_through_door
+from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
+from game.objects.items import get_item_definition
+from game.helper_methods.power_constants import SYSTEM_POWER_RATES
+from game.special_rooms.shared import add_note, open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
+
+DOOR_KEY = "6,3"
 
 class Engineering:
     def __init__(self, parent_window, player_data, station_crew, return_callback):
@@ -29,27 +31,8 @@ class Engineering:
         # Room actions
         self.button_frame = tk.Frame(self.engineering_window, bg="black")
         self.button_frame.pack(pady=20)
-        
-        # Check if user has special access (Engineer or Captain)
-        has_engineering_access = ("permissions" in self.player_data and self.player_data["permissions"].get("engineering_station", False)) or \
-                                 (self.player_data.get("job") == "Engineer") or \
-                                 (self.player_data.get("job") == "Captain")
-        
-        if has_engineering_access:
-            # Show station access button for authorized personnel
-            station_btn = tk.Button(self.button_frame, text="Enter Engineering Station", font=("Arial", 14), width=20, command=self.access_engineering_station)
-            station_btn.pack(pady=10)
-            
-            # Add door lock/unlock button for authorized personnel
-            door_btn = tk.Button(self.button_frame, text="Lock/Unlock Door", font=("Arial", 14), width=20, command=self.toggle_door_lock)
-            door_btn.pack(pady=10)
-            
-            # Add "Room Options" button to show regular options
-            options_btn = tk.Button(self.button_frame, text="Room Options", font=("Arial", 14), width=20, command=self.show_room_options)
-            options_btn.pack(pady=10)
-        else:
-            # Show regular options for unauthorized personnel
-            self.show_room_options()
+
+        self._build_station_menu()
         
         # Exit button
         exit_btn = tk.Button(self.engineering_window, text="Exit Room", font=("Arial", 14), width=15, command=self.on_closing)
@@ -65,12 +48,7 @@ class Engineering:
         fabricator_btn = tk.Button(self.button_frame, text="Access Fabricator", font=("Arial", 14), width=20, command=self.access_fabricator)
         fabricator_btn.pack(pady=10)
         
-        # Only show "Back to Station Menu" if player has access
-        has_engineering_access = ("permissions" in self.player_data and self.player_data["permissions"].get("engineering_station", False)) or \
-                                 (self.player_data.get("job") == "Engineer") or \
-                                 (self.player_data.get("job") == "Captain")
-        if has_engineering_access:
-            # Back to station menu button
+        if can_control_door(self.player_data, DOOR_KEY):
             back_btn = tk.Button(self.button_frame, text="Back to Station Menu", font=("Arial", 14), width=20, 
                                command=self.show_station_menu)
             back_btn.pack(pady=10)
@@ -732,7 +710,7 @@ class Engineering:
                                      font=("Arial", 10, "italic"), bg="#222222", fg="#AAAAAA", wraplength=500)
             power_draw_info.pack(anchor="w", pady=5)
             
-            # Power consumption rates for each system at max level (see power_constants.py)
+            # Power consumption rates for each system at max level (see helper_methods/power_constants.py)
             system_power_rates = SYSTEM_POWER_RATES
             
             # Dictionary to store power draw labels
@@ -1125,41 +1103,32 @@ class Engineering:
                                  parent=self.engineering_window)
     
     def toggle_door_lock(self):
-        toggle_room_door_lock(self.player_data, "6,3", self.engineering_window)
+        toggle_room_door_lock(self.player_data, DOOR_KEY, self.engineering_window)
     
     def on_closing(self):
         try_leave_through_door(
             self.engineering_window,
             self.player_data,
-            "6,3",
+            DOOR_KEY,
             self.return_callback,
             self.station_crew,
         )
 
+    def _build_station_menu(self, before_show=None):
+        render_station_menu(
+            self.button_frame,
+            self.player_data,
+            door_key=DOOR_KEY,
+            stations=[{
+                "label": "Enter Engineering Station",
+                "command": self.access_engineering_station,
+            }],
+            show_room_options=self.show_room_options,
+            toggle_door_lock=self.toggle_door_lock,
+            before_show=before_show,
+        )
+
     def show_station_menu(self):
         """Return to main station menu options"""
-        # Clear existing buttons
-        for widget in self.button_frame.winfo_children():
-            widget.destroy()
-            
-        # Check if user has special access (Engineer or Captain)
-        has_engineering_access = ("permissions" in self.player_data and self.player_data["permissions"].get("engineering_station", False)) or \
-                                 (self.player_data.get("job") == "Engineer") or \
-                                 (self.player_data.get("job") == "Captain")
-        
-        if has_engineering_access:
-            # Show station access button for authorized personnel
-            station_btn = tk.Button(self.button_frame, text="Enter Engineering Station", font=("Arial", 14), width=20, command=self.access_engineering_station)
-            station_btn.pack(pady=10)
-            
-            # Add door lock/unlock button for authorized personnel
-            door_btn = tk.Button(self.button_frame, text="Lock/Unlock Door", font=("Arial", 14), width=20, command=self.toggle_door_lock)
-            door_btn.pack(pady=10)
-            
-            # Add "Room Options" button to show regular options
-            options_btn = tk.Button(self.button_frame, text="Room Options", font=("Arial", 14), width=20, command=self.show_room_options)
-            options_btn.pack(pady=10)
-        else:
-            # Show regular options for unauthorized personnel
-            self.show_room_options()
+        self._build_station_menu()
 

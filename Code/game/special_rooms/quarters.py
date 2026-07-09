@@ -2,10 +2,11 @@ import datetime
 import tkinter as tk
 from tkinter import messagebox
 
-from game.game import Game
-from game.items import ItemInventoryMixin, get_item_definition
+from game.character_methods.character_sheet import render_character_sheet
+from game.helper_methods.game import Game
+from game.objects.items import ItemInventoryMixin, ensure_locker_inventory, get_item_definition
 from game.special_rooms.shared import add_note, leave_room, open_room_in_main_window
-from game.stock_market import StockMarket, sync_holdings_to_companies
+from game.helper_methods.stock_market import StockMarket, sync_holdings_to_companies
 
 
 class Quarters(ItemInventoryMixin):
@@ -219,35 +220,7 @@ class Quarters(ItemInventoryMixin):
         )
         inventory_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        initial_locker_item_ids = [
-            "welcome_guide",
-            "flashlight",
-            "station_map",
-            "emergency_rations",
-            "basic_tools",
-            "id_card_reader",
-            "portable_scanner",
-            "maintenance_manual",
-            "emergency_beacon",
-            "first_aid_kit",
-        ]
-
-        locker_item_defs = [
-            get_item_definition(item_id)
-            for item_id in initial_locker_item_ids
-            if get_item_definition(item_id)
-        ]
-
-        player_inventory_ids = {
-            item.get("id")
-            for item in self.player_data.get("inventory", [])
-            if isinstance(item, dict)
-        }
-        filtered_items = [
-            item_def
-            for item_def in locker_item_defs
-            if item_def.get("id") not in player_inventory_ids
-        ]
+        locker_inventory = ensure_locker_inventory(self.player_data)
 
         locker_canvas = tk.Canvas(locker_frame, bg="black", highlightthickness=0)
         locker_scrollbar = tk.Scrollbar(locker_frame, orient="vertical", command=locker_canvas.yview)
@@ -257,7 +230,7 @@ class Quarters(ItemInventoryMixin):
         locker_items_frame = tk.Frame(locker_canvas, bg="black")
         locker_canvas.create_window((0, 0), window=locker_items_frame, anchor="nw")
 
-        if not filtered_items:
+        if not locker_inventory:
             tk.Label(
                 locker_items_frame,
                 text="The storage locker is empty.",
@@ -266,7 +239,7 @@ class Quarters(ItemInventoryMixin):
                 fg="white",
             ).pack(pady=10, padx=10, anchor="w")
         else:
-            for item_def in filtered_items:
+            for locker_index, item_def in enumerate(locker_inventory):
                 item_frame = tk.Frame(
                     locker_items_frame,
                     bg="dark gray",
@@ -279,16 +252,22 @@ class Quarters(ItemInventoryMixin):
                 info_frame = tk.Frame(item_frame, bg="dark gray")
                 info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor="w")
 
+                name_text = str(item_def)
+                description = ""
+                if isinstance(item_def, dict):
+                    name_text = item_def.get("name", "Unknown Item")
+                    description = item_def.get("description", "")
+
                 tk.Label(
                     info_frame,
-                    text=item_def.get("name", "Unknown Item"),
+                    text=name_text,
                     font=("Arial", 12, "bold"),
                     bg="dark gray",
                 ).pack(anchor="w", padx=10, pady=(5, 0))
 
                 tk.Label(
                     info_frame,
-                    text=item_def.get("description", ""),
+                    text=description,
                     font=("Arial", 10),
                     bg="dark gray",
                     wraplength=200,
@@ -301,8 +280,8 @@ class Quarters(ItemInventoryMixin):
                     button_frame,
                     text="Take",
                     font=("Arial", 10),
-                    command=lambda item_id=item_def.get("id"), sw=storage_window: self._take_item(
-                        item_id, sw
+                    command=lambda index=locker_index, sw=storage_window: self._take_item(
+                        index, sw
                     ),
                 ).pack()
 
@@ -387,46 +366,53 @@ class Quarters(ItemInventoryMixin):
             command=storage_window.destroy,
         ).pack(pady=20)
 
-    def _take_item(self, item_id, storage_window):
-        if not item_id:
-            messagebox.showerror("Error", "Invalid item ID provided.", parent=self.quarters_window)
+    def _take_item(self, locker_index, storage_window):
+        locker_inventory = ensure_locker_inventory(self.player_data)
+
+        if not (0 <= locker_index < len(locker_inventory)):
+            messagebox.showerror("Error", "Invalid locker item.", parent=self.quarters_window)
             return
 
-        item_def = get_item_definition(item_id)
-        if not item_def:
-            messagebox.showerror(
-                "Error",
-                f"Could not find definition for item ID: {item_id}.",
-                parent=self.quarters_window,
-            )
-            return
+        item_def = locker_inventory[locker_index]
+        item_name = str(item_def)
+        item_id = None
+        if isinstance(item_def, dict):
+            item_name = item_def.get("name", "Unknown Item")
+            item_id = item_def.get("id")
 
-        item_name = item_def.get("name", "Unknown Item")
         player_inventory = self.player_data.setdefault("inventory", [])
-        has_item = any(
-            isinstance(inv_item, dict) and inv_item.get("id") == item_id
-            for inv_item in player_inventory
-        )
+        if item_id:
+            has_item = any(
+                isinstance(inv_item, dict) and inv_item.get("id") == item_id
+                for inv_item in player_inventory
+            )
+            if has_item:
+                messagebox.showinfo(
+                    "Already Have It",
+                    f"You already have a {item_name}.",
+                    parent=self.quarters_window,
+                )
+                return
 
-        if not has_item:
-            player_inventory.append(item_def)
-            messagebox.showinfo(
-                "Item Taken",
-                f"You took the {item_name}.",
-                parent=self.quarters_window,
-            )
-            add_note(self.player_data, f"Took {item_name} ({item_id}) from locker.")
-            storage_window.destroy()
-            self.show_storage()
+        taken_item = locker_inventory.pop(locker_index)
+        if isinstance(taken_item, dict):
+            player_inventory.append(taken_item.copy())
         else:
-            messagebox.showinfo(
-                "Already Have It",
-                f"You already have a {item_name}.",
-                parent=self.quarters_window,
-            )
+            player_inventory.append(taken_item)
+
+        messagebox.showinfo(
+            "Item Taken",
+            f"You took the {item_name}.",
+            parent=self.quarters_window,
+        )
+        note_text = f"Took {item_name}" + (f" ({item_id})" if item_id else "") + " from locker."
+        add_note(self.player_data, note_text)
+        storage_window.destroy()
+        self.show_storage()
 
     def _store_item(self, item_index, storage_window):
         player_inventory = self.player_data.get("inventory", [])
+        locker_inventory = ensure_locker_inventory(self.player_data)
 
         if not (0 <= item_index < len(player_inventory)):
             messagebox.showerror("Error", "Invalid item index.", parent=self.quarters_window)
@@ -440,6 +426,11 @@ class Quarters(ItemInventoryMixin):
             item_id = item_to_store.get("id")
 
         del player_inventory[item_index]
+        if isinstance(item_to_store, dict):
+            locker_inventory.append(item_to_store.copy())
+        else:
+            locker_inventory.append(item_to_store)
+
         messagebox.showinfo(
             "Item Stored",
             f"You placed the {item_name} in the storage locker.",
@@ -559,177 +550,13 @@ class Quarters(ItemInventoryMixin):
         y = (sheet_window.winfo_screenheight() // 2) - (height // 2)
         sheet_window.geometry(f"{width}x{height}+{x}+{y}")
 
-        tk.Label(
+        render_character_sheet(
             sheet_window,
-            text="Character Sheet",
-            font=("Arial", 24),
-            bg="black",
-            fg="white",
-        ).pack(pady=20)
-
-        info_frame = tk.Frame(sheet_window, bg="black")
-        info_frame.pack(pady=10)
-
-        tk.Label(
-            info_frame,
-            text=f"Name: {self.player_data['name']}",
-            font=("Arial", 14),
-            bg="black",
-            fg="white",
-        ).pack(anchor="w", padx=10, pady=5)
-
-        tk.Label(
-            info_frame,
-            text=f"Job: {self.player_data['job']}",
-            font=("Arial", 14),
-            bg="black",
-            fg="white",
-        ).pack(anchor="w", padx=10, pady=5)
-
-        department = self.player_data.get("department", "Unknown")
-        tk.Label(
-            info_frame,
-            text=f"Department: {department}",
-            font=("Arial", 14),
-            bg="black",
-            fg="white",
-        ).pack(anchor="w", padx=10, pady=5)
-
-        tk.Label(
-            info_frame,
-            text=f"Credits: {self.player_data['credits']:.2f}",
-            font=("Arial", 14),
-            bg="black",
-            fg="white",
-        ).pack(anchor="w", padx=10, pady=5)
-
-        button_frame = tk.Frame(info_frame, bg="black")
-        button_frame.pack(anchor="w", padx=10, pady=5, fill=tk.X)
-
-        inv_count = len(self.player_data.get("inventory", []))
-        tk.Button(
-            button_frame,
-            text=f"View Inventory ({inv_count} items)",
-            font=("Arial", 12),
-            width=20,
-            command=self.show_inventory_popup,
-        ).pack(side=tk.LEFT, padx=5, pady=5)
-
-        holdings_count = len(self.player_data.get("stock_holdings", {}))
-        tk.Button(
-            button_frame,
-            text=f"View Stock Holdings ({holdings_count})",
-            font=("Arial", 12),
-            width=20,
-            command=self.show_holdings_popup,
-        ).pack(side=tk.LEFT, padx=5, pady=5)
-
-        notes_count = len(self.player_data.get("notes", []))
-        tk.Button(
-            button_frame,
-            text=f"View Notes ({notes_count})",
-            font=("Arial", 12),
-            width=15,
-            command=self._show_notes_popup,
-        ).pack(side=tk.LEFT, padx=5, pady=5)
-
-        tk.Label(
-            info_frame,
-            text="Overall Damage:",
-            font=("Arial", 14),
-            bg="black",
-            fg="white",
-        ).pack(anchor="w", padx=10, pady=5)
-
-        damage_frame = tk.Frame(info_frame, bg="black")
-        damage_frame.pack(fill=tk.X, padx=20, pady=5)
-
-        damage_types = [
-            {"name": "Burn", "key": "burn", "icon": "Fire"},
-            {"name": "Poison", "key": "poison", "icon": "Toxin"},
-            {"name": "Oxygen", "key": "oxygen", "icon": "Air"},
-        ]
-
-        for damage_type in damage_types:
-            damage_value = self.player_data["damage"].get(damage_type["key"], 0)
-            color = (
-                "green"
-                if damage_value < 10
-                else "yellow"
-                if damage_value < 30
-                else "orange"
-                if damage_value < 60
-                else "red"
-            )
-
-            type_frame = tk.Frame(damage_frame, bg="black")
-            type_frame.pack(anchor="w", fill=tk.X, pady=2)
-
-            tk.Label(
-                type_frame,
-                text=f"{damage_type['icon']} {damage_type['name']}: ",
-                font=("Arial", 12),
-                bg="black",
-                fg="white",
-            ).pack(side=tk.LEFT, padx=5)
-
-            tk.Label(
-                type_frame,
-                text=f"{damage_value:.1f}%",
-                font=("Arial", 12),
-                bg="black",
-                fg=color,
-            ).pack(side=tk.LEFT)
-
-        tk.Label(
-            info_frame,
-            text="Limb Health (Blunt Damage):",
-            font=("Arial", 14),
-            bg="black",
-            fg="white",
-        ).pack(anchor="w", padx=10, pady=5)
-
-        limb_frame = tk.Frame(info_frame, bg="black")
-        limb_frame.pack(fill=tk.X, padx=20, pady=5)
-
-        limb_order = ["head", "chest", "left_arm", "right_arm", "left_leg", "right_leg"]
-        for limb_name in limb_order:
-            if limb_name in self.player_data["limbs"]:
-                health = self.player_data["limbs"][limb_name]
-                display_name = limb_name.replace("_", " ").title()
-                color = "green" if health > 75 else "yellow" if health > 40 else "red"
-                tk.Label(
-                    limb_frame,
-                    text=f"{display_name}: {health}%",
-                    font=("Arial", 12),
-                    bg="black",
-                    fg=color,
-                ).pack(anchor="w", pady=2)
-
-        limb_health = sum(self.player_data["limbs"].values()) / len(self.player_data["limbs"])
-        damage_health = 100 - (
-            sum(self.player_data["damage"].values()) / len(self.player_data["damage"])
+            self.player_data,
+            on_inventory=self.show_inventory_popup,
+            on_holdings=self.show_holdings_popup,
+            on_notes=self._show_notes_popup,
         )
-        overall_health = (limb_health + damage_health) / 2
-        overall_color = (
-            "green" if overall_health > 75 else "yellow" if overall_health > 40 else "red"
-        )
-
-        tk.Label(
-            info_frame,
-            text="Overall Health:",
-            font=("Arial", 14),
-            bg="black",
-            fg="white",
-        ).pack(anchor="w", padx=10, pady=5)
-
-        tk.Label(
-            info_frame,
-            text=f"{overall_health:.1f}%",
-            font=("Arial", 16, "bold"),
-            bg="black",
-            fg=overall_color,
-        ).pack(anchor="w", padx=10, pady=5)
 
         tk.Button(
             sheet_window,
