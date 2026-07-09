@@ -348,6 +348,7 @@ class CharacterCreation:
             "oxygen": 0
         }
         self.player_data["alcohol_percent"] = 0
+        self.player_data["warrant"] = False
 
         self.player_data["credits"] = job_info["credits"]
 
@@ -392,6 +393,7 @@ class CharacterCreation:
                     "right_leg": 100, "chest": 100, "head": 100,
                 },
                 "damage": {"burn": 0, "poison": 0, "oxygen": 0},
+                "warrant": False,
                 "permissions": permissions_for_job("Staff Assistant"),
             }
 
@@ -414,6 +416,7 @@ class CharacterCreation:
                     "right_leg": 100, "chest": 100, "head": 100,
                 },
                 "damage": {"burn": 0, "poison": 0, "oxygen": 0},
+                "warrant": False,
                 "permissions": permissions_for_job("Captain"),
             }
             station_crew.append(captain_data)
@@ -443,6 +446,7 @@ class CharacterCreation:
                             "right_leg": 100, "chest": 100, "head": 100,
                         },
                         "damage": {"burn": 0, "poison": 0, "oxygen": 0},
+                        "warrant": False,
                         "permissions": {
                             s: (j == npc_job)
                             for j, d in department_heads.items()

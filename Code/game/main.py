@@ -107,6 +107,7 @@ class SpaceStationGame(ItemInventoryMixin):
                 "oxygen": 0
             },
             "alcohol_percent": 0,
+            "warrant": False,
             "station_power": default_station_power(),
             "notes": []
         }

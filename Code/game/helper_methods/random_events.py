@@ -58,9 +58,15 @@ def trigger_random_event(game):
         },
         {
             "type": "neutral",
-            "title": "Maintenance",
-            "desc": "A maintenance drone passes by, cleaning the hallway.",
-            "effect": lambda: None,
+            "title": "Bot Moves By",
+            "desc": "A station bot rolls past you in the hallway.",
+            "effect": lambda: bot_moves_by(game),
+        },
+        {
+            "type": "neutral",
+            "title": "Vending Machine Malfunction",
+            "desc": "A nearby vending machine sputters and flashes error lights.",
+            "effect": lambda: vending_machine_malfunction(game),
         },
         # Bad events - now all include blunt damage
         {
@@ -292,3 +298,149 @@ def station_announcement(game):
         "Station Announcement",
         f"The PA system crackles: '{announcement}'",
     )
+
+
+def heal_limb(game, limb, min_heal, max_heal):
+    """Restore health to a specific limb within range."""
+    if limb not in game.player_data["limbs"]:
+        return
+
+    amount = random.randint(min_heal, max_heal)
+    original = game.player_data["limbs"][limb]
+    game.player_data["limbs"][limb] = min(100, original + amount)
+    new_health = game.player_data["limbs"][limb]
+    limb_name = limb.replace("_", " ").title()
+    healed = new_health - original
+
+    _report_effect(
+        game,
+        "Medical Treatment",
+        f"Your {limb_name} was healed by {healed}% and is now at {new_health}%.",
+    )
+    game.add_note(
+        f"Medical bot healed {limb_name}: +{healed}% "
+        f"(from {original}% to {new_health}%)"
+    )
+
+
+def heal_damage_type(game, damage_key, label, min_heal, max_heal):
+    """Reduce a damage type by a random amount within range."""
+    amount = random.randint(min_heal, max_heal)
+    original = game.player_data["damage"].get(damage_key, 0)
+    game.player_data["damage"][damage_key] = max(0, original - amount)
+    new_value = game.player_data["damage"][damage_key]
+    healed = original - new_value
+
+    _report_effect(
+        game,
+        "Medical Treatment",
+        f"Your {label.lower()} damage was reduced by {healed}% "
+        f"(now {new_value}%).",
+    )
+    game.add_note(
+        f"Medical bot treated {label.lower()} damage: -{healed}% "
+        f"(from {original}% to {new_value}%)"
+    )
+
+
+def medical_bot_heal(game):
+    """Heal one random damaged limb or damage type by 5–10%."""
+    candidates = []
+
+    for limb, health in game.player_data.get("limbs", {}).items():
+        if health < 100:
+            candidates.append(("limb", limb))
+
+    for damage_key, label in (("burn", "Burn"), ("poison", "Poison"), ("oxygen", "Oxygen")):
+        if game.player_data.get("damage", {}).get(damage_key, 0) > 0:
+            candidates.append(("damage", damage_key, label))
+
+    if not candidates:
+        _report_effect(
+            game,
+            "Medical Bot",
+            "A medical bot scans you, finds nothing to treat, and rolls away.",
+        )
+        return
+
+    choice = random.choice(candidates)
+    if choice[0] == "limb":
+        heal_limb(game, choice[1], 5, 10)
+    else:
+        heal_damage_type(game, choice[1], choice[2], 5, 10)
+
+
+def bot_moves_by(game):
+    """A maintenance, security, or medical bot passes by."""
+    bot = random.choice(["maintenance", "security", "medical"])
+
+    if bot == "maintenance":
+        _report_effect(
+            game,
+            "Maintenance Bot",
+            "A maintenance bot rolls past, scrubbing the floor as it goes.",
+        )
+    elif bot == "security":
+        if game.player_data.get("warrant", False):
+            _report_effect(
+                game,
+                "Security Bot",
+                "A security bot locks onto you. You are wanted.",
+            )
+            game.add_note("Encountered a security bot while wanted.")
+        else:
+            _report_effect(
+                game,
+                "Security Bot",
+                "A security bot scans you briefly and continues on its patrol.",
+            )
+    else:
+        _report_effect(
+            game,
+            "Medical Bot",
+            "A medical bot stops beside you and runs a quick diagnostic.",
+        )
+        medical_bot_heal(game)
+
+
+def add_snack(game):
+    """Add a Snack item to the player's inventory."""
+    item_def = get_item_definition("snack")
+    if not item_def:
+        messagebox.showerror("Error", "Could not find definition for snack.")
+        return
+
+    game.player_data.setdefault("inventory", [])
+    game.player_data["inventory"].append(item_def)
+    _report_effect(
+        game,
+        "Free Snack",
+        "You found a free Snack and added it to your inventory.",
+    )
+    game.add_note("Found a Snack from a vending machine and added it to inventory.")
+
+
+def vending_machine_malfunction(game):
+    """One of three vending machine outcomes."""
+    outcome = random.choice(["spit_out", "stuck", "free_snack"])
+
+    if outcome == "spit_out":
+        _report_effect(
+            game,
+            "Vending Machine",
+            "The machine violently spits something out at you!",
+        )
+        damage_random_limb(game, 1, 5)
+    elif outcome == "stuck":
+        _report_effect(
+            game,
+            "Vending Machine",
+            "You see a snack stuck against the glass, just out of reach.",
+        )
+    else:
+        _report_effect(
+            game,
+            "Vending Machine",
+            "The machine clunks and a free snack drops into the tray.",
+        )
+        add_snack(game)
