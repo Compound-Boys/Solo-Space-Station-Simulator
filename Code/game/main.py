@@ -16,6 +16,7 @@ from game.game import Game
 from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany, Quarters
 from game.items import get_item_definition, ALL_ITEMS, ItemInventoryMixin
 from game.character_creation import CharacterCreation
+from game.character_sheet import render_character_sheet
 from game.power_constants import (
     LOW_POWER_SYSTEM_LEVELS,
     HIGH_MODE_SOLAR_DRAIN,
@@ -502,168 +503,23 @@ class SpaceStationGame(ItemInventoryMixin):
             widget.destroy()
 
         self._ensure_game_running()
-        
+
         # Configure window size
         self.root.geometry("800x700")  # Increased height to accommodate all content
-        
-        # Title
-        title_label = tk.Label(self.root, text="Character Sheet", font=("Arial", 24), bg="black", fg="white")
-        title_label.pack(pady=20)
-        
-        # Character info
-        info_frame = tk.Frame(self.root, bg="black")
-        info_frame.pack(pady=10)
-        
-        # Name and job
-        name_label = tk.Label(info_frame, text=f"Name: {self.player_data['name']}", font=("Arial", 14), bg="black", fg="white")
-        name_label.pack(anchor="w", padx=10, pady=5)
-        
-        job_label = tk.Label(info_frame, text=f"Job: {self.player_data['job']}", font=("Arial", 14), bg="black", fg="white")
-        job_label.pack(anchor="w", padx=10, pady=5)
 
-        department = self.player_data.get("department", "Unknown")
-        department_label = tk.Label(info_frame, text=f"Department: {department}", font=("Arial", 14), bg="black", fg="white")
-        department_label.pack(anchor="w", padx=10, pady=5)
-        
-        # Credits (displayed to 2 decimal places)
-        credits_label = tk.Label(info_frame, text=f"Credits: {self.player_data['credits']:.2f}", font=("Arial", 14), bg="black", fg="white")
-        credits_label.pack(anchor="w", padx=10, pady=5)
-        
-        # Buttons for inventory, stock holdings, and notes
-        button_frame = tk.Frame(info_frame, bg="black")
-        button_frame.pack(anchor="w", padx=10, pady=5, fill=tk.X)
-        
-        # Inventory button
-        inv_count = len(self.player_data.get('inventory', []))
-        inv_btn = tk.Button(button_frame, text=f"View Inventory ({inv_count} items)", 
-                          font=("Arial", 12), width=20, command=self.show_inventory_popup)
-        inv_btn.pack(side=tk.LEFT, padx=5, pady=5)
-        
-        # Stock holdings button
-        holdings_count = len(self.player_data.get('stock_holdings', {}))
-        stock_btn = tk.Button(button_frame, text=f"View Stock Holdings ({holdings_count})", 
-                            font=("Arial", 12), width=20, command=self.show_holdings_popup)
-        stock_btn.pack(side=tk.LEFT, padx=5, pady=5)
-        
-        # Notes button
-        notes_count = len(self.player_data.get('notes', []))
-        notes_btn = tk.Button(button_frame, text=f"View Notes ({notes_count})", 
-                            font=("Arial", 12), width=15, command=self.show_notes_popup)
-        notes_btn.pack(side=tk.LEFT, padx=5, pady=5)
-        
-        # Damage section - for non-limb specific damage
-        damage_label = tk.Label(info_frame, text="Overall Damage:", font=("Arial", 14), bg="black", fg="white")
-        damage_label.pack(anchor="w", padx=10, pady=5)
-        
-        # Create a frame for overall damage types
-        damage_frame = tk.Frame(info_frame, bg="black")
-        damage_frame.pack(fill=tk.X, padx=20, pady=5)
-        
-        # Show overall damage types
-        damage_types = [
-            {"name": "Burn", "key": "burn", "icon": "🔥"},
-            {"name": "Poison", "key": "poison", "icon": "☣️"},
-            {"name": "Oxygen", "key": "oxygen", "icon": "💨"}
-        ]
-        
-        for damage_type in damage_types:
-            damage_value = self.player_data["damage"].get(damage_type["key"], 0)
-            
-            # Color based on damage level
-            color = "green" if damage_value < 10 else "yellow" if damage_value < 30 else "orange" if damage_value < 60 else "red"
-            
-            # Create frame for this damage type
-            type_frame = tk.Frame(damage_frame, bg="black")
-            type_frame.pack(anchor="w", fill=tk.X, pady=2)
-            
-            # Icon and name
-            type_label = tk.Label(type_frame, text=f"{damage_type['icon']} {damage_type['name']}: ", 
-                               font=("Arial", 12), bg="black", fg="white")
-            type_label.pack(side=tk.LEFT, padx=5)
-            
-            # Damage value with color
-            value_label = tk.Label(type_frame, text=f"{damage_value:.1f}%", 
-                                font=("Arial", 12), bg="black", fg=color)
-            value_label.pack(side=tk.LEFT)
-            
-            # Description of effects
-            if damage_value >= 30:
-                effect_text = "Severe" if damage_value >= 70 else "Moderate" if damage_value >= 50 else "Mild"
-                effect_label = tk.Label(type_frame, text=f" - {effect_text} effects", 
-                                     font=("Arial", 12, "italic"), bg="black", fg=color)
-                effect_label.pack(side=tk.LEFT, padx=5)
-        
-        # Limb health - horizontal layout
-        limb_label = tk.Label(info_frame, text="Limb Health (Blunt Damage):", font=("Arial", 14), bg="black", fg="white")
-        limb_label.pack(anchor="w", padx=10, pady=5)
-        
-        # Create a frame for the horizontal limb health display
-        limb_frame = tk.Frame(info_frame, bg="black")
-        limb_frame.pack(fill=tk.X, padx=20, pady=5)
-        
-        # Create a 2x3 grid for the 6 limbs
-        row1_frame = tk.Frame(limb_frame, bg="black")
-        row1_frame.pack(fill=tk.X, pady=2)
-        
-        row2_frame = tk.Frame(limb_frame, bg="black")
-        row2_frame.pack(fill=tk.X, pady=2)
-        
-        # Sort limbs into logical order
-        limb_order = ["head", "chest", "left_arm", "right_arm", "left_leg", "right_leg"]
-        
-        # First row: Head, Chest, Left Arm
-        for i, limb_name in enumerate(limb_order[:3]):
-            if limb_name in self.player_data['limbs']:
-                health = self.player_data['limbs'][limb_name]
-                display_name = limb_name.replace('_', ' ').title()
-                
-                # Change color based on health
-                color = "green" if health > 75 else "yellow" if health > 40 else "red"
-                
-                limb_frame = tk.Frame(row1_frame, bg="black", width=200)
-                limb_frame.pack(side=tk.LEFT, padx=10, expand=True)
-                
-                limb_health_label = tk.Label(limb_frame, text=f"{display_name}: {health}%", 
-                                         font=("Arial", 12), bg="black", fg=color)
-                limb_health_label.pack(side=tk.LEFT)
-        
-        # Second row: Right Arm, Left Leg, Right Leg
-        for i, limb_name in enumerate(limb_order[3:]):
-            if limb_name in self.player_data['limbs']:
-                health = self.player_data['limbs'][limb_name]
-                display_name = limb_name.replace('_', ' ').title()
-                
-                # Change color based on health
-                color = "green" if health > 75 else "yellow" if health > 40 else "red"
-                
-                limb_frame = tk.Frame(row2_frame, bg="black", width=200)
-                limb_frame.pack(side=tk.LEFT, padx=10, expand=True)
-                
-                limb_health_label = tk.Label(limb_frame, text=f"{display_name}: {health}%", 
-                                         font=("Arial", 12), bg="black", fg=color)
-                limb_health_label.pack(side=tk.LEFT)
-        
-        # Overall health calculation
-        overall_label = tk.Label(info_frame, text="Overall Health:", font=("Arial", 14), bg="black", fg="white")
-        overall_label.pack(anchor="w", padx=10, pady=5)
-        
-        # Calculate overall health as an average of limb health and damage types
-        limb_health = sum(self.player_data["limbs"].values()) / len(self.player_data["limbs"])
-        damage_health = 100 - (sum(self.player_data["damage"].values()) / len(self.player_data["damage"]))
-        overall_health = (limb_health + damage_health) / 2
-        
-        # Color based on overall health
-        overall_color = "green" if overall_health > 75 else "yellow" if overall_health > 40 else "red"
-        
-        overall_health_label = tk.Label(info_frame, text=f"{overall_health:.1f}%", 
-                                     font=("Arial", 16, "bold"), bg="black", fg=overall_color)
-        overall_health_label.pack(anchor="w", padx=10, pady=5)
-        
+        render_character_sheet(
+            self.root,
+            self.player_data,
+            on_inventory=self.show_inventory_popup,
+            on_holdings=self.show_holdings_popup,
+            on_notes=self.show_notes_popup,
+        )
+
         # Store the previous screen to return to
         self.previous_screen = getattr(self, 'previous_screen', 'show_hallway')
-        
+
         # Return button that goes back to the previous screen
-        return_btn = tk.Button(self.root, text="Return", font=("Arial", 14), width=15, 
+        return_btn = tk.Button(self.root, text="Return", font=("Arial", 14), width=15,
                              command=lambda: getattr(self, self.previous_screen)())
         return_btn.pack(pady=30)  # Increased padding to ensure button is visible
     
