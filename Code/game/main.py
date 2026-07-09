@@ -2,11 +2,13 @@ import tkinter as tk
 import os
 import sys
 import time
+import copy
 import threading
 import datetime
 import random
 from tkinter import messagebox
 
+from game.maps import donut
 from game.helper_methods.stock_market import (
     StockMarketEngine,
     default_stock_market_state,
@@ -40,25 +42,8 @@ SPECIAL_ROOM_CLASSES = {
     "Quarters": Quarters,
 }
 
-SPECIAL_ROOM_TILES = {
-    "6,0": "Bridge",
-    "0,6": "MedBay",
-    "6,6": "Security",
-    "6,3": "Engineering",
-    "0,-1": "Bar",
-    "3,-1": "Botany",
-    "-1,0": "Quarters",
-}
-
-SPECIAL_ROOM_HALLWAY = {
-    "6,0": (5, 0),
-    "0,6": (0, 5),
-    "6,6": (5, 5),
-    "6,3": (5, 3),
-    "0,-1": (0, 3),
-    "3,-1": (3, 0),
-    "-1,0": (0, 0),
-}
+SPECIAL_ROOM_TILES = donut.SPECIAL_ROOM_TILES
+SPECIAL_ROOM_HALLWAY = donut.SPECIAL_ROOM_HALLWAY
 
 class SpaceStationGame(ItemInventoryMixin):
     def __init__(self, root, base_path):
@@ -108,42 +93,8 @@ class SpaceStationGame(ItemInventoryMixin):
             "notes": []
         }
 
-        # Ship map configuration
-        self.ship_map = {
-            "-1,0": {"name": "Quarters", "desc": "Your personal quarters on the station."},
-            "0,0": {"name": "Hallway Junction", "desc": "A junction in the hallway. Your quarters are nearby."},
-            "1,0": {"name": "North Hallway", "desc": "A long hallway stretching north."},
-            "2,0": {"name": "North Hallway", "desc": "A long hallway stretching north."},
-            "3,0": {"name": "North Hallway", "desc": "A long hallway stretching north. You notice a door labeled 'Botany Lab' on the west wall."},
-            "4,0": {"name": "North Hallway", "desc": "A long hallway stretching north."},
-            "5,0": {"name": "North End", "desc": "The northern end of the hallway. The bridge is nearby."},
-            "0,1": {"name": "East Hallway", "desc": "A long hallway stretching east."},
-            "0,2": {"name": "East Hallway", "desc": "A long hallway stretching east."},
-            "0,3": {"name": "Bar Entrance", "desc": "This hallway leads to the station Bar. Soft music can be heard from inside."},
-            "0,4": {"name": "East Hallway", "desc": "A long hallway stretching east."},
-            "0,5": {"name": "East End", "desc": "The eastern end of the hallway. The medbay is nearby."},
-            
-            # Northeast Corridors
-            "5,1": {"name": "Northeast Hallway", "desc": "A hallway connecting the north and east corridors."},
-            "5,2": {"name": "Northeast Hallway", "desc": "A hallway connecting the north and east corridors."},
-            "5,3": {"name": "Engineering Bay Entrance", "desc": "This hallway leads to the Engineering Bay."},
-            "5,4": {"name": "Northeast Hallway", "desc": "A hallway connecting the north and east corridors."},
-            "5,5": {"name": "Northeast Corner", "desc": "The far corner of the station. Security is nearby."},
-            
-            # East Section
-            "4,5": {"name": "East Section", "desc": "A hallway along the eastern side of the station."},
-            "3,5": {"name": "East Section", "desc": "A hallway along the eastern side of the station."},
-            "2,5": {"name": "East Section", "desc": "A hallway along the eastern side of the station."},
-            "1,5": {"name": "East Section", "desc": "A hallway connecting back to the main hallways."},
-            
-            # Special room tiles
-            "6,0": {"name": "Bridge", "desc": "The control center of the station. The door is unlocked.", "locked": False},
-            "0,6": {"name": "MedBay", "desc": "The medical facility of the station. The door is unlocked.", "locked": False},
-            "6,6": {"name": "Security", "desc": "The security center of the station. The door is unlocked.", "locked": False},
-            "6,3": {"name": "Engineering Bay", "desc": "The station's engineering and maintenance center. The door is unlocked.", "locked": False},
-            "0,-1": {"name": "Bar", "desc": "The station's social hub where crew members can relax and enjoy drinks. The door is unlocked.", "locked": False},
-            "3,-1": {"name": "Botany Lab", "desc": "The station's plant cultivation and research facility. The door is unlocked.", "locked": False}
-        }
+        # Ship map configuration (see game/maps/donut.py for the layout data)
+        self.ship_map = copy.deepcopy(donut.SHIP_MAP)
         
         # Bind the window close event to stop the market thread
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
@@ -403,7 +354,7 @@ class SpaceStationGame(ItemInventoryMixin):
             self.add_note("CRITICAL EVENT: Nearly died from oxygen deprivation. Emergency medical systems intervened.")
             
             # Return player to quarters
-            self.player_data["location"] = {"x": -1, "y": 0}
+            self.player_data["location"] = dict(donut.QUARTERS_LOCATION)
             self.show_hallway()
         except Exception as e:
             print(f"Error handling oxygen death: {e}")
@@ -491,11 +442,11 @@ class SpaceStationGame(ItemInventoryMixin):
 
     def save_and_start(self):
         """Save the character and start the game in quarters."""
-        self.player_data["location"] = {"x": -1, "y": 0}
+        self.player_data["location"] = dict(donut.QUARTERS_LOCATION)
         self._save_game()
         self.start_market_thread()
         self.start_battery_timer()
-        self.enter_special_room_at("Quarters", "-1,0")
+        self.enter_special_room_at("Quarters", donut.QUARTERS_KEY)
     
     def show_character_sheet(self):
         """Show the character sheet window"""
@@ -645,10 +596,11 @@ class SpaceStationGame(ItemInventoryMixin):
         y = self.player_data["location"]["y"]
         
         if x == -1 and y == 0:  # In quarters, move to hallway
-            self.player_data["location"] = {"x": 0, "y": 0}
+            hallway_x, hallway_y = donut.SPECIAL_ROOM_HALLWAY[donut.QUARTERS_KEY]
+            self.player_data["location"] = {"x": hallway_x, "y": hallway_y}
             self.show_hallway()
         else:  # In hallway, move to quarters
-            self.enter_special_room_at("Quarters", "-1,0")
+            self.enter_special_room_at("Quarters", donut.QUARTERS_KEY)
     
     def get_location_key(self):
         x = self.player_data["location"]["x"]
@@ -737,45 +689,21 @@ class SpaceStationGame(ItemInventoryMixin):
         x = self.player_data["location"]["x"]
         y = self.player_data["location"]["y"]
 
-        north_available = False
-        south_available = False
-        east_available = False
-        west_available = False
-        
-        # Standard hallway directions
-        # North hallway section (0-5, 0)
-        if y == 0 and x < 5:
-            north_available = True
-        if y == 0 and x > 0:
-            south_available = True
-            
-        # East hallway section (0, 0-5)
-        if x == 0 and y < 5:
-            east_available = True
-        if x == 0 and y > 0:
-            west_available = True
-            
-        # North end - can go east
-        if x == 5 and y < 5:
-            east_available = True
-        if x == 5 and y > 0:
-            west_available = True
-            
-        # East end - can go north
-        if y == 5 and x < 5:
-            north_available = True
-        if y == 5 and x > 0:
-            south_available = True
-        
+        directions = donut.get_available_directions(x, y)
+        north_available = directions["north"]
+        south_available = directions["south"]
+        east_available = directions["east"]
+        west_available = directions["west"]
+
         # Special cases for room access points
         is_special_location = False
         
         # Bridge access from north end
-        if x == 5 and y == 0:
+        if (x, y) == SPECIAL_ROOM_HALLWAY[donut.BRIDGE_KEY]:
             is_special_location = True
             # Add the Bridge access button
             bridge_btn = tk.Button(nav_frame, text="Bridge", font=("Arial", 14), width=15,
-                                command=lambda: self.enter_special_room_at("Bridge", "6,0"))
+                                command=lambda: self.enter_special_room_at("Bridge", donut.BRIDGE_KEY))
             bridge_btn.grid(row=0, column=1, padx=10, pady=10)
             
             # Also add regular east button for the corridor
@@ -791,11 +719,11 @@ class SpaceStationGame(ItemInventoryMixin):
                 south_btn.grid(row=2, column=1, padx=10, pady=10)
             
         # MedBay access from east end
-        elif x == 0 and y == 5:
+        elif (x, y) == SPECIAL_ROOM_HALLWAY[donut.MEDBAY_KEY]:
             is_special_location = True
             # Add MedBay access button
             medbay_btn = tk.Button(nav_frame, text="MedBay", font=("Arial", 14), width=15,
-                              command=lambda: self.enter_special_room_at("MedBay", "0,6"))
+                              command=lambda: self.enter_special_room_at("MedBay", donut.MEDBAY_KEY))
             medbay_btn.grid(row=1, column=2, padx=10, pady=10)
             
             # Add north button for the corridor
@@ -811,11 +739,11 @@ class SpaceStationGame(ItemInventoryMixin):
                 west_btn.grid(row=1, column=0, padx=10, pady=10)
             
         # Security access from northeast corner
-        elif x == 5 and y == 5:
+        elif (x, y) == SPECIAL_ROOM_HALLWAY[donut.SECURITY_KEY]:
             is_special_location = True
             # Just one button for Security access
             security_btn = tk.Button(nav_frame, text="Security", font=("Arial", 14), width=15,
-                                 command=lambda: self.enter_special_room_at("Security", "6,6"))
+                                 command=lambda: self.enter_special_room_at("Security", donut.SECURITY_KEY))
             security_btn.grid(row=0, column=1, padx=10, pady=10)
             
             # Add west and south buttons for the corridors
@@ -828,11 +756,11 @@ class SpaceStationGame(ItemInventoryMixin):
             south_btn.grid(row=2, column=1, padx=10, pady=10)
 
         # Engineering Bay access from engineering hallway
-        elif x == 5 and y == 3:
+        elif (x, y) == SPECIAL_ROOM_HALLWAY[donut.ENGINEERING_KEY]:
             is_special_location = True
             # Add Engineering Bay access button
             eng_bay_btn = tk.Button(nav_frame, text="Engineering Bay", font=("Arial", 14), width=15,
-                                command=lambda: self.enter_special_room_at("Engineering", "6,3"))
+                                command=lambda: self.enter_special_room_at("Engineering", donut.ENGINEERING_KEY))
             eng_bay_btn.grid(row=0, column=1, padx=10, pady=10)
             
             # Add west and east buttons for the corridors
@@ -845,12 +773,12 @@ class SpaceStationGame(ItemInventoryMixin):
             east_btn.grid(row=1, column=2, padx=10, pady=10)
         
         # Bar access from bar entrance
-        elif x == 0 and y == 3:
+        elif (x, y) == SPECIAL_ROOM_HALLWAY[donut.BAR_KEY]:
             is_special_location = True
             # Add Bar access button
             bar_btn = tk.Button(nav_frame, text="Bar", font=("Arial", 14), width=15,
-                             command=lambda: self.enter_special_room_at("Bar", "0,-1"))
-            bar_btn.grid(row=0, column=1, padx=10, pady=10)
+                             command=lambda: self.enter_special_room_at("Bar", donut.BAR_KEY))
+            bar_btn.grid(row=2, column=1, padx=10, pady=10)
             
             # Add west and east buttons for the corridors
             west_btn = tk.Button(nav_frame, text="Go West", font=("Arial", 14), width=15,
@@ -883,14 +811,14 @@ class SpaceStationGame(ItemInventoryMixin):
                                    command=lambda: self.move_direction("west"))
                 west_btn.grid(row=1, column=0, padx=10, pady=10)
             
-            # Special case for the Botany Lab entrance at (3,0)
-            if x == 3 and y == 0:
+            # Special case for the Botany Lab entrance
+            if (x, y) == SPECIAL_ROOM_HALLWAY[donut.BOTANY_KEY]:
                 botany_btn = tk.Button(nav_frame, text="Botany Lab", font=("Arial", 14), width=15,
-                                     command=lambda: self.enter_special_room_at("Botany", "3,-1"))
+                                     command=lambda: self.enter_special_room_at("Botany", donut.BOTANY_KEY))
                 botany_btn.grid(row=1, column=0, padx=10, pady=10)
         
         # Only show return to quarters at the starting junction
-        if x == 0 and y == 0:
+        if (x, y) == SPECIAL_ROOM_HALLWAY[donut.QUARTERS_KEY]:
             quarters_btn = tk.Button(nav_frame, text="Quarters", font=("Arial", 14), width=15,
                                    command=self.use_door)
             quarters_btn.grid(row=3, column=1, columnspan=1, padx=10, pady=20)
@@ -1194,19 +1122,19 @@ class SpaceStationGame(ItemInventoryMixin):
             
             # Check if player is in a special room or hallway
             loc_key = f"{x},{y}"
-            if loc_key in SPECIAL_ROOM_TILES and loc_key != "-1,0":
+            if loc_key in SPECIAL_ROOM_TILES and loc_key != donut.QUARTERS_KEY:
                 # Player was in a special room, return to hallway entrance
                 self.update_player_data_from_room(self.player_data)
             elif x == -1 and y == 0:
                 # Player was in quarters — open the quarters room UI
-                self.enter_special_room_at("Quarters", "-1,0")
+                self.enter_special_room_at("Quarters", donut.QUARTERS_KEY)
             else:
                 # Player was in a hallway
                 self.show_hallway()
         else:
             # Default to quarters if location is missing
-            self.player_data["location"] = {"x": -1, "y": 0}
-            self.enter_special_room_at("Quarters", "-1,0")
+            self.player_data["location"] = dict(donut.QUARTERS_LOCATION)
+            self.enter_special_room_at("Quarters", donut.QUARTERS_KEY)
         
         return True
 

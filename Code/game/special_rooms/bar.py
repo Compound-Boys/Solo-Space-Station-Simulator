@@ -6,8 +6,7 @@ from game.helper_methods.door_control import can_control_door, toggle_door_lock 
 from game.objects.drinks import DRINKS_MENU, MIXED_DRINKS, DrinkMixer, is_drink_alcoholic
 from game.special_rooms.shared import add_note, leave_room, open_room_in_main_window, show_station_menu as render_station_menu
 from game.helper_methods.ui_panels import open_modal_panel
-
-DOOR_KEY = "0,-1"
+from game.maps.donut import BAR_KEY as DOOR_KEY
 
 class Bar:
     def __init__(self, parent_window, player_data, station_crew, return_callback):

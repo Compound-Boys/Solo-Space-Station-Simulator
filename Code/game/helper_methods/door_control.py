@@ -1,32 +1,41 @@
 from tkinter import messagebox
 
+from game.maps.donut import (
+    BRIDGE_KEY,
+    MEDBAY_KEY,
+    SECURITY_KEY,
+    ENGINEERING_KEY,
+    BAR_KEY,
+    BOTANY_KEY,
+)
+
 SPECIAL_ROOM_DOORS = {
-    "6,0": {
+    BRIDGE_KEY: {
         "room_name": "Bridge",
         "desc_base": "The control center of the station.",
         "permission": frozenset({"Captain", "HoP"}),
     },
-    "0,6": {
+    MEDBAY_KEY: {
         "room_name": "MedBay",
         "desc_base": "The medical facility of the station.",
         "permission": frozenset({"Captain", "HoP", "Doctor"}),
     },
-    "6,6": {
+    SECURITY_KEY: {
         "room_name": "Security",
         "desc_base": "The security center of the station.",
         "permission": frozenset({"Captain", "Security"}),
     },
-    "6,3": {
+    ENGINEERING_KEY: {
         "room_name": "Engineering Bay",
         "desc_base": "The station's engineering and maintenance center.",
         "permission": frozenset({"Captain", "HoP", "Engineer"}),
     },
-    "0,-1": {
+    BAR_KEY: {
         "room_name": "Bar",
         "desc_base": "The station's social hub where crew members can relax and enjoy drinks.",
         "permission": frozenset({"Captain", "HoP", "Bar"}),
     },
-    "3,-1": {
+    BOTANY_KEY: {
         "room_name": "Botany Lab",
         "desc_base": "The station's plant cultivation and research facility.",
         "permission": frozenset({"Captain", "HoP", "Botany"}),

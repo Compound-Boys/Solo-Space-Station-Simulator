@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 from game.helper_methods.ui_panels import open_modal_panel
+from game.maps.donut import render_map_text
 
 # Base structure for items
 # { 
@@ -36,27 +37,9 @@ IMPORTANT TIPS:
 We hope you enjoy your stay and contribute to our thriving community!
 """
 
-STATION_MAP_CONTENT = """SPACE STATION EXPLORER - STATION MAP
-
-NORTH SECTION:
-- Bridge (Command Center)
-- North Hallway
-
-EAST SECTION:
-- Medical Bay
-- East Hallway
-- Bar
-
-NORTHEAST SECTION:
-- Security
-- Engineering Bay
-
-CENTRAL:
-- Personal Quarters
-- Hallway Junction
-
-Remember to use navigation panels to move between sections.
-"""
+# Generated from the map's own coordinate data (see game/maps/donut.py) so it
+# always matches the actual station layout.
+STATION_MAP_CONTENT = render_map_text()
 
 MAINTENANCE_MANUAL_CONTENT = """SPACE STATION MAINTENANCE MANUAL
 
@@ -673,6 +656,7 @@ class ItemInventoryMixin:
 
         item_name = item.get('name', 'Readable Item')
         content = item.get('attributes', {}).get('content', '[No content found]')
+        is_map = item.get('id') == 'station_map'
 
         panel, read_popup = open_modal_panel(self.root, title=f"Reading: {item_name}")
 
@@ -685,8 +669,10 @@ class ItemInventoryMixin:
         content_scrollbar = tk.Scrollbar(content_frame)
         content_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        content_text = tk.Text(content_frame, bg="black", fg="white", font=("Arial", 12),
-                             wrap=tk.WORD, yscrollcommand=content_scrollbar.set)
+        content_font = ("Courier New", 11) if is_map else ("Arial", 12)
+        content_wrap = tk.NONE if is_map else tk.WORD
+        content_text = tk.Text(content_frame, bg="black", fg="white", font=content_font,
+                             wrap=content_wrap, yscrollcommand=content_scrollbar.set)
         content_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         content_scrollbar.config(command=content_text.yview)
 
@@ -745,6 +731,7 @@ class ItemInventoryMixin:
 
         item_name = item.get('name', 'Readable Item')
         content = item.get('attributes', {}).get('content', '[No content found]')
+        is_map = item.get('id') == 'station_map'
 
         panel, read_content_popup = open_modal_panel(self.root, title=f"Reading: {item_name}")
 
@@ -757,8 +744,10 @@ class ItemInventoryMixin:
         content_scrollbar = tk.Scrollbar(content_frame)
         content_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        content_text = tk.Text(content_frame, bg="black", fg="white", font=("Arial", 12),
-                             wrap=tk.WORD, yscrollcommand=content_scrollbar.set)
+        content_font = ("Courier New", 11) if is_map else ("Arial", 12)
+        content_wrap = tk.NONE if is_map else tk.WORD
+        content_text = tk.Text(content_frame, bg="black", fg="white", font=content_font,
+                             wrap=content_wrap, yscrollcommand=content_scrollbar.set)
         content_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         content_scrollbar.config(command=content_text.yview)
 

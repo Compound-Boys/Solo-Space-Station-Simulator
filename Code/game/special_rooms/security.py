@@ -8,8 +8,7 @@ from game.special_rooms.shared import (
     try_leave_through_door,
     show_station_menu as render_station_menu,
 )
-
-DOOR_KEY = "6,6"
+from game.maps.donut import SECURITY_KEY as DOOR_KEY
 
 class Security:
     def __init__(self, parent_window, player_data, station_crew, return_callback):

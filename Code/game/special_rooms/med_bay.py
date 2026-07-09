@@ -6,8 +6,7 @@ import math
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
 from game.special_rooms.shared import add_note, open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
 from game.helper_methods.ui_panels import open_modal_panel
-
-DOOR_KEY = "0,6"
+from game.maps.donut import MEDBAY_KEY as DOOR_KEY
 
 class MedBay:
     def __init__(self, parent_window, player_data, station_crew, return_callback):
