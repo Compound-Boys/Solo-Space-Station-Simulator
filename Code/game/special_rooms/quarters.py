@@ -7,6 +7,46 @@ from game.items import ItemInventoryMixin, get_item_definition
 from game.special_rooms.shared import add_note, leave_room, open_room_in_main_window
 from game.stock_market import StockMarket, sync_holdings_to_companies
 
+DEFAULT_LOCKER_ITEM_IDS = [
+    "welcome_guide",
+    "flashlight",
+    "station_map",
+    "emergency_rations",
+    "basic_tools",
+    "id_card_reader",
+    "portable_scanner",
+    "maintenance_manual",
+    "emergency_beacon",
+    "first_aid_kit",
+]
+
+
+def build_default_locker_inventory(exclude_item_ids=None):
+    """Return default locker item dicts, optionally skipping IDs already held."""
+    exclude = exclude_item_ids or set()
+    items = []
+    for item_id in DEFAULT_LOCKER_ITEM_IDS:
+        if item_id in exclude:
+            continue
+        item_def = get_item_definition(item_id)
+        if item_def:
+            items.append(item_def)
+    return items
+
+
+def ensure_locker_inventory(player_data):
+    """Return persistent locker inventory, seeding once for older saves."""
+    if "locker_inventory" in player_data and isinstance(player_data["locker_inventory"], list):
+        return player_data["locker_inventory"]
+
+    player_inventory_ids = {
+        item.get("id")
+        for item in player_data.get("inventory", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    player_data["locker_inventory"] = build_default_locker_inventory(player_inventory_ids)
+    return player_data["locker_inventory"]
+
 
 class Quarters(ItemInventoryMixin):
     def __init__(self, parent_window, player_data, station_crew, return_callback):
@@ -219,35 +259,7 @@ class Quarters(ItemInventoryMixin):
         )
         inventory_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        initial_locker_item_ids = [
-            "welcome_guide",
-            "flashlight",
-            "station_map",
-            "emergency_rations",
-            "basic_tools",
-            "id_card_reader",
-            "portable_scanner",
-            "maintenance_manual",
-            "emergency_beacon",
-            "first_aid_kit",
-        ]
-
-        locker_item_defs = [
-            get_item_definition(item_id)
-            for item_id in initial_locker_item_ids
-            if get_item_definition(item_id)
-        ]
-
-        player_inventory_ids = {
-            item.get("id")
-            for item in self.player_data.get("inventory", [])
-            if isinstance(item, dict)
-        }
-        filtered_items = [
-            item_def
-            for item_def in locker_item_defs
-            if item_def.get("id") not in player_inventory_ids
-        ]
+        locker_inventory = ensure_locker_inventory(self.player_data)
 
         locker_canvas = tk.Canvas(locker_frame, bg="black", highlightthickness=0)
         locker_scrollbar = tk.Scrollbar(locker_frame, orient="vertical", command=locker_canvas.yview)
@@ -257,7 +269,7 @@ class Quarters(ItemInventoryMixin):
         locker_items_frame = tk.Frame(locker_canvas, bg="black")
         locker_canvas.create_window((0, 0), window=locker_items_frame, anchor="nw")
 
-        if not filtered_items:
+        if not locker_inventory:
             tk.Label(
                 locker_items_frame,
                 text="The storage locker is empty.",
@@ -266,7 +278,7 @@ class Quarters(ItemInventoryMixin):
                 fg="white",
             ).pack(pady=10, padx=10, anchor="w")
         else:
-            for item_def in filtered_items:
+            for locker_index, item_def in enumerate(locker_inventory):
                 item_frame = tk.Frame(
                     locker_items_frame,
                     bg="dark gray",
@@ -279,16 +291,22 @@ class Quarters(ItemInventoryMixin):
                 info_frame = tk.Frame(item_frame, bg="dark gray")
                 info_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, anchor="w")
 
+                name_text = str(item_def)
+                description = ""
+                if isinstance(item_def, dict):
+                    name_text = item_def.get("name", "Unknown Item")
+                    description = item_def.get("description", "")
+
                 tk.Label(
                     info_frame,
-                    text=item_def.get("name", "Unknown Item"),
+                    text=name_text,
                     font=("Arial", 12, "bold"),
                     bg="dark gray",
                 ).pack(anchor="w", padx=10, pady=(5, 0))
 
                 tk.Label(
                     info_frame,
-                    text=item_def.get("description", ""),
+                    text=description,
                     font=("Arial", 10),
                     bg="dark gray",
                     wraplength=200,
@@ -301,8 +319,8 @@ class Quarters(ItemInventoryMixin):
                     button_frame,
                     text="Take",
                     font=("Arial", 10),
-                    command=lambda item_id=item_def.get("id"), sw=storage_window: self._take_item(
-                        item_id, sw
+                    command=lambda index=locker_index, sw=storage_window: self._take_item(
+                        index, sw
                     ),
                 ).pack()
 
@@ -387,46 +405,53 @@ class Quarters(ItemInventoryMixin):
             command=storage_window.destroy,
         ).pack(pady=20)
 
-    def _take_item(self, item_id, storage_window):
-        if not item_id:
-            messagebox.showerror("Error", "Invalid item ID provided.", parent=self.quarters_window)
+    def _take_item(self, locker_index, storage_window):
+        locker_inventory = ensure_locker_inventory(self.player_data)
+
+        if not (0 <= locker_index < len(locker_inventory)):
+            messagebox.showerror("Error", "Invalid locker item.", parent=self.quarters_window)
             return
 
-        item_def = get_item_definition(item_id)
-        if not item_def:
-            messagebox.showerror(
-                "Error",
-                f"Could not find definition for item ID: {item_id}.",
-                parent=self.quarters_window,
-            )
-            return
+        item_def = locker_inventory[locker_index]
+        item_name = str(item_def)
+        item_id = None
+        if isinstance(item_def, dict):
+            item_name = item_def.get("name", "Unknown Item")
+            item_id = item_def.get("id")
 
-        item_name = item_def.get("name", "Unknown Item")
         player_inventory = self.player_data.setdefault("inventory", [])
-        has_item = any(
-            isinstance(inv_item, dict) and inv_item.get("id") == item_id
-            for inv_item in player_inventory
-        )
+        if item_id:
+            has_item = any(
+                isinstance(inv_item, dict) and inv_item.get("id") == item_id
+                for inv_item in player_inventory
+            )
+            if has_item:
+                messagebox.showinfo(
+                    "Already Have It",
+                    f"You already have a {item_name}.",
+                    parent=self.quarters_window,
+                )
+                return
 
-        if not has_item:
-            player_inventory.append(item_def)
-            messagebox.showinfo(
-                "Item Taken",
-                f"You took the {item_name}.",
-                parent=self.quarters_window,
-            )
-            add_note(self.player_data, f"Took {item_name} ({item_id}) from locker.")
-            storage_window.destroy()
-            self.show_storage()
+        taken_item = locker_inventory.pop(locker_index)
+        if isinstance(taken_item, dict):
+            player_inventory.append(taken_item.copy())
         else:
-            messagebox.showinfo(
-                "Already Have It",
-                f"You already have a {item_name}.",
-                parent=self.quarters_window,
-            )
+            player_inventory.append(taken_item)
+
+        messagebox.showinfo(
+            "Item Taken",
+            f"You took the {item_name}.",
+            parent=self.quarters_window,
+        )
+        note_text = f"Took {item_name}" + (f" ({item_id})" if item_id else "") + " from locker."
+        add_note(self.player_data, note_text)
+        storage_window.destroy()
+        self.show_storage()
 
     def _store_item(self, item_index, storage_window):
         player_inventory = self.player_data.get("inventory", [])
+        locker_inventory = ensure_locker_inventory(self.player_data)
 
         if not (0 <= item_index < len(player_inventory)):
             messagebox.showerror("Error", "Invalid item index.", parent=self.quarters_window)
@@ -440,6 +465,11 @@ class Quarters(ItemInventoryMixin):
             item_id = item_to_store.get("id")
 
         del player_inventory[item_index]
+        if isinstance(item_to_store, dict):
+            locker_inventory.append(item_to_store.copy())
+        else:
+            locker_inventory.append(item_to_store)
+
         messagebox.showinfo(
             "Item Stored",
             f"You placed the {item_name} in the storage locker.",

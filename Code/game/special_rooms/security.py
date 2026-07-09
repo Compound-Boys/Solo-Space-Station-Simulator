@@ -2,7 +2,12 @@ import tkinter as tk
 from tkinter import messagebox
 
 from game.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
-from game.special_rooms.shared import open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
+from game.special_rooms.shared import (
+    open_room_in_main_window,
+    show_crew_manifest as render_crew_manifest,
+    try_leave_through_door,
+    show_station_menu as render_station_menu,
+)
 
 DOOR_KEY = "6,6"
 
@@ -58,7 +63,54 @@ class Security:
         self.security_window.focus_force()
     
     def access_security_station(self):
-        # Make sure the window stays on top after dialog
+        """Show security station options for authorized personnel"""
+        for widget in self.button_frame.winfo_children():
+            widget.destroy()
+
+        manifest_btn = tk.Button(
+            self.button_frame,
+            text="View Crew Manifest",
+            font=("Arial", 14),
+            width=20,
+            command=self.view_crew_manifest,
+        )
+        manifest_btn.pack(pady=10)
+
+        jail_btn = tk.Button(
+            self.button_frame,
+            text="View Jail",
+            font=("Arial", 14),
+            width=20,
+            command=self.view_jail,
+        )
+        jail_btn.pack(pady=10)
+
+        back_btn = tk.Button(
+            self.button_frame,
+            text="Back to Station Menu",
+            font=("Arial", 14),
+            width=20,
+            command=self.show_station_menu,
+        )
+        back_btn.pack(pady=10)
+
+        self.security_window.after(20, self.security_window.lift)
+        self.security_window.focus_force()
+
+    def view_crew_manifest(self):
+        """Display the crew manifest (same logic as Bridge)"""
+        render_crew_manifest(self.security_window, self.player_data, self.station_crew)
+
+    def view_jail(self):
+        """Placeholder until the security guard / jail feature is implemented"""
+        self.security_window.after(
+            10,
+            lambda: messagebox.showinfo(
+                "Jail",
+                "No prisoner in jail now.",
+                parent=self.security_window,
+            ),
+        )
         self.security_window.after(20, self.security_window.lift)
         self.security_window.focus_force()
     
