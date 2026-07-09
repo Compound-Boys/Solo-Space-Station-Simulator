@@ -115,6 +115,49 @@ def get_jobs_for_department(department):
     return []
 
 
+def permissions_for_job(job):
+    """Return station permission flags for the given job title."""
+    if job == "Captain":
+        return {
+            "security_station": True,
+            "medbay_station": True,
+            "bridge_station": True,
+            "engineering_station": True,
+            "bar_station": True,
+            "hop_station": True,
+            "botany_station": True,
+        }
+    if job == "Head of Personnel":
+        return {
+            "security_station": False,
+            "medbay_station": False,
+            "bridge_station": False,
+            "engineering_station": False,
+            "bar_station": True,
+            "hop_station": True,
+            "botany_station": True,
+        }
+    if job == "Botanist":
+        return {
+            "security_station": False,
+            "medbay_station": False,
+            "bridge_station": False,
+            "engineering_station": False,
+            "bar_station": False,
+            "hop_station": False,
+            "botany_station": True,
+        }
+    return {
+        "security_station": job == "Security Guard",
+        "medbay_station": job == "Doctor",
+        "bridge_station": job == "Captain",
+        "engineering_station": job == "Engineer",
+        "bar_station": job == "Bartender",
+        "hop_station": False,
+        "botany_station": job == "Botanist",
+    }
+
+
 class CharacterCreation:
     """Character creation screen rendered in the main game window.
 
@@ -309,50 +352,7 @@ class CharacterCreation:
         self.player_data["credits"] = job_info["credits"]
 
         # Set job-specific permissions for room access
-        if job == "Captain":
-            # Captain has access to all stations
-            self.player_data["permissions"] = {
-                "security_station": True,
-                "medbay_station": True,
-                "bridge_station": True,
-                "engineering_station": True,
-                "bar_station": True,
-                "hop_station": True,
-                "botany_station": True
-            }
-        elif job == "Head of Personnel":
-            # HoP has access to HoP station, Bar station, and Botany station
-            self.player_data["permissions"] = {
-                "security_station": False,
-                "medbay_station": False,
-                "bridge_station": False,
-                "engineering_station": False,
-                "bar_station": True,
-                "hop_station": True,
-                "botany_station": True
-            }
-        elif job == "Botanist":
-            # Botanist has access to Botany station
-            self.player_data["permissions"] = {
-                "security_station": False,
-                "medbay_station": False,
-                "bridge_station": False,
-                "engineering_station": False,
-                "bar_station": False,
-                "hop_station": False,
-                "botany_station": True
-            }
-        else:
-            # Other jobs have specific access
-            self.player_data["permissions"] = {
-                "security_station": job == "Security Guard",
-                "medbay_station": job == "Doctor",
-                "bridge_station": job == "Captain",
-                "engineering_station": job == "Engineer",
-                "bar_station": job == "Bartender",
-                "hop_station": False,
-                "botany_station": job == "Botanist"
-            }
+        self.player_data["permissions"] = permissions_for_job(job)
 
         # --- NPC Generation ---
         station_crew = []  # Fresh crew list for new game
@@ -370,36 +370,101 @@ class CharacterCreation:
             "Bartender": {"credits": 3500, "station": "bar_station"}
         }
 
-        for npc_job, data in department_heads.items():
-            if npc_job != job: # If the player didn't take this job
-                if not available_names:
-                    npc_name = f"NPC_{npc_job.replace(' ', '')}" # Fallback name
-                else:
-                    npc_name = random.choice(available_names)
-                    available_names.remove(npc_name)
+        def _pick_npc_name(fallback_label):
+            if not available_names:
+                return f"NPC_{fallback_label.replace(' ', '')}"
+            npc_name = random.choice(available_names)
+            available_names.remove(npc_name)
+            return npc_name
 
-                npc_data = {
-                    "name": npc_name,
-                    "job": npc_job,
-                    "credits": data["credits"], # Give them starting credits too
-                    "inventory": [], # Empty inventory for now
-                    "location": {"x": -1, "y": 0}, # Start in quarters for simplicity
-                    "limbs": { # Same starting health as player
-                        "left_arm": 100, "right_arm": 100, "left_leg": 100,
-                        "right_leg": 100, "chest": 100, "head": 100
-                    },
-                    "damage": {"burn": 0, "poison": 0, "oxygen": 0},
-                     "permissions": {s: (j == npc_job) for j, d in department_heads.items() for s in [d["station"]]} # Basic permission for their station
-                }
-                # Add special permissions for NPC Captain/HoP if generated
-                if npc_job == "Captain":
-                    npc_data["permissions"] = {d["station"]: True for d in department_heads.values()}
-                elif npc_job == "Head of Personnel":
-                    npc_data["permissions"]["bar_station"] = True
-                    npc_data["permissions"]["botany_station"] = True
+        def _make_staff_assistant(npc_name):
+            assistant_info = JOBS["Staff Assistant"]
+            return {
+                "name": npc_name,
+                "job": "Staff Assistant",
+                "department": assistant_info["department"],
+                "subdepartment": assistant_info["subdepartment"],
+                "credits": assistant_info["credits"],
+                "inventory": [],
+                "location": {"x": -1, "y": 0},
+                "limbs": {
+                    "left_arm": 100, "right_arm": 100, "left_leg": 100,
+                    "right_leg": 100, "chest": 100, "head": 100,
+                },
+                "damage": {"burn": 0, "poison": 0, "oxygen": 0},
+                "permissions": permissions_for_job("Staff Assistant"),
+            }
 
-                station_crew.append(npc_data)
-                print(f"Generated NPC: {npc_name} ({npc_job})") # Debug print
+        player_is_hop = job == "Head of Personnel"
+
+        if player_is_hop:
+            # HoP always has an NPC Captain; remaining vacant head slots + 2 are Staff Assistants
+            captain_name = _pick_npc_name("Captain")
+            captain_info = JOBS["Captain"]
+            captain_data = {
+                "name": captain_name,
+                "job": "Captain",
+                "department": captain_info["department"],
+                "subdepartment": captain_info["subdepartment"],
+                "credits": department_heads["Captain"]["credits"],
+                "inventory": [],
+                "location": {"x": -1, "y": 0},
+                "limbs": {
+                    "left_arm": 100, "right_arm": 100, "left_leg": 100,
+                    "right_leg": 100, "chest": 100, "head": 100,
+                },
+                "damage": {"burn": 0, "poison": 0, "oxygen": 0},
+                "permissions": permissions_for_job("Captain"),
+            }
+            station_crew.append(captain_data)
+            print(f"Generated NPC: {captain_name} (Captain)")
+
+            vacant_roles = [
+                j for j in department_heads if j not in (job, "Captain")
+            ]
+            assistant_count = len(vacant_roles) + 2
+            for i in range(assistant_count):
+                npc_name = _pick_npc_name(f"StaffAssistant{i + 1}")
+                station_crew.append(_make_staff_assistant(npc_name))
+                print(f"Generated NPC: {npc_name} (Staff Assistant)")
+        else:
+            for npc_job, data in department_heads.items():
+                if npc_job != job:  # If the player didn't take this job
+                    npc_name = _pick_npc_name(npc_job)
+
+                    npc_data = {
+                        "name": npc_name,
+                        "job": npc_job,
+                        "credits": data["credits"],
+                        "inventory": [],
+                        "location": {"x": -1, "y": 0},
+                        "limbs": {
+                            "left_arm": 100, "right_arm": 100, "left_leg": 100,
+                            "right_leg": 100, "chest": 100, "head": 100,
+                        },
+                        "damage": {"burn": 0, "poison": 0, "oxygen": 0},
+                        "permissions": {
+                            s: (j == npc_job)
+                            for j, d in department_heads.items()
+                            for s in [d["station"]]
+                        },
+                    }
+                    if npc_job == "Captain":
+                        npc_data["permissions"] = {
+                            d["station"]: True for d in department_heads.values()
+                        }
+                    elif npc_job == "Head of Personnel":
+                        npc_data["permissions"]["bar_station"] = True
+                        npc_data["permissions"]["botany_station"] = True
+
+                    station_crew.append(npc_data)
+                    print(f"Generated NPC: {npc_name} ({npc_job})")
+
+            # Non-HoP games also get 2 Staff Assistants
+            for i in range(2):
+                npc_name = _pick_npc_name(f"StaffAssistant{i + 1}")
+                station_crew.append(_make_staff_assistant(npc_name))
+                print(f"Generated NPC: {npc_name} (Staff Assistant)")
         # --- End NPC Generation ---
 
         # Initialize stock market with starting values
