@@ -6,7 +6,7 @@ from game.character_methods.character_sheet import render_character_sheet
 from game.helper_methods.game import Game
 from game.helper_methods.ui_panels import open_modal_panel
 from game.objects.items import ItemInventoryMixin, ensure_locker_inventory, get_item_definition
-from game.special_rooms.shared import add_note, leave_room, open_room_in_main_window
+from game.special_rooms.shared import add_note, build_room_shell, leave_room, open_room_in_main_window
 from game.helper_methods.stock_market import StockMarket
 
 
@@ -17,57 +17,44 @@ class Quarters(ItemInventoryMixin):
         self.station_crew = station_crew
         self.return_callback = return_callback
 
-        self.quarters_window = open_room_in_main_window(parent_window, "Your Quarters", self.quit_without_save)
+        self.quarters_window = open_room_in_main_window(
+            parent_window, "Your Quarters", player_data, station_crew, return_callback
+        )
         self.root = self.quarters_window
-
-        room_label = tk.Label(
+        style, button_frame = build_room_shell(
             self.quarters_window,
-            text="Your Quarters",
-            font=("Arial", 24),
-            bg="black",
-            fg="white",
+            self.player_data,
+            "Your Quarters",
+            "A small living quarters with basic amenities.",
         )
-        room_label.pack(pady=30)
+        room_bg, room_fg = style["bg"], style["fg"]
 
-        desc_label = tk.Label(
-            self.quarters_window,
-            text="A small living quarters with basic amenities.",
-            font=("Arial", 12),
-            bg="black",
-            fg="white",
-            wraplength=600,
-        )
-        desc_label.pack(pady=10)
-
-        info_frame = tk.Frame(self.quarters_window, bg="black")
-        info_frame.pack(pady=10)
+        info_frame = tk.Frame(self.quarters_window, bg=room_bg)
+        info_frame.pack(pady=10, before=button_frame)
 
         tk.Label(
             info_frame,
             text=f"Name: {self.player_data['name']}",
             font=("Arial", 12),
-            bg="black",
-            fg="white",
+            bg=room_bg,
+            fg=room_fg,
         ).pack(side=tk.LEFT, padx=20)
 
         tk.Label(
             info_frame,
             text=f"Job: {self.player_data['job']}",
             font=("Arial", 12),
-            bg="black",
-            fg="white",
+            bg=room_bg,
+            fg=room_fg,
         ).pack(side=tk.LEFT, padx=20)
 
         tk.Label(
             info_frame,
             text=f"Credits: {self.player_data['credits']:.2f}",
             font=("Arial", 12),
-            bg="black",
-            fg="white",
+            bg=room_bg,
+            fg=room_fg,
         ).pack(side=tk.LEFT, padx=20)
-
-        button_frame = tk.Frame(self.quarters_window, bg="black")
-        button_frame.pack(pady=20)
 
         tk.Button(
             button_frame,
@@ -109,7 +96,7 @@ class Quarters(ItemInventoryMixin):
             command=self.view_character_sheet,
         ).grid(row=2, column=0, columnspan=2, padx=10, pady=10)
 
-        save_frame = tk.Frame(self.quarters_window, bg="black")
+        save_frame = tk.Frame(self.quarters_window, bg=room_bg)
         save_frame.pack(pady=30)
 
         tk.Button(
@@ -625,11 +612,6 @@ class Quarters(ItemInventoryMixin):
     def save_and_exit(self):
         self.player_data["_exit_to_menu"] = True
         self.on_closing()
-
-    def quit_without_save(self):
-        """Window X: quit the app without persisting."""
-        self.player_data["_quit_without_save"] = True
-        leave_room(self.return_callback, self.player_data, self.station_crew)
 
     def on_closing(self):
         leave_room(self.return_callback, self.player_data, self.station_crew)

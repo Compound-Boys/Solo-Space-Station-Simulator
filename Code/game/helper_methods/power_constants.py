@@ -16,6 +16,7 @@ def default_station_power():
             "communication_array": 5,
         },
         "power_mode": "balanced",
+        "last_lighting_battery_band": None,
     }
 
 

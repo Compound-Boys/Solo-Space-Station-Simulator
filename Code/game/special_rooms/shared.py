@@ -4,9 +4,49 @@ import tkinter as tk
 from tkinter import messagebox
 
 from game.helper_methods.door_control import can_control_door, is_door_locked
+from game.helper_methods.lighting_helper import (
+    ensure_station_power_lighting,
+    lighting_style,
+)
 from game.helper_methods.ui_panels import open_modal_panel
 
 ROOM_GEOMETRY = "1012x759"
+
+
+def room_lighting_chrome(player_data):
+    """Clamp lighting for battery and return style dict for a special room shell."""
+    station_power = ensure_station_power_lighting(player_data)
+    level = station_power["system_levels"].get("hallway_lighting", 5)
+    return lighting_style(level, place="room")
+
+
+def build_room_shell(room_window, player_data, title, description):
+    """Title, lit description, and primary button_frame. Returns (style, button_frame)."""
+    style = room_lighting_chrome(player_data)
+    room_bg, room_fg = style["bg"], style["fg"]
+
+    room_label = tk.Label(
+        room_window,
+        text=title,
+        font=("Arial", 24),
+        bg=room_bg,
+        fg="white",
+    )
+    room_label.pack(pady=30)
+
+    desc_label = tk.Label(
+        room_window,
+        text=description + style["power_desc"],
+        font=("Arial", 12),
+        bg=room_bg,
+        fg=room_fg,
+        wraplength=600,
+    )
+    desc_label.pack(pady=10)
+
+    button_frame = tk.Frame(room_window, bg=room_bg)
+    button_frame.pack(pady=20)
+    return style, button_frame
 
 
 def add_note(player_data, text):
@@ -19,20 +59,34 @@ def add_note(player_data, text):
     })
 
 
-def open_room_in_main_window(parent_window, title, on_close):
-    """Clear the main window and prepare it for a special room."""
+def leave_room(return_callback, player_data, station_crew):
+    """Hand off to the game; main window is not destroyed."""
+    return_callback(player_data, station_crew)
+
+
+def quit_without_save(return_callback, player_data, station_crew):
+    """Window X: quit the app without persisting or returning to the hallway."""
+    player_data["_quit_without_save"] = True
+    leave_room(return_callback, player_data, station_crew)
+
+
+def open_room_in_main_window(parent_window, title, player_data, station_crew, return_callback):
+    """Clear the main window and prepare it for a special room.
+
+    Window X quits without saving; Exit Room buttons use leave_room / try_leave_through_door.
+    """
     for widget in parent_window.winfo_children():
         widget.destroy()
     parent_window.title(title)
     parent_window.geometry(ROOM_GEOMETRY)
-    parent_window.configure(bg="black")
-    parent_window.protocol("WM_DELETE_WINDOW", on_close)
+    style = room_lighting_chrome(player_data)
+    parent_window.configure(bg=style["bg"])
+    parent_window.protocol(
+        "WM_DELETE_WINDOW",
+        lambda: quit_without_save(return_callback, player_data, station_crew),
+    )
     return parent_window
 
-
-def leave_room(return_callback, player_data, station_crew):
-    """Hand off to the game; main window is not destroyed."""
-    return_callback(player_data, station_crew)
 
 
 def try_leave_through_door(room_window, player_data, door_key, return_callback, station_crew):

@@ -2,7 +2,9 @@ import tkinter as tk
 from tkinter import messagebox
 
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
+from game.helper_methods.ui_panels import open_modal_panel
 from game.special_rooms.shared import (
+    build_room_shell,
     open_room_in_main_window,
     show_crew_manifest as render_crew_manifest,
     try_leave_through_door,
@@ -17,21 +19,15 @@ class Security:
         self.station_crew = station_crew
         self.return_callback = return_callback
 
-        self.security_window = open_room_in_main_window(parent_window, "Security", self.on_closing)
-        
-        # Title
-        room_label = tk.Label(self.security_window, text="Station Security Office", font=("Arial", 24), bg="black", fg="white")
-        room_label.pack(pady=30)
-        
-        # Description
-        desc_label = tk.Label(self.security_window, 
-                              text="The security office is filled with monitoring equipment. Screens showing various parts of the station line the walls. A few security officers monitor the feeds, while weapon lockers are secured along one wall.",
-                              font=("Arial", 12), bg="black", fg="white", wraplength=600)
-        desc_label.pack(pady=10)
-        
-        # Room actions
-        self.button_frame = tk.Frame(self.security_window, bg="black")
-        self.button_frame.pack(pady=20)
+        self.security_window = open_room_in_main_window(
+            parent_window, "Security", player_data, station_crew, return_callback
+        )
+        _, self.button_frame = build_room_shell(
+            self.security_window,
+            self.player_data,
+            "Station Security Office",
+            "The security office is filled with monitoring equipment. Screens showing various parts of the station line the walls. A few security officers monitor the feeds, while weapon lockers are secured along one wall.",
+        )
 
         self._build_station_menu()
         
@@ -75,6 +71,15 @@ class Security:
         )
         manifest_btn.pack(pady=10)
 
+        warrant_btn = tk.Button(
+            self.button_frame,
+            text="Issue Warrant",
+            font=("Arial", 14),
+            width=20,
+            command=self.show_issue_warrant,
+        )
+        warrant_btn.pack(pady=10)
+
         jail_btn = tk.Button(
             self.button_frame,
             text="View Jail",
@@ -99,6 +104,137 @@ class Security:
     def view_crew_manifest(self):
         """Display the crew manifest (same logic as Bridge)"""
         render_crew_manifest(self.security_window, self.player_data, self.station_crew)
+
+    def show_issue_warrant(self):
+        """Open a warrant terminal listing the player and all station NPCs."""
+        panel, popup = open_modal_panel(self.security_window, title="Issue Warrant")
+        popup.configure(bg="black")
+
+        title_label = tk.Label(
+            popup, text="Issue Warrant", font=("Arial", 18, "bold"), bg="black", fg="white"
+        )
+        title_label.pack(pady=10)
+
+        list_outer = tk.LabelFrame(
+            popup, text="Crew", font=("Arial", 12), bg="black", fg="white"
+        )
+        list_outer.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        scrollbar = tk.Scrollbar(list_outer, orient=tk.VERTICAL)
+        crew_listbox = tk.Listbox(
+            list_outer,
+            bg="black",
+            fg="white",
+            font=("Arial", 12),
+            width=40,
+            height=12,
+            exportselection=False,
+            yscrollcommand=scrollbar.set,
+        )
+        scrollbar.config(command=crew_listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        crew_listbox.pack(side=tk.LEFT, pady=5, padx=5, fill=tk.BOTH, expand=True)
+
+        PLAYER_INDEX = -1
+        member_indices = []
+
+        def _member_for_index(crew_index):
+            if crew_index == PLAYER_INDEX:
+                return self.player_data
+            return self.station_crew[crew_index]
+
+        def _format_row(member, is_player=False):
+            name = member.get("name", "Unknown")
+            job = member.get("job", "Unknown")
+            wanted = " [WANTED]" if member.get("warrant", False) else ""
+            you = " (YOU)" if is_player else ""
+            return f"{name} ({job}){you}{wanted}"
+
+        def refresh_list(preserve_index=None):
+            crew_listbox.delete(0, tk.END)
+            member_indices.clear()
+
+            member_indices.append(PLAYER_INDEX)
+            crew_listbox.insert(tk.END, _format_row(self.player_data, is_player=True))
+
+            for crew_index, npc in enumerate(self.station_crew):
+                member_indices.append(crew_index)
+                crew_listbox.insert(tk.END, _format_row(npc))
+
+            if preserve_index is not None and 0 <= preserve_index < len(member_indices):
+                crew_listbox.selection_set(preserve_index)
+                crew_listbox.activate(preserve_index)
+
+        def _selected_member():
+            selection = crew_listbox.curselection()
+            if not selection:
+                messagebox.showwarning(
+                    "No Selection",
+                    "Select a crew member first.",
+                    parent=popup,
+                )
+                return None, None
+            list_index = selection[0]
+            crew_index = member_indices[list_index]
+            return list_index, _member_for_index(crew_index)
+
+        def issue_warrant():
+            list_index, member = _selected_member()
+            if member is None:
+                return
+            if member.get("warrant", False):
+                messagebox.showinfo(
+                    "Warrant",
+                    f"{member.get('name', 'That crew member')} already has an active warrant.",
+                    parent=popup,
+                )
+                return
+            member["warrant"] = True
+            refresh_list(preserve_index=list_index)
+            messagebox.showinfo(
+                "Warrant Issued",
+                f"Warrant issued for {member.get('name', 'Unknown')}.",
+                parent=popup,
+            )
+
+        def clear_warrant():
+            list_index, member = _selected_member()
+            if member is None:
+                return
+            if not member.get("warrant", False):
+                messagebox.showinfo(
+                    "Warrant",
+                    f"{member.get('name', 'That crew member')} does not have a warrant.",
+                    parent=popup,
+                )
+                return
+            member["warrant"] = False
+            refresh_list(preserve_index=list_index)
+            messagebox.showinfo(
+                "Warrant Cleared",
+                f"Warrant cleared for {member.get('name', 'Unknown')}.",
+                parent=popup,
+            )
+
+        refresh_list()
+
+        button_frame = tk.Frame(popup, bg="black")
+        button_frame.pack(pady=10)
+
+        issue_btn = tk.Button(
+            button_frame, text="Issue Warrant", font=("Arial", 12), width=16, command=issue_warrant
+        )
+        issue_btn.pack(side=tk.LEFT, padx=5)
+
+        clear_btn = tk.Button(
+            button_frame, text="Clear Warrant", font=("Arial", 12), width=16, command=clear_warrant
+        )
+        clear_btn.pack(side=tk.LEFT, padx=5)
+
+        exit_btn = tk.Button(
+            button_frame, text="Exit", font=("Arial", 12), width=10, command=panel.close
+        )
+        exit_btn.pack(side=tk.LEFT, padx=5)
 
     def view_jail(self):
         """Placeholder until the security guard / jail feature is implemented"""

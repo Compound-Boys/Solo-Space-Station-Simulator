@@ -5,7 +5,22 @@ import datetime
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
 from game.objects.items import get_item_definition
 from game.helper_methods.power_constants import SYSTEM_POWER_RATES
-from game.special_rooms.shared import add_note, open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
+from game.helper_methods.oxygen_helper import (
+    LIFE_SUPPORT_DAMAGE_BEGIN_TITLE,
+    LIFE_SUPPORT_DAMAGE_BEGIN_MESSAGE,
+    OXYGEN_DEPLETION_ANNOUNCEMENT_TEXT,
+    OXYGEN_DEPLETION_MODAL_BODY,
+    OXYGEN_DEPLETION_FOLLOWUP_TITLE,
+    OXYGEN_DEPLETION_FOLLOWUP_MESSAGE,
+    life_support_entering_damage_range,
+)
+from game.special_rooms.shared import (
+    add_note,
+    build_room_shell,
+    open_room_in_main_window,
+    try_leave_through_door,
+    show_station_menu as render_station_menu,
+)
 from game.helper_methods.ui_panels import open_modal_panel, report_message
 from game.maps.donut import ENGINEERING_KEY as DOOR_KEY
 
@@ -16,21 +31,15 @@ class Engineering:
         self.station_crew = station_crew
         self.return_callback = return_callback
 
-        self.engineering_window = open_room_in_main_window(parent_window, "Engineering Bay", self.on_closing)
-        
-        # Title
-        room_label = tk.Label(self.engineering_window, text="Station Engineering Bay", font=("Arial", 24), bg="black", fg="white")
-        room_label.pack(pady=30)
-        
-        # Description
-        desc_label = tk.Label(self.engineering_window, 
-                              text="The engineering bay is filled with equipment and tools. Various machines hum with power, and spare parts are organized on shelves. This is where the station's systems are maintained and repaired.",
-                              font=("Arial", 12), bg="black", fg="white", wraplength=600)
-        desc_label.pack(pady=10)
-        
-        # Room actions
-        self.button_frame = tk.Frame(self.engineering_window, bg="black")
-        self.button_frame.pack(pady=20)
+        self.engineering_window = open_room_in_main_window(
+            parent_window, "Engineering Bay", player_data, station_crew, return_callback
+        )
+        _, self.button_frame = build_room_shell(
+            self.engineering_window,
+            self.player_data,
+            "Station Engineering Bay",
+            "The engineering bay is filled with equipment and tools. Various machines hum with power, and spare parts are organized on shelves. This is where the station's systems are maintained and repaired.",
+        )
 
         self._build_station_menu()
         
@@ -694,6 +703,7 @@ class Engineering:
             def update_system_level(system_name, value):
                 value = int(value)  # Convert to integer
                 system_key = system_name.lower().replace(" ", "_")
+                previous_value = self.player_data["station_power"]["system_levels"].get(system_key, 10)
                 self.player_data["station_power"]["system_levels"][system_key] = value
                 
                 # Update power draw label for this system
@@ -745,6 +755,15 @@ class Engineering:
                     if value == 0:
                         # If life support is set to 0, announce oxygen depletion
                         self.announce_oxygen_depletion()
+                    elif life_support_entering_damage_range(previous_value, value):
+                        # Entering the damage range (levels 4–0)
+                        report_message(
+                            LIFE_SUPPORT_DAMAGE_BEGIN_TITLE,
+                            LIFE_SUPPORT_DAMAGE_BEGIN_MESSAGE,
+                            kind="warning",
+                            parent=self.engineering_window,
+                        )
+                        self.announcement_active = False
                     else:
                         # If life support is greater than 0, reset the flag so another
                         # announcement can happen if it drops to 0 again
@@ -905,7 +924,18 @@ class Engineering:
             def update_battery_display_timer():
                 # Force an immediate battery update from player_data values
                 update_battery_display()
-                
+
+                # Keep Hallway Lighting slider in sync when battery band clamp changes it
+                if "hallway_lighting" in system_sliders:
+                    current = int(
+                        self.player_data["station_power"]["system_levels"].get(
+                            "hallway_lighting", 5
+                        )
+                    )
+                    slider = system_sliders["hallway_lighting"]
+                    if int(float(slider.get())) != current:
+                        slider.set(current)
+
                 # Schedule the next update - update more frequently (500ms instead of 2000ms)
                 self.battery_display_timer = panel_window.after(500, update_battery_display_timer)
             
@@ -960,7 +990,7 @@ class Engineering:
                 
             announcement = {
                 "timestamp": datetime.datetime.now().isoformat(),
-                "text": "CRITICAL ALERT: Life support systems offline! Oxygen levels dropping to critical levels. All crew are advised to evacuate or obtain emergency oxygen supplies immediately.",
+                "text": OXYGEN_DEPLETION_ANNOUNCEMENT_TEXT,
                 "type": "emergency",
                 "seen": False
             }
@@ -992,8 +1022,8 @@ class Engineering:
                     self.engineering_window.focus_force()
 
                 report_message(
-                    "CRITICAL SYSTEM ALERT",
-                    "STATION ALERT: Life support systems have been deactivated!\n\nOxygen levels will rapidly deplete. All crew will begin to suffer oxygen damage in approximately 1 minute.",
+                    OXYGEN_DEPLETION_FOLLOWUP_TITLE,
+                    OXYGEN_DEPLETION_FOLLOWUP_MESSAGE,
                     kind="warning",
                     parent=self.engineering_window,
                 )
@@ -1032,7 +1062,7 @@ class Engineering:
             
             # Alert message
             message_text = tk.Label(content_frame, 
-                                  text="LIFE SUPPORT SYSTEMS OFFLINE!\n\nOxygen levels dropping to critical levels.\n\nAll crew are advised to evacuate or obtain emergency oxygen supplies immediately.",
+                                  text=OXYGEN_DEPLETION_MODAL_BODY,
                                   font=("Arial", 14), bg="#990000", fg="white", justify=tk.CENTER, wraplength=500)
             message_text.pack(pady=20)
             
@@ -1055,9 +1085,11 @@ class Engineering:
             # Reset flag if there's an error so it can try again
             self.announcement_active = False
             # Show a simple warning as fallback
-            messagebox.showwarning("CRITICAL SYSTEM ALERT", 
-                                 "STATION ALERT: Life support systems have been deactivated!\n\nOxygen levels will rapidly deplete. All crew will begin to suffer oxygen damage in approximately 1 minute.", 
-                                 parent=self.engineering_window)
+            messagebox.showwarning(
+                OXYGEN_DEPLETION_FOLLOWUP_TITLE,
+                OXYGEN_DEPLETION_FOLLOWUP_MESSAGE,
+                parent=self.engineering_window,
+            )
     
     def toggle_door_lock(self):
         toggle_room_door_lock(self.player_data, DOOR_KEY, self.engineering_window)

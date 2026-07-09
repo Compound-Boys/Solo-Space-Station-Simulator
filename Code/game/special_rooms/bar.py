@@ -4,7 +4,13 @@ import random
 
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock, is_door_locked
 from game.objects.drinks import DRINKS_MENU, MIXED_DRINKS, DrinkMixer, is_drink_alcoholic
-from game.special_rooms.shared import add_note, leave_room, open_room_in_main_window, show_station_menu as render_station_menu
+from game.special_rooms.shared import (
+    add_note,
+    build_room_shell,
+    leave_room,
+    open_room_in_main_window,
+    show_station_menu as render_station_menu,
+)
 from game.helper_methods.ui_panels import open_modal_panel
 from game.maps.donut import BAR_KEY as DOOR_KEY
 
@@ -15,25 +21,20 @@ class Bar:
         self.station_crew = station_crew
         self.return_callback = return_callback
 
-        self.bar_window = open_room_in_main_window(parent_window, "Bar", self.on_closing)
+        self.bar_window = open_room_in_main_window(
+            parent_window, "Bar", player_data, station_crew, return_callback
+        )
 
         # Track bartender mode
         self.bartender_mode = False
         self.drink_mixer = DrinkMixer(self.bar_window, self.player_data)
-        
-        # Title
-        room_label = tk.Label(self.bar_window, text="Station Bar", font=("Arial", 24), bg="black", fg="white")
-        room_label.pack(pady=30)
-        
-        # Description
-        desc_label = tk.Label(self.bar_window, 
-                              text="The station's bar is lively and well-furnished. A long counter runs along one wall, with shelves of drinks behind it. Tables and chairs are scattered about, and soft music plays in the background.",
-                              font=("Arial", 12), bg="black", fg="white", wraplength=600)
-        desc_label.pack(pady=10)
-        
-        # Room actions
-        self.button_frame = tk.Frame(self.bar_window, bg="black")
-        self.button_frame.pack(pady=20)
+
+        _, self.button_frame = build_room_shell(
+            self.bar_window,
+            self.player_data,
+            "Station Bar",
+            "The station's bar is lively and well-furnished. A long counter runs along one wall, with shelves of drinks behind it. Tables and chairs are scattered about, and soft music plays in the background.",
+        )
 
         self._build_station_menu()
         
@@ -383,7 +384,7 @@ class Bar:
         toggle_room_door_lock(self.player_data, DOOR_KEY, self.bar_window)
     
     def on_closing(self):
-        """Handle window closing"""
+        """Handle Exit Room (return to hallway)."""
         if is_door_locked(self.player_data, DOOR_KEY):
             self.bar_window.after(
                 10,
