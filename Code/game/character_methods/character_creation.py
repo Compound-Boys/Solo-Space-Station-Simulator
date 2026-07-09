@@ -405,11 +405,15 @@ class CharacterCreation:
             self.player_data["stock_market"] = default_stock_market_state()
             self.player_data["stock_market"]["companies"] = serialize_companies(self.companies)
 
-        # Initialize station power - Solar panels default ON unless player can control them
-        can_control_power = job in ["Engineer", "Captain"]
+        # Solar ON when an NPC Engineer is present; OFF if the player is the Engineer
+        player_is_engineer = job == "Engineer"
+        station_has_engineer = player_is_engineer or any(
+            npc.get("job") == "Engineer" for npc in station_crew
+        )
+        solar_charging = station_has_engineer and not player_is_engineer
         self.player_data["station_power"] = {
             "battery_level": 25.0,
-            "solar_charging": not can_control_power,  # True if player can't control, False otherwise
+            "solar_charging": solar_charging,
             "last_update_time": datetime.datetime.now().isoformat(),
             "system_levels": {
                 "life_support": 10,
