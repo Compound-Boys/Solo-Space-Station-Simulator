@@ -4,6 +4,7 @@ import random
 
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
 from game.special_rooms.shared import add_note, open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
+from game.helper_methods.ui_panels import open_modal_panel
 
 DOOR_KEY = "3,-1"
 
@@ -75,21 +76,7 @@ class Botany:
     def view_plants(self):
         """View the plants in the botany lab"""
         # Create a new top-level window for viewing plants
-        plants_window = tk.Toplevel(self.botany_window)
-        plants_window.title("Viewing Plants")
-        plants_window.geometry("600x500")
-        plants_window.configure(bg="black")
-        plants_window.transient(self.botany_window)
-        plants_window.grab_set()
-        
-        # Center the window
-        plants_window.update_idletasks()
-        width = 600
-        height = 500
-        x = (plants_window.winfo_screenwidth() // 2) - (width // 2)
-        y = (plants_window.winfo_screenheight() // 2) - (height // 2)
-        plants_window.geometry(f"{width}x{height}+{x}+{y}")
-        
+        _panel, plants_window = open_modal_panel(self.botany_window, title="Viewing Plants")
         # Title
         title_label = tk.Label(plants_window, text="Botany Lab Plants", font=("Arial", 18, "bold"), bg="black", fg="white")
         title_label.pack(pady=15)
@@ -172,21 +159,7 @@ class Botany:
     def access_seed_machine(self):
         """Access the seed machine to get seeds"""
         # Create a new toplevel window for the seed machine
-        seed_window = tk.Toplevel(self.botany_window)
-        seed_window.title("Seed Machine")
-        seed_window.geometry("700x600")
-        seed_window.configure(bg="black")
-        seed_window.transient(self.botany_window)
-        seed_window.grab_set()
-        
-        # Center the window
-        seed_window.update_idletasks()
-        width = 700
-        height = 600
-        x = (seed_window.winfo_screenwidth() // 2) - (width // 2)
-        y = (seed_window.winfo_screenheight() // 2) - (height // 2)
-        seed_window.geometry(f"{width}x{height}+{x}+{y}")
-        
+        _panel, seed_window = open_modal_panel(self.botany_window, title="Seed Machine")
         # Title
         title_label = tk.Label(seed_window, text="Botanical Seed Dispenser", font=("Arial", 18, "bold"), bg="black", fg="white")
         title_label.pack(pady=15)
@@ -336,21 +309,7 @@ class Botany:
             return
         
         # Create a new toplevel window for planting
-        plant_window = tk.Toplevel(self.botany_window)
-        plant_window.title("Plant Seeds")
-        plant_window.geometry("800x600")
-        plant_window.configure(bg="black")
-        plant_window.transient(self.botany_window)
-        plant_window.grab_set()
-        
-        # Center the window
-        plant_window.update_idletasks()
-        width = 800
-        height = 600
-        x = (plant_window.winfo_screenwidth() // 2) - (width // 2)
-        y = (plant_window.winfo_screenheight() // 2) - (height // 2)
-        plant_window.geometry(f"{width}x{height}+{x}+{y}")
-        
+        _panel, plant_window = open_modal_panel(self.botany_window, title="Plant Seeds")
         # Create main canvas with scrollbar
         main_canvas = tk.Canvas(plant_window, bg="black", highlightthickness=0)
         scrollbar = tk.Scrollbar(plant_window, orient="vertical", command=main_canvas.yview)

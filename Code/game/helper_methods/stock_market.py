@@ -266,182 +266,164 @@ class StockMarketEngine:
             refresh_companies_from_player_data(self.companies, player_data)
 
 
+def hydrate_companies(companies):
+    """Return live Company objects from Company instances or serialized dicts."""
+    if not companies:
+        return create_default_companies()
+    if all(isinstance(company, Company) for company in companies):
+        return list(companies)
+    live = create_default_companies(history_cycles=0)
+    apply_companies_from_save(live, companies)
+    return live
+
+
 class StockMarket:
     def __init__(self, parent_window, player_data, companies, cycle_number, day_number, return_callback):
-        # Create a new toplevel window
-        self.stock_window = tk.Toplevel(parent_window)
-        self.stock_window.title("Stock Market")
-        self.stock_window.geometry("1000x850") 
-        self.stock_window.configure(bg="black")
-        
-        # Set a minimum window size to prevent UI elements from getting cut off
-        self.stock_window.minsize(900, 700)
-        
         # Store references
         self.parent_window = parent_window
         self.player_data = player_data
-        self.companies = companies
+        self.companies = hydrate_companies(companies)
         self.cycle_number = cycle_number
         self.day_number = day_number
         self.return_callback = return_callback
         self.current_company = None
-        
+
         # Track transactions for notes
         self.stock_transactions = []
-        
+
         # Filter state
         self.current_filter = "All" # Default filter shows all stocks
-        
+
         # Sort order: "price_asc" (low to high) or "price_desc" (high to low)
         self.sort_order = "price_asc"
-        
-        # Ownership filter: "all", "owned", "not_owned" 
+
+        # Ownership filter: "all", "owned", "not_owned"
         self.ownership_filter = "all"
 
         # Trend filter: "all", "rising", "falling"
         self.trend_filter = "all"
-        
-        # Bind window closing
+
+        # Dedicated window (matplotlib needs a real Toplevel, not an overlay Frame)
+        self.stock_window = tk.Toplevel(parent_window)
+        self.stock_window.title("Stock Market")
+        self.stock_window.geometry("1150x978")
+        self.stock_window.configure(bg="black")
+        self.stock_window.minsize(1035, 805)
         self.stock_window.protocol("WM_DELETE_WINDOW", self.on_closing)
-        
-        # Ensure this window stays on top
         self.stock_window.transient(parent_window)
         self.stock_window.grab_set()
-        
+
         # Load company owned shares from player data
         sync_holdings_to_companies(self.companies, player_data.get("stock_holdings"))
-        
+
         # Create main frames
         self.left_frame = tk.Frame(self.stock_window, bg="black", width=300)
-        self.left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
-        
-        # Fixed bottom section for navigation buttons (aligns with trade controls)
-        self.left_bottom_frame = tk.Frame(self.left_frame, bg="black")
-        self.left_bottom_frame.pack(side=tk.BOTTOM, fill=tk.X)
-        
-        self.history_btn = tk.Button(self.left_bottom_frame, text="View Trade History", 
-                                   font=("Arial", 12), bg="#333333", fg="white",
-                                   command=self.show_trade_history)
-        self.history_btn.pack(pady=(5, 2), fill=tk.X)
-        
-        self.back_btn = tk.Button(self.left_bottom_frame, text="Back to Computer", 
-                                font=("Arial", 12), bg="#333333", fg="white",
-                                command=self.on_closing)
-        self.back_btn.pack(pady=(2, 5), fill=tk.X)
-        
-        # Main content area above the fixed bottom buttons
+        self.left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=5)
+
+        # Left column: filters → listbox → trade → History/Back (normal pack order)
         self.left_content = tk.Frame(self.left_frame, bg="black")
         self.left_content.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-        
+
         self.right_frame = tk.Frame(self.stock_window, bg="black")
-        self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Info labels
-        self.info_frame = tk.Frame(self.left_content, bg="black")
-        self.info_frame.pack(fill=tk.X, pady=10)
-        
-        self.cycle_label = tk.Label(self.info_frame, text=f"Cycle: {self.cycle_number}", 
+        self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        # Right header: status (left) + company info (further right)
+        self.header_frame = tk.Frame(self.right_frame, bg="black")
+        self.header_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 0))
+
+        self.info_frame = tk.Frame(self.header_frame, bg="black")
+        self.info_frame.pack(side=tk.LEFT, anchor="nw", padx=(0, 20))
+
+        self.cycle_label = tk.Label(self.info_frame, text=f"Cycle: {self.cycle_number}",
                                    font=("Arial", 12), bg="black", fg="white")
-        self.cycle_label.grid(row=0, column=0, sticky="w", pady=2)
-        
-        self.day_label = tk.Label(self.info_frame, text=f"Day: {self.day_number}", 
+        self.cycle_label.grid(row=0, column=0, sticky="w", pady=1)
+
+        self.day_label = tk.Label(self.info_frame, text=f"Day: {self.day_number}",
                                  font=("Arial", 12), bg="black", fg="white")
-        self.day_label.grid(row=1, column=0, sticky="w", pady=2)
-        
-        # Add timer for next update
-        self.timer_label = tk.Label(self.info_frame, text="Next Update: Calculating...", 
+        self.day_label.grid(row=1, column=0, sticky="w", pady=1)
+
+        self.timer_label = tk.Label(self.info_frame, text="Next Update: Calculating...",
                                   font=("Arial", 12), bg="black", fg="yellow")
-        self.timer_label.grid(row=2, column=0, sticky="w", pady=2)
-        
-        self.credits_label = tk.Label(self.info_frame, text=f"Credits: {player_data['credits']:.2f}", 
+        self.timer_label.grid(row=2, column=0, sticky="w", pady=1)
+
+        self.credits_label = tk.Label(self.info_frame, text=f"Credits: {player_data['credits']:.2f}",
                                     font=("Arial", 12), bg="black", fg="white")
-        self.credits_label.grid(row=3, column=0, sticky="w", pady=2)
-        
-        # Sort and filter options
+        self.credits_label.grid(row=3, column=0, sticky="w", pady=1)
+
+        self.company_info_frame = tk.Frame(self.header_frame, bg="black")
+        self.company_info_frame.pack(side=tk.RIGHT, anchor="ne", fill=tk.X, expand=True)
+
+        # Sort and filter options (left column starts here so content sits higher)
         self.filter_frame = tk.Frame(self.left_content, bg="black")
-        self.filter_frame.pack(fill=tk.X, pady=5)
-        
-        filter_label = tk.Label(self.filter_frame, text="Filter Stocks:", 
+        self.filter_frame.pack(fill=tk.X, pady=(0, 2))
+
+        filter_label = tk.Label(self.filter_frame, text="Filter Stocks:",
                              font=("Arial", 12), bg="black", fg="white")
-        filter_label.pack(anchor="w", pady=(5,0))
-        
-        # Filter buttons
+        filter_label.pack(anchor="w", pady=(0, 0))
+
         self.filter_buttons_frame = tk.Frame(self.filter_frame, bg="black")
-        self.filter_buttons_frame.pack(fill=tk.X, pady=5)
-        
-        # Show All button
-        self.all_btn = tk.Button(self.filter_buttons_frame, text="Show All", 
+        self.filter_buttons_frame.pack(fill=tk.X, pady=2)
+
+        self.all_btn = tk.Button(self.filter_buttons_frame, text="Show All",
                             font=("Arial", 10), bg="#333333", fg="white", relief=tk.SUNKEN,
                             command=lambda: self.filter_companies("All"))
         self.all_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # Affordable button (can buy at least 1 share)
-        self.affordable_btn = tk.Button(self.filter_buttons_frame, text="Affordable", 
+
+        self.affordable_btn = tk.Button(self.filter_buttons_frame, text="Affordable",
                                  font=("Arial", 10), bg="#333333", fg="white",
                                  command=lambda: self.filter_companies("Affordable"))
         self.affordable_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # Expensive button (can't afford any shares)
-        self.expensive_btn = tk.Button(self.filter_buttons_frame, text="Expensive", 
+
+        self.expensive_btn = tk.Button(self.filter_buttons_frame, text="Expensive",
                                 font=("Arial", 10), bg="#333333", fg="white",
                                 command=lambda: self.filter_companies("Expensive"))
         self.expensive_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # Sort options
-        sort_label = tk.Label(self.filter_frame, text="Sort By Price:", 
+
+        sort_label = tk.Label(self.filter_frame, text="Sort By Price:",
                             font=("Arial", 12), bg="black", fg="white")
-        sort_label.pack(anchor="w", pady=(10,0))
-        
-        # Sort buttons
+        sort_label.pack(anchor="w", pady=(4, 0))
+
         self.sort_buttons_frame = tk.Frame(self.filter_frame, bg="black")
-        self.sort_buttons_frame.pack(fill=tk.X, pady=5)
-        
-        # Low to High button
-        self.low_high_btn = tk.Button(self.sort_buttons_frame, text="Low to High", 
+        self.sort_buttons_frame.pack(fill=tk.X, pady=2)
+
+        self.low_high_btn = tk.Button(self.sort_buttons_frame, text="Low to High",
                                   font=("Arial", 10), bg="#333333", fg="white", relief=tk.SUNKEN,
                                   command=lambda: self.sort_companies("price_asc"))
         self.low_high_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # High to Low button
-        self.high_low_btn = tk.Button(self.sort_buttons_frame, text="High to Low", 
+
+        self.high_low_btn = tk.Button(self.sort_buttons_frame, text="High to Low",
                                   font=("Arial", 10), bg="#333333", fg="white",
                                   command=lambda: self.sort_companies("price_desc"))
         self.high_low_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # Ownership filter options
-        ownership_label = tk.Label(self.filter_frame, text="Ownership:", 
+
+        ownership_label = tk.Label(self.filter_frame, text="Ownership:",
                                  font=("Arial", 12), bg="black", fg="white")
-        ownership_label.pack(anchor="w", pady=(10,0))
-        
-        # Ownership filter buttons
+        ownership_label.pack(anchor="w", pady=(4, 0))
+
         self.ownership_buttons_frame = tk.Frame(self.filter_frame, bg="black")
-        self.ownership_buttons_frame.pack(fill=tk.X, pady=5)
-        
-        # All Stocks button
-        self.all_ownership_btn = tk.Button(self.ownership_buttons_frame, text="All Stocks", 
+        self.ownership_buttons_frame.pack(fill=tk.X, pady=2)
+
+        self.all_ownership_btn = tk.Button(self.ownership_buttons_frame, text="All Stocks",
                                           font=("Arial", 10), bg="#333333", fg="white", relief=tk.SUNKEN,
                                           command=lambda: self.filter_by_ownership("all"))
         self.all_ownership_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # Owned Stocks button
-        self.owned_btn = tk.Button(self.ownership_buttons_frame, text="Owned", 
+
+        self.owned_btn = tk.Button(self.ownership_buttons_frame, text="Owned",
                                   font=("Arial", 10), bg="#333333", fg="white",
                                   command=lambda: self.filter_by_ownership("owned"))
         self.owned_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # Not Owned Stocks button
-        self.not_owned_btn = tk.Button(self.ownership_buttons_frame, text="Not Owned", 
+
+        self.not_owned_btn = tk.Button(self.ownership_buttons_frame, text="Not Owned",
                                      font=("Arial", 10), bg="#333333", fg="white",
                                      command=lambda: self.filter_by_ownership("not_owned"))
         self.not_owned_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
 
-        # Trend filter options
         trend_label = tk.Label(self.filter_frame, text="Trend:",
                                  font=("Arial", 12), bg="black", fg="white")
-        trend_label.pack(anchor="w", pady=(10, 0))
+        trend_label.pack(anchor="w", pady=(4, 0))
 
         self.trend_buttons_frame = tk.Frame(self.filter_frame, bg="black")
-        self.trend_buttons_frame.pack(fill=tk.X, pady=5)
+        self.trend_buttons_frame.pack(fill=tk.X, pady=2)
 
         self.all_trend_btn = tk.Button(self.trend_buttons_frame, text="All",
                                           font=("Arial", 10), bg="#333333", fg="white", relief=tk.SUNKEN,
@@ -457,22 +439,33 @@ class StockMarket:
                                      font=("Arial", 10), bg="#333333", fg="white",
                                      command=lambda: self.filter_by_trend("falling"))
         self.falling_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
+
         # Companies list
-        self.companies_listbox = tk.Listbox(self.left_content, 
+        self.companies_listbox = tk.Listbox(self.left_content,
                                          font=("Arial", 12), bg="black", fg="white",
                                          selectbackground="#333333", selectforeground="white",
-                                         width=30)
-        self.companies_listbox.pack(pady=10, fill=tk.BOTH, expand=True)
-        
-        # Right frame contents (will be populated when company is selected)
-        self.trade_frame = tk.Frame(self.right_frame, bg="black")
-        self.trade_frame.pack(side=tk.BOTTOM, pady=(5, 0))
-        
-        self.company_info_frame = tk.Frame(self.right_frame, bg="black")
-        self.company_info_frame.pack(side=tk.TOP, fill=tk.X, pady=10)
-        
-        # Set up the figure for the graph
+                                         width=30, height=8)
+        self.companies_listbox.pack(pady=(4, 2), fill=tk.X)
+
+        # Trade controls directly under the listbox
+        self.trade_frame = tk.Frame(self.left_content, bg="black")
+        self.trade_frame.pack(fill=tk.X, pady=(4, 2))
+
+        # Navigation under buy/sell so it stays on screen
+        self.left_bottom_frame = tk.Frame(self.left_content, bg="black")
+        self.left_bottom_frame.pack(fill=tk.X, pady=(2, 0))
+
+        self.history_btn = tk.Button(self.left_bottom_frame, text="View Trade History",
+                                   font=("Arial", 12), bg="#333333", fg="white",
+                                   command=self.show_trade_history)
+        self.history_btn.pack(pady=(2, 1), fill=tk.X)
+
+        self.back_btn = tk.Button(self.left_bottom_frame, text="Back to Computer",
+                                font=("Arial", 12), bg="#333333", fg="white",
+                                command=self.on_closing)
+        self.back_btn.pack(pady=(1, 2), fill=tk.X)
+
+        # Right pane: header + graph only
         self.fig = plt.Figure(figsize=(5, 3), dpi=100)
         self.fig.patch.set_facecolor('black')
         self.ax = self.fig.add_subplot(111)
@@ -482,11 +475,16 @@ class StockMarket:
         self.ax.spines['top'].set_color('white')
         self.ax.spines['left'].set_color('white')
         self.ax.spines['right'].set_color('white')
-        
+
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.right_frame)
         self.canvas_widget = self.canvas.get_tk_widget()
         self.canvas_widget.configure(bg="black", highlightbackground="black")
-        self.canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Less top padding so the plot sits higher; bottom margin keeps x-axis label visible
+        self.fig.subplots_adjust(left=0.12, right=0.95, top=0.90, bottom=0.18)
+        self.canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+
+        self._timer_after_id = None
+        self._closed = False
         
         # Bind selection event for the listbox AFTER all frames are created
         self.companies_listbox.bind('<<ListboxSelect>>', self.on_company_select)
@@ -529,6 +527,14 @@ class StockMarket:
     
     def update_timer(self):
         """Update the countdown timer for next stock update"""
+        if getattr(self, "_closed", False):
+            return
+        try:
+            if not self.stock_window.winfo_exists():
+                return
+        except tk.TclError:
+            return
+
         cycle_day_changed = self._sync_cycle_day_from_player_data()
         if cycle_day_changed:
             self._refresh_companies_from_player_data()
@@ -583,7 +589,7 @@ class StockMarket:
                         self.companies_listbox.selection_set(0)
                         self.on_company_select(None)
 
-                    self.stock_window.after(1000, self.update_timer)
+                    self._timer_after_id = self.stock_window.after(1000, self.update_timer)
                     return
 
                 minutes = int(remaining // 60)
@@ -597,7 +603,7 @@ class StockMarket:
         else:
             self.timer_label.config(text="Next Update: Unknown", fg="gray")
 
-        self.stock_window.after(1000, self.update_timer)
+        self._timer_after_id = self.stock_window.after(1000, self.update_timer)
     
     def on_company_select(self, event):
         """Handle company selection from the listbox"""
@@ -696,7 +702,8 @@ class StockMarket:
         
         # Remove grid
         self.ax.grid(False)
-        
+        self.fig.subplots_adjust(left=0.12, right=0.95, top=0.90, bottom=0.18)
+
         # Draw the canvas
         self.canvas.draw()
     
@@ -931,60 +938,47 @@ class StockMarket:
             messagebox.showerror("Input Error", "Please enter a valid number of shares.")
     
     def show_trade_history(self):
-        """Show the trade history log"""
-        # Create a new toplevel window
+        """Show the trade history log in a child window."""
         history_window = tk.Toplevel(self.stock_window)
         history_window.title("Trade History")
-        history_window.geometry("650x550")  # Increased size for better visibility
+        history_window.geometry("650x550")
         history_window.configure(bg="black")
-        
-        # Set minimum size
         history_window.minsize(500, 400)
-        
-        # Ensure this window stays on top
         history_window.transient(self.stock_window)
         history_window.grab_set()
-        
-        # Title
-        title_label = tk.Label(history_window, text="Trade History", 
+
+        title_label = tk.Label(history_window, text="Trade History",
                              font=("Arial", 18), bg="black", fg="white")
         title_label.pack(pady=10)
-        
-        # Create frame with scrollbar
+
         frame = tk.Frame(history_window, bg="black")
         frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-        
-        # Add a scrollbar
+
         scrollbar = tk.Scrollbar(frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Create the trade log text widget with tags for color formatting
-        trade_log = tk.Text(frame, font=("Arial", 12), 
+
+        trade_log = tk.Text(frame, font=("Arial", 12),
                           bg="black", fg="white", width=60, height=20,
                           yscrollcommand=scrollbar.set, wrap=tk.WORD)
         trade_log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=trade_log.yview)
-        
-        # Create tags for colored text
+
         trade_log.tag_configure("header", foreground="yellow", font=("Arial", 14, "bold"))
         trade_log.tag_configure("cycle", foreground="cyan", font=("Arial", 12, "bold"))
         trade_log.tag_configure("bought", foreground="green", font=("Arial", 12))
         trade_log.tag_configure("sold", foreground="red", font=("Arial", 12))
         trade_log.tag_configure("company", foreground="white", font=("Arial", 12))
-        
-        # Populate the trade log
+
         if "stock_market" in self.player_data and "trade_log" in self.player_data["stock_market"]:
             trade_log.insert(tk.END, "TRADE HISTORY\n\n", "header")
-            
-            # Display trade log entries in reverse order (newest first)
+
             for entry in reversed(self.player_data["stock_market"]["trade_log"]):
                 cycle = entry.get("cycle", 0)
                 day = entry.get("day", 0)
                 trade_log.insert(tk.END, f"Cycle {cycle} (Day {day}):\n", "cycle")
-                
+
                 trades = entry.get("trades", {})
-                
-                # Bought trades
+
                 if "bought" in trades and trades["bought"]:
                     trade_log.insert(tk.END, "  BOUGHT:\n", "bought")
                     for company, data in trades["bought"].items():
@@ -992,8 +986,7 @@ class StockMarket:
                         price = data.get("price", 0)
                         total = data.get("total", 0)
                         trade_log.insert(tk.END, f"    {company}: {amount} shares @ {price:.2f} cr each = {total:.2f} cr\n", "company")
-                
-                # Sold trades
+
                 if "sold" in trades and trades["sold"]:
                     trade_log.insert(tk.END, "  SOLD:\n", "sold")
                     for company, data in trades["sold"].items():
@@ -1001,77 +994,88 @@ class StockMarket:
                         price = data.get("price", 0)
                         total = data.get("total", 0)
                         trade_log.insert(tk.END, f"    {company}: {amount} shares @ {price:.2f} cr each = {total:.2f} cr\n", "company")
-                
+
                 trade_log.insert(tk.END, "\n")
         else:
             trade_log.insert(tk.END, "No trade history available.")
-        
-        # Make the text widget read-only
+
         trade_log.config(state=tk.DISABLED)
-        
-        # Mouse wheel binding for scrolling
+
         def _on_trade_mousewheel(event):
             try:
-                # Windows style scrolling (positive or negative delta)
                 trade_log.yview_scroll(int(-1*(event.delta/120)), "units")
-            except Exception as e:
+            except Exception:
                 try:
-                    # Linux style scrolling (positive delta for scroll up, negative for down)
                     if event.num == 4:
                         trade_log.yview_scroll(-1, "units")
                     elif event.num == 5:
                         trade_log.yview_scroll(1, "units")
-                except:
-                    pass  # Ignore errors if the widget was destroyed
-        
-        # Bind mousewheel to trade log and all parent widgets to ensure it works everywhere
-        trade_log.bind("<MouseWheel>", _on_trade_mousewheel)  # Windows
-        trade_log.bind("<Button-4>", _on_trade_mousewheel)    # Linux scroll up
-        trade_log.bind("<Button-5>", _on_trade_mousewheel)    # Linux scroll down
-        
+                except Exception:
+                    pass
+
+        trade_log.bind("<MouseWheel>", _on_trade_mousewheel)
+        trade_log.bind("<Button-4>", _on_trade_mousewheel)
+        trade_log.bind("<Button-5>", _on_trade_mousewheel)
         frame.bind("<MouseWheel>", _on_trade_mousewheel)
-        frame.bind("<Button-4>", _on_trade_mousewheel)
-        frame.bind("<Button-5>", _on_trade_mousewheel)
-        
         history_window.bind("<MouseWheel>", _on_trade_mousewheel)
-        history_window.bind("<Button-4>", _on_trade_mousewheel)
-        history_window.bind("<Button-5>", _on_trade_mousewheel)
-        
-        # Override destroy method to cleanup bindings
+
         orig_destroy = history_window.destroy
         def _destroy_and_cleanup():
             try:
                 history_window.unbind("<MouseWheel>")
                 history_window.unbind("<Button-4>")
                 history_window.unbind("<Button-5>")
-            except:
+            except tk.TclError:
                 pass
             orig_destroy()
-        
+
         history_window.destroy = _destroy_and_cleanup
-        
-        # Close button
-        close_btn = tk.Button(history_window, text="Close", 
+
+        close_btn = tk.Button(history_window, text="Close",
                             font=("Arial", 12), bg="#333333", fg="white",
                             command=history_window.destroy)
         close_btn.pack(pady=10)
-    
+
     def on_closing(self):
-        """Handle window closing"""
-        # Add the stock transactions to the player data to be logged as notes
+        """Handle closing the stock market window."""
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+
         if self.stock_transactions:
             self.player_data["stock_transactions"] = self.stock_transactions
-        
-        # Release the grab and return control to the parent window
-        self.stock_window.grab_release()
-        
-        # Return player data to the main game
-        if self.return_callback:
-            self.return_callback(self.player_data)
-            
-        # Destroy the window
-        self.stock_window.destroy()
-    
+
+        if getattr(self, "_timer_after_id", None) is not None:
+            try:
+                self.stock_window.after_cancel(self._timer_after_id)
+            except (tk.TclError, ValueError):
+                pass
+            self._timer_after_id = None
+
+        try:
+            self.stock_window.grab_release()
+        except tk.TclError:
+            pass
+
+        callback = self.return_callback
+        self.return_callback = None
+
+        try:
+            self.canvas.get_tk_widget().destroy()
+        except Exception:
+            pass
+        try:
+            plt.close(self.fig)
+        except Exception:
+            pass
+
+        try:
+            self.stock_window.destroy()
+        except tk.TclError:
+            pass
+
+        if callback:
+            callback(self.player_data)
     def filter_companies(self, filter_type):
         """Filter companies based on selected filter"""
         # Update filter state

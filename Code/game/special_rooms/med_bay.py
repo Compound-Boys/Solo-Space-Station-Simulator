@@ -5,6 +5,7 @@ import math
 
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
 from game.special_rooms.shared import add_note, open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
+from game.helper_methods.ui_panels import open_modal_panel
 
 DOOR_KEY = "0,6"
 
@@ -157,21 +158,7 @@ class MedBay:
         message = f"The doctor examines you. 'I can treat all your injuries for {total_cost} credits. Would you like to proceed?'"
         
         # Create a custom dialog with Yes/No buttons
-        dialog = tk.Toplevel(self.medbay_window)
-        dialog.title("Doctor")
-        dialog.geometry("400x150")
-        dialog.configure(bg="black")
-        dialog.transient(self.medbay_window)
-        dialog.grab_set()
-        
-        # Center the dialog relative to the parent window
-        dialog.update_idletasks()
-        width = 400
-        height = 150
-        x = (dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (dialog.winfo_screenheight() // 2) - (height // 2)
-        dialog.geometry(f"{width}x{height}+{x}+{y}")
-        
+        _panel, dialog = open_modal_panel(self.medbay_window, title="Doctor")
         # Message label
         msg_label = tk.Label(dialog, text=message, font=("Arial", 12), bg="black", fg="white", wraplength=380)
         msg_label.pack(pady=20)
@@ -340,20 +327,9 @@ class MedBay:
 
     def show_crew_vitals(self):
         """Display a window showing the vitals of all crew members."""
-        vitals_window = tk.Toplevel(self.medbay_window)
-        vitals_window.title("Crew Vitals Monitor")
-        vitals_window.geometry("900x700") # Wider window
+        _panel, vitals_window = open_modal_panel(self.medbay_window, title="Crew Vitals Monitor")
         vitals_window.configure(bg="black")
-        vitals_window.transient(self.medbay_window)
-        vitals_window.grab_set()
 
-        # Center the popup
-        vitals_window.update_idletasks()
-        width = 900
-        height = 700
-        x = (vitals_window.winfo_screenwidth() // 2) - (width // 2)
-        y = (vitals_window.winfo_screenheight() // 2) - (height // 2)
-        vitals_window.geometry(f"{width}x{height}+{x}+{y}")
 
         # --- Header ---
         header_frame = tk.Frame(vitals_window, bg="black")

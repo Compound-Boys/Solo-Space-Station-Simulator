@@ -122,12 +122,14 @@ def render_character_sheet(
 
         type_label = tk.Label(
             type_frame,
-            text=f"{damage_type['icon']} {damage_type['name']}: ",
+            text=f"{damage_type['icon']}{damage_type['name']}:",
             font=("Arial", 12),
             bg="black",
             fg="white",
+            width=12,
+            anchor="w",
         )
-        type_label.pack(side=tk.LEFT, padx=5)
+        type_label.grid(row=0, column=0, sticky="w", padx=(5, 0))
 
         value_label = tk.Label(
             type_frame,
@@ -136,7 +138,7 @@ def render_character_sheet(
             bg="black",
             fg=color,
         )
-        value_label.pack(side=tk.LEFT)
+        value_label.grid(row=0, column=1, sticky="w")
 
         if damage_value >= 30:
             effect_text = (
@@ -153,7 +155,7 @@ def render_character_sheet(
                 bg="black",
                 fg=color,
             )
-            effect_label.pack(side=tk.LEFT, padx=5)
+            effect_label.grid(row=0, column=2, sticky="w", padx=5)
 
     limb_label = tk.Label(
         info_frame,

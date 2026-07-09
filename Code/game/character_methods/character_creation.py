@@ -150,7 +150,7 @@ class CharacterCreation:
         name_label.grid(row=0, column=0, sticky="w", pady=10)
 
         self.name_entry = tk.Entry(form_frame, font=("Arial", 14), width=25)
-        self.name_entry.grid(row=0, column=1, pady=10)
+        self.name_entry.grid(row=0, column=1, sticky="w", pady=10)
 
         # Random Name button
         def set_random_name():
@@ -173,8 +173,8 @@ class CharacterCreation:
             *department_names,
             command=self.on_department_selected,
         )
-        department_menu.config(font=("Arial", 14), width=20)
-        department_menu.grid(row=1, column=1, pady=10)
+        department_menu.config(font=("Arial", 14), width=25)
+        department_menu.grid(row=1, column=1, sticky="w", pady=10)
 
         # Job selection
         job_label = tk.Label(form_frame, text="Select Job:", font=("Arial", 14), bg="black", fg="white")
@@ -230,7 +230,7 @@ class CharacterCreation:
             *options,
             command=self.update_job_information,
         )
-        job_menu.config(font=("Arial", 14), width=20)
+        job_menu.config(font=("Arial", 14), width=25)
         job_menu.pack()
 
         if select_first and options and options[0] in JOBS:

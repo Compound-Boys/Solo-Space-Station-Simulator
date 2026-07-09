@@ -24,6 +24,11 @@ from game.helper_methods.power_constants import (
     calculate_solar_charge,
     default_station_power,
 )
+from game.helper_methods.ui_panels import (
+    open_modal_panel,
+    configure_message_buffer,
+    report_message,
+)
 
 SPECIAL_ROOM_CLASSES = {
     "Bridge": Bridge,
@@ -60,8 +65,9 @@ class SpaceStationGame(ItemInventoryMixin):
         self.root = root
         self.base_path = base_path
         self.root.title("Space Station 13 Text Clone")
-        self.root.geometry("800x600")
+        self.root.geometry("920x690")
         self.root.configure(bg="black")
+        configure_message_buffer(self.root)
 
         self.market_running = False
         self.market_thread = None
@@ -170,7 +176,7 @@ class SpaceStationGame(ItemInventoryMixin):
         if self._event_effect_messages is not None:
             self._event_effect_messages.append(message)
         else:
-            messagebox.showinfo(title, message)
+            report_message(title, message, kind="info", parent=self.root)
 
     def _add_damage_type(self, damage_key, label, min_damage, max_damage):
         """Apply incremental damage of a given type to the player."""
@@ -371,13 +377,7 @@ class SpaceStationGame(ItemInventoryMixin):
         }
         
         try:
-            window = self.root.focus_get()
-            if window:
-                messagebox.showwarning("Oxygen Warning", warnings[threshold], parent=window)
-            else:
-                messagebox.showwarning("Oxygen Warning", warnings[threshold], parent=self.root)
-                
-            # Add note about oxygen damage
+            report_message("Oxygen Warning", warnings[threshold], kind="warning", parent=self.root)
             self.add_note(f"Suffered {threshold}% oxygen damage due to life support failure.")
         except Exception as e:
             print(f"Error showing oxygen warning: {e}")
@@ -385,10 +385,12 @@ class SpaceStationGame(ItemInventoryMixin):
     def handle_oxygen_death(self):
         """Handle player death from oxygen deprivation"""
         try:
-            # Show death message
-            messagebox.showerror("CRITICAL: Oxygen Depleted", 
-                              "You have succumbed to oxygen deprivation. Emergency medical protocols have been activated, and you have been revived at minimal health levels.",
-                              parent=self.root)
+            report_message(
+                "CRITICAL: Oxygen Depleted",
+                "You have succumbed to oxygen deprivation. Emergency medical protocols have been activated, and you have been revived at minimal health levels.",
+                kind="error",
+                parent=self.root,
+            )
             
             # Reset oxygen damage
             self.player_data["damage"]["oxygen"] = 50
@@ -408,34 +410,24 @@ class SpaceStationGame(ItemInventoryMixin):
     
     def show_low_power_warning(self):
         """Show warning about low battery power"""
-        try:
-            window = self.root.focus_get()
-            if window:
-                messagebox.showwarning("Low Power Warning", 
-                                     "Warning: Station battery power low. Emergency lighting active. Please activate solar panels.",
-                                     parent=window)
-        except:
-            # Fall back to main window if there's an error
-            messagebox.showwarning("Low Power Warning", 
-                                 "Warning: Station battery power low. Emergency lighting active. Please activate solar panels.",
-                                 parent=self.root)
+        report_message(
+            "Low Power Warning",
+            "Warning: Station battery power low. Emergency lighting active. Please activate solar panels.",
+            kind="warning",
+            parent=self.root,
+        )
     
     def trigger_power_outage(self):
         """Trigger effects of a complete power outage"""
         try:
             # Set battery to minimum level to prevent multiple outage triggers
             self.player_data["station_power"]["battery_level"] = 0.1
-            
-            window = self.root.focus_get()
-            if window:
-                messagebox.showerror("Power Outage", 
-                                   "CRITICAL: Station power failure! Emergency systems active. Activate solar arrays immediately!",
-                                   parent=window)
-            else:
-                messagebox.showerror("Power Outage", 
-                                   "CRITICAL: Station power failure! Emergency systems active. Activate solar arrays immediately!",
-                                   parent=self.root)
-
+            report_message(
+                "Power Outage",
+                "CRITICAL: Station power failure! Emergency systems active. Activate solar arrays immediately!",
+                kind="error",
+                parent=self.root,
+            )
             self.add_note("CRITICAL: Station suffered complete power failure. Emergency systems active.")
 
         except Exception as e:
@@ -498,12 +490,12 @@ class SpaceStationGame(ItemInventoryMixin):
         self.save_and_start()
 
     def save_and_start(self):
-        """Save the character and start the game"""
+        """Save the character and start the game in quarters."""
+        self.player_data["location"] = {"x": -1, "y": 0}
         self._save_game()
         self.start_market_thread()
         self.start_battery_timer()
-        self.player_data["location"] = {"x": -1, "y": 0}
-        self.show_hallway()
+        self.enter_special_room_at("Quarters", "-1,0")
     
     def show_character_sheet(self):
         """Show the character sheet window"""
@@ -513,7 +505,7 @@ class SpaceStationGame(ItemInventoryMixin):
         self._ensure_game_running()
 
         # Configure window size
-        self.root.geometry("800x700")  # Increased height to accommodate all content
+        self.root.geometry("920x805")  # Increased height to accommodate all content
 
         # Store the previous screen to return to
         self.previous_screen = getattr(self, 'previous_screen', 'show_hallway')
@@ -532,186 +524,119 @@ class SpaceStationGame(ItemInventoryMixin):
         )
     
     def show_notes_popup(self):
-        """Show a popup window with the player's notes"""
-        popup = tk.Toplevel(self.root)
-        popup.title("Character Notes")
-        popup.geometry("600x500")
-        popup.configure(bg="black")
-        
-        # Ensure this window stays on top
-        popup.transient(self.root)
-        popup.grab_set()
-        
-        # Center the popup window
-        popup.update_idletasks()
-        width = 600
-        height = 500
-        x = (popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (popup.winfo_screenheight() // 2) - (height // 2)
-        popup.geometry(f"{width}x{height}+{x}+{y}")
-        
-        # Title
+        """Show character notes as an in-main-window overlay."""
+        panel, popup = open_modal_panel(self.root, title="Character Notes")
+
         title_label = tk.Label(popup, text="Character Notes", font=("Arial", 18), bg="black", fg="white")
         title_label.pack(pady=10)
-        
-        # Create a frame for the scrollable notes
+
         frame = tk.Frame(popup, bg="black")
         frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
-        
-        # Add a scrollbar
+
         scrollbar = tk.Scrollbar(frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Create a text widget for notes
+
         notes_text = tk.Text(frame, bg="black", fg="white", font=("Arial", 12),
                            width=60, height=20, yscrollcommand=scrollbar.set, wrap=tk.WORD)
         notes_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=notes_text.yview)
-        
-        # Disable editing
+
         notes_text.config(state=tk.DISABLED)
-        
-        # Load notes
+
         if "notes" in self.player_data and self.player_data["notes"]:
-            # Re-enable text widget temporarily to insert text
             notes_text.config(state=tk.NORMAL)
-            
-            # Insert notes in reverse order (newest first)
+
             for note in reversed(self.player_data["notes"]):
-                # Format the note
                 if "timestamp" in note and "text" in note:
                     timestamp = note["timestamp"]
                     text = note["text"]
-                    
-                    # Format the timestamp for display
+
                     try:
-                        # Parse ISO format timestamp
                         dt = datetime.datetime.fromisoformat(timestamp)
                         formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
                     except (ValueError, TypeError):
-                        # If timestamp format is invalid, use it as is
                         formatted_time = timestamp
-                    
-                    # Insert the formatted note
+
                     notes_text.insert(tk.END, f"{formatted_time}:\n{text}\n\n")
                 else:
-                    # If note doesn't have proper structure, just insert the text
                     notes_text.insert(tk.END, f"{str(note)}\n\n")
-            
-            # Disable editing again
+
             notes_text.config(state=tk.DISABLED)
         else:
-            # If no notes, show a message
             notes_text.config(state=tk.NORMAL)
             notes_text.insert(tk.END, "No notes recorded yet.")
             notes_text.config(state=tk.DISABLED)
-        
-        # Mouse wheel binding for scrolling
+
         def _on_notes_mousewheel(event):
             try:
                 notes_text.yview_scroll(int(-1*(event.delta/120)), "units")
             except tk.TclError:
-                pass  # Ignore errors if the text widget was destroyed
-        
-        # Bind mousewheel to notes text widget
+                pass
+
         popup.bind("<MouseWheel>", _on_notes_mousewheel)
-        
-        # Override destroy method to cleanup bindings
-        orig_destroy = popup.destroy
-        def _destroy_and_cleanup():
+
+        def _close():
             try:
                 popup.unbind("<MouseWheel>")
-            except:
+            except tk.TclError:
                 pass
-            orig_destroy()
-        
-        popup.destroy = _destroy_and_cleanup
-        
-        # Close button
-        close_btn = tk.Button(popup, text="Close", font=("Arial", 12), width=10, command=popup.destroy)
+            panel.close()
+
+        close_btn = tk.Button(popup, text="Close", font=("Arial", 12), width=10, command=_close)
         close_btn.pack(pady=10)
-    
+
     def add_note(self, text):
         """Add a note to the player's notes"""
         if "notes" not in self.player_data:
             self.player_data["notes"] = []
-        
-        # Create a new note with timestamp
+
         note = {
             "timestamp": datetime.datetime.now().isoformat(),
             "text": text
         }
-        
-        # Add the note to the player's notes
+
         self.player_data["notes"].append(note)
-    
+
     def show_holdings_popup(self):
-        """Show a popup window with the player's stock holdings"""
-        popup = tk.Toplevel(self.root)
-        popup.title("Stock Holdings")
-        popup.geometry("400x400")
-        popup.configure(bg="black")
-        
-        # Ensure this window stays on top
-        popup.transient(self.root)
-        popup.grab_set()
-        
-        # Center the popup window
-        popup.update_idletasks()
-        width = 400
-        height = 400
-        x = (popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (popup.winfo_screenheight() // 2) - (height // 2)
-        popup.geometry(f"{width}x{height}+{x}+{y}")
-        
-        # Title
+        """Show stock holdings as an in-main-window overlay."""
+        panel, popup = open_modal_panel(self.root, title="Stock Holdings")
+
         title_label = tk.Label(popup, text="Stock Holdings", font=("Arial", 18), bg="black", fg="white")
         title_label.pack(pady=10)
-        
-        # Create a frame for the scrollable holdings list
+
         frame = tk.Frame(popup, bg="black")
         frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
-        
-        # Add a scrollbar
+
         scrollbar = tk.Scrollbar(frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Create a listbox for holdings
+
         holdings_list = tk.Listbox(frame, bg="black", fg="white", font=("Arial", 12),
                                  width=30, height=15, yscrollcommand=scrollbar.set)
         holdings_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=holdings_list.yview)
-        
-        # Add holdings to the listbox
+
         if not self.player_data.get('stock_holdings', {}):
             holdings_list.insert(tk.END, "You don't own any company stocks.")
         else:
             for company, shares in self.player_data['stock_holdings'].items():
                 holdings_list.insert(tk.END, f"{company}: {shares} shares")
-        
-        # Mouse wheel binding for scrolling
+
         def _on_holdings_mousewheel(event):
             try:
                 holdings_list.yview_scroll(int(-1*(event.delta/120)), "units")
             except tk.TclError:
-                pass  # Ignore errors if the widget was destroyed
-        
-        # Bind mousewheel to holdings list
+                pass
+
         popup.bind("<MouseWheel>", _on_holdings_mousewheel)
-        
-        # Override destroy method to cleanup bindings
-        orig_destroy = popup.destroy
-        def _destroy_and_cleanup():
+
+        def _close():
             try:
                 popup.unbind("<MouseWheel>")
-            except:
+            except tk.TclError:
                 pass
-            orig_destroy()
-        
-        popup.destroy = _destroy_and_cleanup
-        
-        # Close button
-        close_btn = tk.Button(popup, text="Close", font=("Arial", 12), width=10, command=popup.destroy)
+            panel.close()
+
+        close_btn = tk.Button(popup, text="Close", font=("Arial", 12), width=10, command=_close)
         close_btn.pack(pady=10)
     
     def use_door(self):
@@ -1273,15 +1198,15 @@ class SpaceStationGame(ItemInventoryMixin):
                 # Player was in a special room, return to hallway entrance
                 self.update_player_data_from_room(self.player_data)
             elif x == -1 and y == 0:
-                # Player was in quarters
-                self.show_hallway()
+                # Player was in quarters — open the quarters room UI
+                self.enter_special_room_at("Quarters", "-1,0")
             else:
                 # Player was in a hallway
                 self.show_hallway()
         else:
             # Default to quarters if location is missing
             self.player_data["location"] = {"x": -1, "y": 0}
-            self.show_hallway()
+            self.enter_special_room_at("Quarters", "-1,0")
         
         return True
 
@@ -1312,6 +1237,7 @@ class SpaceStationGame(ItemInventoryMixin):
         # Remove temporary keys from player data if they exist
         ship_map_from_room = updated_player_data.pop("ship_map", None)
         exit_to_menu = updated_player_data.pop("_exit_to_menu", False)
+        quit_without_save = updated_player_data.pop("_quit_without_save", False)
 
         # Update player data
         self.player_data = updated_player_data
@@ -1325,6 +1251,12 @@ class SpaceStationGame(ItemInventoryMixin):
             self.ship_map = ship_map_from_room
 
         self._ensure_game_running()
+
+        if quit_without_save:
+            self.stop_market_thread()
+            self.stop_battery_timer()
+            self.root.destroy()
+            return
 
         if exit_to_menu:
             self._save_game()

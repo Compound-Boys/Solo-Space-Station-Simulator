@@ -5,6 +5,7 @@ import random
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock, is_door_locked
 from game.objects.drinks import DRINKS_MENU, MIXED_DRINKS, DrinkMixer, is_drink_alcoholic
 from game.special_rooms.shared import add_note, leave_room, open_room_in_main_window, show_station_menu as render_station_menu
+from game.helper_methods.ui_panels import open_modal_panel
 
 DOOR_KEY = "0,-1"
 
@@ -64,20 +65,7 @@ class Bar:
     def show_drink_menu(self):
         """Show the menu of available drinks"""
         # Create a popup for the drink menu
-        menu_popup = tk.Toplevel(self.bar_window)
-        menu_popup.title("Drink Menu")
-        menu_popup.configure(bg="black")
-        menu_popup.transient(self.bar_window)
-        menu_popup.grab_set()
-        
-        # Center the popup
-        menu_popup.update_idletasks()
-        width = 700
-        height = 600
-        x = (menu_popup.winfo_screenwidth() // 2) - (width // 2)
-        y = (menu_popup.winfo_screenheight() // 2) - (height // 2)
-        menu_popup.geometry(f"{width}x{height}+{x}+{y}")
-        
+        _panel, menu_popup = open_modal_panel(self.bar_window, title="Drink Menu")
         # Title
         title_label = tk.Label(menu_popup, text="Drink Menu", font=("Arial", 18), bg="black", fg="white")
         title_label.pack(pady=10)
