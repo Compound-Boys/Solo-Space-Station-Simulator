@@ -3,7 +3,12 @@ from tkinter import messagebox
 import random
 
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
-from game.special_rooms.shared import add_note, open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
+from game.special_rooms.shared import (
+    add_note,
+    open_room_in_main_window,
+    try_leave_through_door,
+    show_station_menu as render_station_menu,
+)
 from game.helper_methods.ui_panels import open_modal_panel
 from game.maps.donut import BOTANY_KEY as DOOR_KEY
 
@@ -35,7 +40,9 @@ class Botany:
             {"name": "Apple Seeds", "description": "Grows into small apple trees."}
         ]
 
-        self.botany_window = open_room_in_main_window(parent_window, "Botany Lab", self.on_closing)
+        self.botany_window = open_room_in_main_window(
+            parent_window, "Botany Lab", player_data, station_crew, return_callback
+        )
         
         # Title
         room_label = tk.Label(self.botany_window, text="Station Botany Lab", font=("Arial", 24), bg="black", fg="white")
@@ -540,7 +547,7 @@ class Botany:
         toggle_room_door_lock(self.player_data, DOOR_KEY, self.botany_window)
     
     def on_closing(self):
-        """Handle window closing"""
+        """Handle Exit Room (return to hallway)."""
         try_leave_through_door(
             self.botany_window,
             self.player_data,

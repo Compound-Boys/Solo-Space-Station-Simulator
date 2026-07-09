@@ -20,7 +20,9 @@ class Bridge:
         self.station_crew = station_crew
         self.return_callback = return_callback
 
-        self.bridge_window = open_room_in_main_window(parent_window, "Bridge", self.on_closing)
+        self.bridge_window = open_room_in_main_window(
+            parent_window, "Bridge", player_data, station_crew, return_callback
+        )
         
         # Title
         room_label = tk.Label(self.bridge_window, text="Station Bridge", font=("Arial", 24), bg="black", fg="white")

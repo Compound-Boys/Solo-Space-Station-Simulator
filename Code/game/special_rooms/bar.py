@@ -4,7 +4,12 @@ import random
 
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock, is_door_locked
 from game.objects.drinks import DRINKS_MENU, MIXED_DRINKS, DrinkMixer, is_drink_alcoholic
-from game.special_rooms.shared import add_note, leave_room, open_room_in_main_window, show_station_menu as render_station_menu
+from game.special_rooms.shared import (
+    add_note,
+    leave_room,
+    open_room_in_main_window,
+    show_station_menu as render_station_menu,
+)
 from game.helper_methods.ui_panels import open_modal_panel
 from game.maps.donut import BAR_KEY as DOOR_KEY
 
@@ -15,7 +20,9 @@ class Bar:
         self.station_crew = station_crew
         self.return_callback = return_callback
 
-        self.bar_window = open_room_in_main_window(parent_window, "Bar", self.on_closing)
+        self.bar_window = open_room_in_main_window(
+            parent_window, "Bar", player_data, station_crew, return_callback
+        )
 
         # Track bartender mode
         self.bartender_mode = False
@@ -383,7 +390,7 @@ class Bar:
         toggle_room_door_lock(self.player_data, DOOR_KEY, self.bar_window)
     
     def on_closing(self):
-        """Handle window closing"""
+        """Handle Exit Room (return to hallway)."""
         if is_door_locked(self.player_data, DOOR_KEY):
             self.bar_window.after(
                 10,

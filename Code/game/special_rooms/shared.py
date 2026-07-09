@@ -19,20 +19,32 @@ def add_note(player_data, text):
     })
 
 
-def open_room_in_main_window(parent_window, title, on_close):
-    """Clear the main window and prepare it for a special room."""
+def leave_room(return_callback, player_data, station_crew):
+    """Hand off to the game; main window is not destroyed."""
+    return_callback(player_data, station_crew)
+
+
+def quit_without_save(return_callback, player_data, station_crew):
+    """Window X: quit the app without persisting or returning to the hallway."""
+    player_data["_quit_without_save"] = True
+    leave_room(return_callback, player_data, station_crew)
+
+
+def open_room_in_main_window(parent_window, title, player_data, station_crew, return_callback):
+    """Clear the main window and prepare it for a special room.
+
+    Window X quits without saving; Exit Room buttons use leave_room / try_leave_through_door.
+    """
     for widget in parent_window.winfo_children():
         widget.destroy()
     parent_window.title(title)
     parent_window.geometry(ROOM_GEOMETRY)
     parent_window.configure(bg="black")
-    parent_window.protocol("WM_DELETE_WINDOW", on_close)
+    parent_window.protocol(
+        "WM_DELETE_WINDOW",
+        lambda: quit_without_save(return_callback, player_data, station_crew),
+    )
     return parent_window
-
-
-def leave_room(return_callback, player_data, station_crew):
-    """Hand off to the game; main window is not destroyed."""
-    return_callback(player_data, station_crew)
 
 
 def try_leave_through_door(room_window, player_data, door_key, return_callback, station_crew):

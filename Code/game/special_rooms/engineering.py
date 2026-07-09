@@ -14,7 +14,12 @@ from game.helper_methods.oxygen_helper import (
     OXYGEN_DEPLETION_FOLLOWUP_MESSAGE,
     life_support_entering_damage_range,
 )
-from game.special_rooms.shared import add_note, open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
+from game.special_rooms.shared import (
+    add_note,
+    open_room_in_main_window,
+    try_leave_through_door,
+    show_station_menu as render_station_menu,
+)
 from game.helper_methods.ui_panels import open_modal_panel, report_message
 from game.maps.donut import ENGINEERING_KEY as DOOR_KEY
 
@@ -25,7 +30,9 @@ class Engineering:
         self.station_crew = station_crew
         self.return_callback = return_callback
 
-        self.engineering_window = open_room_in_main_window(parent_window, "Engineering Bay", self.on_closing)
+        self.engineering_window = open_room_in_main_window(
+            parent_window, "Engineering Bay", player_data, station_crew, return_callback
+        )
         
         # Title
         room_label = tk.Label(self.engineering_window, text="Station Engineering Bay", font=("Arial", 24), bg="black", fg="white")

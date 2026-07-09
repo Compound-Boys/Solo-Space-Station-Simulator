@@ -17,7 +17,9 @@ class Quarters(ItemInventoryMixin):
         self.station_crew = station_crew
         self.return_callback = return_callback
 
-        self.quarters_window = open_room_in_main_window(parent_window, "Your Quarters", self.quit_without_save)
+        self.quarters_window = open_room_in_main_window(
+            parent_window, "Your Quarters", player_data, station_crew, return_callback
+        )
         self.root = self.quarters_window
 
         room_label = tk.Label(
@@ -625,11 +627,6 @@ class Quarters(ItemInventoryMixin):
     def save_and_exit(self):
         self.player_data["_exit_to_menu"] = True
         self.on_closing()
-
-    def quit_without_save(self):
-        """Window X: quit the app without persisting."""
-        self.player_data["_quit_without_save"] = True
-        leave_room(self.return_callback, self.player_data, self.station_crew)
 
     def on_closing(self):
         leave_room(self.return_callback, self.player_data, self.station_crew)
