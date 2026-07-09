@@ -413,12 +413,54 @@ ALL_ITEMS = {
     # },
 }
 
-# --- Helper Functions --- 
+# --- Helper Functions ---
+DEFAULT_LOCKER_ITEM_IDS = [
+    "welcome_guide",
+    "flashlight",
+    "station_map",
+    "emergency_rations",
+    "basic_tools",
+    "id_card_reader",
+    "portable_scanner",
+    "maintenance_manual",
+    "emergency_beacon",
+    "first_aid_kit",
+]
+
+
 def get_item_definition(item_id):
     """Returns a copy of the item definition from the master dictionary."""
     if item_id in ALL_ITEMS:
         return ALL_ITEMS[item_id].copy() # Return a copy to prevent modification of the original
     return None
+
+
+def build_default_locker_inventory(exclude_item_ids=None):
+    """Return default locker item dicts, optionally skipping IDs already held."""
+    exclude = exclude_item_ids or set()
+    items = []
+    for item_id in DEFAULT_LOCKER_ITEM_IDS:
+        if item_id in exclude:
+            continue
+        item_def = get_item_definition(item_id)
+        if item_def:
+            items.append(item_def)
+    return items
+
+
+def ensure_locker_inventory(player_data):
+    """Return persistent locker inventory, seeding once for older saves."""
+    if "locker_inventory" in player_data and isinstance(player_data["locker_inventory"], list):
+        return player_data["locker_inventory"]
+
+    player_inventory_ids = {
+        item.get("id")
+        for item in player_data.get("inventory", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    player_data["locker_inventory"] = build_default_locker_inventory(player_inventory_ids)
+    return player_data["locker_inventory"]
+
 
 def get_items_by_category(category_name):
     """Returns a list of item definitions for a given category."""

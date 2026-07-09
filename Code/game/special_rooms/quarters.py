@@ -3,49 +3,9 @@ import tkinter as tk
 from tkinter import messagebox
 
 from game.game import Game
-from game.items import ItemInventoryMixin, get_item_definition
+from game.items import ItemInventoryMixin, ensure_locker_inventory, get_item_definition
 from game.special_rooms.shared import add_note, leave_room, open_room_in_main_window
 from game.stock_market import StockMarket, sync_holdings_to_companies
-
-DEFAULT_LOCKER_ITEM_IDS = [
-    "welcome_guide",
-    "flashlight",
-    "station_map",
-    "emergency_rations",
-    "basic_tools",
-    "id_card_reader",
-    "portable_scanner",
-    "maintenance_manual",
-    "emergency_beacon",
-    "first_aid_kit",
-]
-
-
-def build_default_locker_inventory(exclude_item_ids=None):
-    """Return default locker item dicts, optionally skipping IDs already held."""
-    exclude = exclude_item_ids or set()
-    items = []
-    for item_id in DEFAULT_LOCKER_ITEM_IDS:
-        if item_id in exclude:
-            continue
-        item_def = get_item_definition(item_id)
-        if item_def:
-            items.append(item_def)
-    return items
-
-
-def ensure_locker_inventory(player_data):
-    """Return persistent locker inventory, seeding once for older saves."""
-    if "locker_inventory" in player_data and isinstance(player_data["locker_inventory"], list):
-        return player_data["locker_inventory"]
-
-    player_inventory_ids = {
-        item.get("id")
-        for item in player_data.get("inventory", [])
-        if isinstance(item, dict) and item.get("id")
-    }
-    player_data["locker_inventory"] = build_default_locker_inventory(player_inventory_ids)
-    return player_data["locker_inventory"]
 
 
 class Quarters(ItemInventoryMixin):
