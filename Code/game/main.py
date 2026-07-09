@@ -12,11 +12,11 @@ from game.maps import donut
 from game.helper_methods.stock_market import (
     StockMarketEngine,
     default_stock_market_state,
-    generate_market_tip,
 )
 from game.helper_methods.game import Game
+from game.helper_methods.random_events import maybe_trigger_hallway_event
 from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany, Quarters
-from game.objects.items import get_item_definition, ALL_ITEMS, ItemInventoryMixin
+from game.objects.items import ItemInventoryMixin
 from game.character_methods.character_creation import CharacterCreation
 from game.character_methods.character_sheet import render_character_sheet
 from game.helper_methods.power_constants import (
@@ -78,7 +78,6 @@ class SpaceStationGame(ItemInventoryMixin):
 
         self.battery_timer_running = False
         self.battery_timer_id = None
-        self._event_effect_messages = None
 
         # Stock market background tracking
         self.market_engine = StockMarketEngine()
@@ -140,25 +139,6 @@ class SpaceStationGame(ItemInventoryMixin):
             self.start_market_thread()
         if not self.battery_timer_running:
             self.start_battery_timer()
-
-    def _report_effect(self, title, message):
-        """Show an effect popup, or buffer the message during a random event."""
-        if self._event_effect_messages is not None:
-            self._event_effect_messages.append(message)
-        else:
-            report_message(title, message, kind="info", parent=self.root)
-
-    def _add_damage_type(self, damage_key, label, min_damage, max_damage):
-        """Apply incremental damage of a given type to the player."""
-        damage = random.randint(min_damage, max_damage)
-        original_damage = self.player_data["damage"].get(damage_key, 0)
-        self.player_data["damage"][damage_key] = min(100, original_damage + damage)
-        total = self.player_data["damage"][damage_key]
-        self._report_effect(
-            f"{label} Damage",
-            f"You suffered {damage}% {label.lower()} damage! Total {label.lower()} damage: {total}%.",
-        )
-        self.add_note(f"Suffered {label.lower()} damage: Took {damage}% damage (total now {total}%)")
 
     def _enter_special_room(self, room_class):
         """Create a special room UI instance from a room class."""
@@ -817,119 +797,10 @@ class SpaceStationGame(ItemInventoryMixin):
             self.player_data["location"]["x"] = x - (1 if direction == "north" else -1 if direction == "south" else 0)
             self.player_data["location"]["y"] = y - (1 if direction == "east" else -1 if direction == "west" else 0)
 
-        # 20% chance of a random hallway event
-        if random.random() < 0.20:
-            self.trigger_random_event()
+        maybe_trigger_hallway_event(self)
         
         # Refresh hallway view
         self.show_hallway()
-    
-    def trigger_random_event(self):
-        """Trigger a random event"""
-        # List of possible events with good, bad, and neutral outcomes
-        events = [
-            # Good events
-            {"type": "good", "title": "Found Credits", "desc": "You found some credits on the floor!", "effect": lambda: self.add_credits(random.randint(50, 200))},
-            {"type": "good", "title": "Supply Crate", "desc": "You found an unsealed supply crate with useful items.", "effect": lambda: self.add_random_item()},
-            {"type": "good", "title": "Market Tip", "desc": "You overheard a reliable market tip.", "effect": lambda: self.add_market_knowledge()},
-            
-            # Neutral events
-            {"type": "neutral", "title": "Crew Member", "desc": "You passed by a crew member who nodded at you.", "effect": lambda: None},
-            {"type": "neutral", "title": "Announcement", "desc": "The station PA system makes an announcement.", "effect": lambda: self.station_announcement()},
-            {"type": "neutral", "title": "Maintenance", "desc": "A maintenance drone passes by, cleaning the hallway.", "effect": lambda: None},
-            
-            # Bad events - now all include blunt damage
-            {"type": "bad", "title": "Lost Credits", "desc": "You dropped some credits and couldn't find them all. You bumped your head looking for them.", 
-              "effect": lambda: self.combined_effect([
-                  lambda: self.lose_credits(random.randint(10, 50)),
-                  lambda: self.damage_limb("head", 5, 10)
-              ])},
-            {"type": "bad", "title": "Small Explosion", "desc": "A nearby conduit explodes, showering you with hot sparks and debris!", 
-              "effect": lambda: self.combined_effect([
-                  lambda: self.damage_random_limb(10, 25),  # Blunt damage from impact
-                  lambda: self.add_burn_damage(5, 15)       # Burn damage from sparks
-              ])},
-            {"type": "bad", "title": "Slip and Fall", "desc": "You slipped on a wet floor and fell hard.", 
-              "effect": lambda: self.damage_random_limb(10, 20)},
-            {"type": "bad", "title": "Steam Leak", "desc": "A pipe bursts, releasing scalding steam that burns your arm!", 
-              "effect": lambda: self.combined_effect([
-                  lambda: self.damage_limb("left_arm", 5, 10),  # Blunt damage from impact
-                  lambda: self.add_burn_damage(15, 30)          # Burn damage from steam
-              ])},
-            {"type": "bad", "title": "Falling Debris", "desc": "A ceiling panel breaks loose and hits your head!", 
-              "effect": lambda: self.damage_limb("head", 15, 35)},
-            {"type": "bad", "title": "Maintenance Accident", "desc": "Your leg gets caught in an open floor grate!", 
-              "effect": lambda: self.damage_limb("right_leg", 10, 20)},
-            {"type": "bad", "title": "Chemical Spill", "desc": "You walk through a chemical spill! Your leg is burned and you feel ill.", 
-              "effect": lambda: self.combined_effect([
-                  lambda: self.damage_limb("left_leg", 5, 10),    # Blunt damage from slipping
-                  lambda: self.add_burn_damage(5, 15),            # Burn damage from chemicals
-                  lambda: self.add_poison_damage(10, 20)          # Poison damage from fumes
-              ])}
-        ]
-        
-        # Pick a random event
-        event = random.choice(events)
-
-        self._event_effect_messages = []
-        try:
-            event["effect"]()
-            body = event["desc"]
-            if self._event_effect_messages:
-                body = body + "\n\n" + "\n".join(self._event_effect_messages)
-            messagebox.showinfo(event["title"], body)
-        finally:
-            self._event_effect_messages = None
-    
-    def combined_effect(self, effect_functions):
-        """Apply multiple effects in sequence"""
-        for effect_fn in effect_functions:
-            effect_fn()
-    
-    def damage_random_limb(self, min_damage, max_damage):
-        """Damage a random limb by a random amount"""
-        # Get a random limb
-        limb = random.choice(list(self.player_data["limbs"].keys()))
-        self.damage_limb(limb, min_damage, max_damage)
-    
-    def damage_limb(self, limb, min_damage, max_damage):
-        """Damage a specific limb by a random amount within range (blunt damage)"""
-        if limb in self.player_data["limbs"]:
-            # Calculate damage
-            damage = random.randint(min_damage, max_damage)
-            
-            # Apply damage
-            original_health = self.player_data["limbs"][limb]
-            self.player_data["limbs"][limb] = max(0, original_health - damage)
-            
-            # Format the limb name for display
-            limb_name = limb.replace('_', ' ').title()
-            
-            # Show damage message
-            self._report_effect(
-                "Blunt Injury",
-                f"Your {limb_name} took {damage}% blunt damage and is now at {self.player_data['limbs'][limb]}%.",
-            )
-            
-            # Add note about the injury
-            self.add_note(f"Suffered blunt damage to {limb_name}: Took {damage}% damage (from {original_health}% to {self.player_data['limbs'][limb]}%)")
-    
-    def add_credits(self, amount):
-        """Add credits to the player"""
-        self.player_data["credits"] += amount
-        self._report_effect("Credits Added", f"You gained {amount} credits.")
-        
-        # Add note about credits gained
-        self.add_note(f"Found {amount} credits. New balance: {self.player_data['credits']} credits.")
-    
-    def lose_credits(self, amount):
-        """Subtract credits from the player (min 0)"""
-        old_credits = self.player_data["credits"]
-        self.player_data["credits"] = max(0, old_credits - amount)
-        self._report_effect("Credits Lost", f"You lost {amount} credits.")
-        
-        # Add note about credits lost
-        self.add_note(f"Lost {amount} credits. New balance: {self.player_data['credits']} credits.")
     
     def show_load_game(self):
         # Clear the window
@@ -1071,14 +942,6 @@ class SpaceStationGame(ItemInventoryMixin):
         
         return True
 
-    def add_burn_damage(self, min_damage, max_damage):
-        """Apply burn damage to the player"""
-        self._add_damage_type("burn", "Burn", min_damage, max_damage)
-
-    def add_poison_damage(self, min_damage, max_damage):
-        """Apply poison damage to the player"""
-        self._add_damage_type("poison", "Poison", min_damage, max_damage)
-
     def enter_special_room_at(self, room_name, target_key):
         """Enter a special room at a specified target location"""
         room_details = self.ship_map.get(target_key)
@@ -1143,60 +1006,6 @@ class SpaceStationGame(ItemInventoryMixin):
         self._save_game()
         self.stop_battery_timer()
         self.show_main_menu()
-
-    def add_random_item(self):
-        """Add a random item (using item definitions) to the player's inventory"""
-        # Get all available item IDs from the master list
-        available_item_ids = list(ALL_ITEMS.keys())
-        
-        if not available_item_ids:
-            messagebox.showwarning("Error", "No items defined to be found.")
-            return
-            
-        # Choose a random item ID
-        item_id = random.choice(available_item_ids)
-        
-        # Get a copy of the item definition
-        item_def = get_item_definition(item_id)
-        
-        if not item_def:
-            messagebox.showerror("Error", f"Could not find definition for random item ID: {item_id}")
-            return
-
-        # Ensure inventory list exists
-        self.player_data.setdefault("inventory", [])
-            
-        # Add the item dictionary to inventory
-        self.player_data["inventory"].append(item_def)
-        item_name = item_def.get("name", "an item")
-        self._report_effect("Item Found", f"You found {item_name} and added it to your inventory.")
-        
-        # Add note about the item found
-        self.add_note(f"Found {item_name} ({item_id}) and added it to inventory.")
-    
-    def add_market_knowledge(self):
-        """Add market knowledge to the player - reveals a tip about a stock"""
-        message = generate_market_tip(self.player_data["stock_market"].get("companies", []))
-        if message is None:
-            self._report_effect("Market Tip", "You heard a stock tip, but don't understand the market yet.")
-            return
-
-        self._report_effect("Market Tip", message)
-        self.add_note(f"Market Tip: {message}")
-    
-    def station_announcement(self):
-        """Display a random station announcement"""
-        announcements = [
-            "Reminder to all crew: safety protocols must be followed at all times.",
-            "The cafeteria will be serving special meal rations today.",
-            "Maintenance is scheduled in Sector 7 tomorrow.",
-            "All personnel are reminded to report suspicious activity to security.",
-            "Weekly crew meeting is postponed until further notice.",
-            "Environmental controls are being recalibrated. Expect minor temperature fluctuations."
-        ]
-        
-        announcement = random.choice(announcements)
-        self._report_effect("Station Announcement", f"The PA system crackles: '{announcement}'")
 
 if __name__ == "__main__":
     if getattr(sys, "frozen", False):
