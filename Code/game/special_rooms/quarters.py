@@ -550,6 +550,14 @@ class Quarters(ItemInventoryMixin):
         y = (sheet_window.winfo_screenheight() // 2) - (height // 2)
         sheet_window.geometry(f"{width}x{height}+{x}+{y}")
 
+        tk.Button(
+            sheet_window,
+            text="Close",
+            font=("Arial", 14),
+            width=15,
+            command=sheet_window.destroy,
+        ).pack(side=tk.BOTTOM, pady=20)
+
         render_character_sheet(
             sheet_window,
             self.player_data,
@@ -557,14 +565,6 @@ class Quarters(ItemInventoryMixin):
             on_holdings=self.show_holdings_popup,
             on_notes=self._show_notes_popup,
         )
-
-        tk.Button(
-            sheet_window,
-            text="Close",
-            font=("Arial", 14),
-            width=15,
-            command=sheet_window.destroy,
-        ).pack(pady=30)
 
     def show_holdings_popup(self):
         popup = tk.Toplevel(self.quarters_window)

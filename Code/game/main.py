@@ -69,6 +69,7 @@ class SpaceStationGame(ItemInventoryMixin):
 
         self.battery_timer_running = False
         self.battery_timer_id = None
+        self._event_effect_messages = None
 
         # Stock market background tracking
         self.market_engine = StockMarketEngine()
@@ -164,13 +165,20 @@ class SpaceStationGame(ItemInventoryMixin):
         if not self.battery_timer_running:
             self.start_battery_timer()
 
+    def _report_effect(self, title, message):
+        """Show an effect popup, or buffer the message during a random event."""
+        if self._event_effect_messages is not None:
+            self._event_effect_messages.append(message)
+        else:
+            messagebox.showinfo(title, message)
+
     def _add_damage_type(self, damage_key, label, min_damage, max_damage):
         """Apply incremental damage of a given type to the player."""
         damage = random.randint(min_damage, max_damage)
         original_damage = self.player_data["damage"].get(damage_key, 0)
         self.player_data["damage"][damage_key] = min(100, original_damage + damage)
         total = self.player_data["damage"][damage_key]
-        messagebox.showinfo(
+        self._report_effect(
             f"{label} Damage",
             f"You suffered {damage}% {label.lower()} damage! Total {label.lower()} damage: {total}%.",
         )
@@ -507,6 +515,14 @@ class SpaceStationGame(ItemInventoryMixin):
         # Configure window size
         self.root.geometry("800x700")  # Increased height to accommodate all content
 
+        # Store the previous screen to return to
+        self.previous_screen = getattr(self, 'previous_screen', 'show_hallway')
+
+        # Pack Return at the bottom first so it stays visible above tall sheet content
+        return_btn = tk.Button(self.root, text="Return", font=("Arial", 14), width=15,
+                             command=lambda: getattr(self, self.previous_screen)())
+        return_btn.pack(side=tk.BOTTOM, pady=20)
+
         render_character_sheet(
             self.root,
             self.player_data,
@@ -514,14 +530,6 @@ class SpaceStationGame(ItemInventoryMixin):
             on_holdings=self.show_holdings_popup,
             on_notes=self.show_notes_popup,
         )
-
-        # Store the previous screen to return to
-        self.previous_screen = getattr(self, 'previous_screen', 'show_hallway')
-
-        # Return button that goes back to the previous screen
-        return_btn = tk.Button(self.root, text="Return", font=("Arial", 14), width=15,
-                             command=lambda: getattr(self, self.previous_screen)())
-        return_btn.pack(pady=30)  # Increased padding to ensure button is visible
     
     def show_notes_popup(self):
         """Show a popup window with the player's notes"""
@@ -1076,12 +1084,16 @@ class SpaceStationGame(ItemInventoryMixin):
         
         # Pick a random event
         event = random.choice(events)
-        
-        # Show the event
-        messagebox.showinfo(event["title"], event["desc"])
-        
-        # Apply the effect
-        event["effect"]()
+
+        self._event_effect_messages = []
+        try:
+            event["effect"]()
+            body = event["desc"]
+            if self._event_effect_messages:
+                body = body + "\n\n" + "\n".join(self._event_effect_messages)
+            messagebox.showinfo(event["title"], body)
+        finally:
+            self._event_effect_messages = None
     
     def combined_effect(self, effect_functions):
         """Apply multiple effects in sequence"""
@@ -1108,7 +1120,10 @@ class SpaceStationGame(ItemInventoryMixin):
             limb_name = limb.replace('_', ' ').title()
             
             # Show damage message
-            messagebox.showinfo("Blunt Injury", f"Your {limb_name} took {damage}% blunt damage and is now at {self.player_data['limbs'][limb]}%.")
+            self._report_effect(
+                "Blunt Injury",
+                f"Your {limb_name} took {damage}% blunt damage and is now at {self.player_data['limbs'][limb]}%.",
+            )
             
             # Add note about the injury
             self.add_note(f"Suffered blunt damage to {limb_name}: Took {damage}% damage (from {original_health}% to {self.player_data['limbs'][limb]}%)")
@@ -1116,7 +1131,7 @@ class SpaceStationGame(ItemInventoryMixin):
     def add_credits(self, amount):
         """Add credits to the player"""
         self.player_data["credits"] += amount
-        messagebox.showinfo("Credits Added", f"You gained {amount} credits.")
+        self._report_effect("Credits Added", f"You gained {amount} credits.")
         
         # Add note about credits gained
         self.add_note(f"Found {amount} credits. New balance: {self.player_data['credits']} credits.")
@@ -1125,7 +1140,7 @@ class SpaceStationGame(ItemInventoryMixin):
         """Subtract credits from the player (min 0)"""
         old_credits = self.player_data["credits"]
         self.player_data["credits"] = max(0, old_credits - amount)
-        messagebox.showinfo("Credits Lost", f"You lost {amount} credits.")
+        self._report_effect("Credits Lost", f"You lost {amount} credits.")
         
         # Add note about credits lost
         self.add_note(f"Lost {amount} credits. New balance: {self.player_data['credits']} credits.")
@@ -1361,7 +1376,7 @@ class SpaceStationGame(ItemInventoryMixin):
         # Add the item dictionary to inventory
         self.player_data["inventory"].append(item_def)
         item_name = item_def.get("name", "an item")
-        messagebox.showinfo("Item Found", f"You found {item_name} and added it to your inventory.")
+        self._report_effect("Item Found", f"You found {item_name} and added it to your inventory.")
         
         # Add note about the item found
         self.add_note(f"Found {item_name} ({item_id}) and added it to inventory.")
@@ -1370,10 +1385,10 @@ class SpaceStationGame(ItemInventoryMixin):
         """Add market knowledge to the player - reveals a tip about a stock"""
         message = generate_market_tip(self.player_data["stock_market"].get("companies", []))
         if message is None:
-            messagebox.showinfo("Market Tip", "You heard a stock tip, but don't understand the market yet.")
+            self._report_effect("Market Tip", "You heard a stock tip, but don't understand the market yet.")
             return
 
-        messagebox.showinfo("Market Tip", message)
+        self._report_effect("Market Tip", message)
         self.add_note(f"Market Tip: {message}")
     
     def station_announcement(self):
@@ -1388,7 +1403,7 @@ class SpaceStationGame(ItemInventoryMixin):
         ]
         
         announcement = random.choice(announcements)
-        messagebox.showinfo("Station Announcement", f"The PA system crackles: '{announcement}'")
+        self._report_effect("Station Announcement", f"The PA system crackles: '{announcement}'")
 
 if __name__ == "__main__":
     if getattr(sys, "frozen", False):
