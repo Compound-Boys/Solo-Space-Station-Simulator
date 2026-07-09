@@ -107,19 +107,15 @@ class Bar:
                           font=("Arial", 12), bg="black", fg="white", wraplength=600)
         desc_label.pack()
         
-        # Organize drinks into categories
-        basic_drinks = {}
-        mixed_drinks = {}
-        all_drinks = {}
-        
-        # Copy the drinks to their respective categories
-        for name, details in DRINKS_MENU.items():
-            basic_drinks[name] = details
-            all_drinks[name] = details
-            
-        for name, details in MIXED_DRINKS.items():
-            mixed_drinks[name] = details
-            all_drinks[name] = details
+        # Organize drinks into categories (mixed drinks come from stock only)
+        stock = self.player_data.setdefault("bar_mixed_stock", {})
+        basic_drinks = dict(DRINKS_MENU)
+        mixed_drinks = {
+            name: MIXED_DRINKS[name]
+            for name, qty in stock.items()
+            if qty > 0 and name in MIXED_DRINKS
+        }
+        all_drinks = {**basic_drinks, **mixed_drinks}
 
         alcoholic_drinks = {
             name: details for name, details in all_drinks.items()
@@ -129,117 +125,184 @@ class Bar:
             name: details for name, details in all_drinks.items()
             if not is_drink_alcoholic(name, details)
         }
-        
+
+        # Mutable category dicts so refresh after purchase can rebuild them
+        categories = {
+            "All Drinks": all_drinks,
+            "Basic Drinks": basic_drinks,
+            "Mixed Drinks": mixed_drinks,
+            "Alcoholic": alcoholic_drinks,
+            "Non-Alcoholic": non_alcoholic_drinks,
+        }
+
         # Track the current category and selected drink
         current_category = {"drinks": all_drinks, "name": "All Drinks"}
         selected_drink = {"name": "", "details": None}
-        
-        # Function to populate the listbox with a category
-        def show_category(category_drinks, category_name):
+
+        def rebuild_categories():
+            stock = self.player_data.setdefault("bar_mixed_stock", {})
+            categories["Basic Drinks"] = dict(DRINKS_MENU)
+            categories["Mixed Drinks"] = {
+                name: MIXED_DRINKS[name]
+                for name, qty in stock.items()
+                if qty > 0 and name in MIXED_DRINKS
+            }
+            categories["All Drinks"] = {**categories["Basic Drinks"], **categories["Mixed Drinks"]}
+            categories["Alcoholic"] = {
+                name: details for name, details in categories["All Drinks"].items()
+                if is_drink_alcoholic(name, details)
+            }
+            categories["Non-Alcoholic"] = {
+                name: details for name, details in categories["All Drinks"].items()
+                if not is_drink_alcoholic(name, details)
+            }
+
+        def show_category(category_name):
+            rebuild_categories()
+            category_drinks = categories[category_name]
+
             # Clear the listbox
             drink_listbox.delete(0, tk.END)
-            
+
             # Update current category
             current_category["drinks"] = category_drinks
             current_category["name"] = category_name
-            
+
             # Add header
             drink_listbox.insert(tk.END, f"--- {category_name} ---")
-            
+
             # Add drinks to the listbox
+            stock = self.player_data.setdefault("bar_mixed_stock", {})
             for drink, details in category_drinks.items():
-                drink_listbox.insert(tk.END, f"{drink} - {details['price']} credits")
-            
-            # Reset the description
+                if drink in MIXED_DRINKS:
+                    qty = stock.get(drink, 0)
+                    drink_listbox.insert(
+                        tk.END, f"{drink} (Qty: {qty}) - {details['price']} credits"
+                    )
+                else:
+                    drink_listbox.insert(tk.END, f"{drink} - {details['price']} credits")
+
+            # Reset the description and selection
             desc_label.config(text="Select a drink to see its description")
-        
+            selected_drink["name"] = ""
+            selected_drink["details"] = None
+
+        def refresh_menu():
+            show_category(current_category["name"])
+
         # Create the category buttons with more spacing
         all_btn = tk.Button(tab_frame, text="All Drinks", font=("Arial", 12), width=12,
-                         command=lambda: show_category(all_drinks, "All Drinks"))
+                         command=lambda: show_category("All Drinks"))
         all_btn.pack(side=tk.LEFT, padx=15)
-        
+
         basic_btn = tk.Button(tab_frame, text="Basic Drinks", font=("Arial", 12), width=12,
-                           command=lambda: show_category(basic_drinks, "Basic Drinks"))
+                           command=lambda: show_category("Basic Drinks"))
         basic_btn.pack(side=tk.LEFT, padx=15)
-        
+
         mixed_btn = tk.Button(tab_frame, text="Mixed Drinks", font=("Arial", 12), width=12,
-                           command=lambda: show_category(mixed_drinks, "Mixed Drinks"))
+                           command=lambda: show_category("Mixed Drinks"))
         mixed_btn.pack(side=tk.LEFT, padx=15)
 
         alcoholic_btn = tk.Button(tab_frame, text="Alcoholic", font=("Arial", 12), width=12,
-                               command=lambda: show_category(alcoholic_drinks, "Alcoholic"))
+                               command=lambda: show_category("Alcoholic"))
         alcoholic_btn.pack(side=tk.LEFT, padx=15)
 
         non_alcoholic_btn = tk.Button(tab_frame, text="Non-Alcoholic", font=("Arial", 12), width=12,
-                                   command=lambda: show_category(non_alcoholic_drinks, "Non-Alcoholic"))
+                                   command=lambda: show_category("Non-Alcoholic"))
         non_alcoholic_btn.pack(side=tk.LEFT, padx=15)
-        
+
         # Show all drinks by default
-        show_category(all_drinks, "All Drinks")
-        
+        show_category("All Drinks")
+
         # Update description when a drink is selected
         def on_select(event):
             selection = drink_listbox.curselection()
             if not selection or selection[0] == 0:  # Skip the header
                 return
-                
+
             # Get the selected drink name by parsing the listbox entry
             index = selection[0]
             entry = drink_listbox.get(index)
-            
+
             # Parse the entry to get the drink name
             if " - " in entry:
                 drink_name = entry.split(" - ")[0]
-                
+                if " (Qty:" in drink_name:
+                    drink_name = drink_name.split(" (Qty:")[0].strip()
+
                 # Find the drink details in the current category
                 if drink_name in current_category["drinks"]:
                     drink_details = current_category["drinks"][drink_name]
                     desc_label.config(text=drink_details['desc'])
-                    
+
                     # Update the selected drink
                     selected_drink["name"] = drink_name
                     selected_drink["details"] = drink_details
-            
+
         drink_listbox.bind('<<ListboxSelect>>', on_select)
-        
+
         # Order button
-        order_btn = tk.Button(btn_frame, text="Order Selected Drink", font=("Arial", 12), 
-                           command=lambda: self.order_drink_from_menu(selected_drink, menu_popup, credits_label))
+        order_btn = tk.Button(btn_frame, text="Order Selected Drink", font=("Arial", 12),
+                           command=lambda: self.order_drink_from_menu(
+                               selected_drink, menu_popup, credits_label, refresh_menu
+                           ))
         order_btn.pack(side=tk.LEFT, padx=10)
         
         # Close button
         close_btn = tk.Button(btn_frame, text="Close Menu", font=("Arial", 12), command=menu_popup.destroy)
         close_btn.pack(side=tk.LEFT, padx=10)
     
-    def order_drink_from_menu(self, selected_drink, popup, credits_label):
+    def order_drink_from_menu(self, selected_drink, popup, credits_label, refresh_menu=None):
         """Process an order for a drink selected from the menu"""
         # Check if a drink is selected
         if not selected_drink["name"] or not selected_drink["details"]:
             tk.messagebox.showinfo("Selection Needed", "Please select a drink first", parent=popup)
             return
-        
+
         drink_name = selected_drink["name"]
         drink_details = selected_drink["details"]
-        
+
+        # Mixed drinks require available stock
+        if drink_name in MIXED_DRINKS:
+            stock = self.player_data.setdefault("bar_mixed_stock", {})
+            if stock.get(drink_name, 0) <= 0:
+                tk.messagebox.showinfo(
+                    "Out of Stock",
+                    f"{drink_name} is not available. Mix one at the bartender station first.",
+                    parent=popup,
+                )
+                return
+
         # Check if player has enough credits
         if self.player_data['credits'] < drink_details['price']:
-            tk.messagebox.showinfo("Insufficient Credits", 
-                               f"You don't have enough credits to order {drink_name}.", 
+            tk.messagebox.showinfo("Insufficient Credits",
+                               f"You don't have enough credits to order {drink_name}.",
                                parent=popup)
             return
-        
+
+        # Decrement mixed drink stock after a successful purchase check
+        if drink_name in MIXED_DRINKS:
+            stock = self.player_data.setdefault("bar_mixed_stock", {})
+            stock[drink_name] -= 1
+            if stock[drink_name] <= 0:
+                del stock[drink_name]
+
         # Process the order
         self.player_data['credits'] -= drink_details['price']
-        
+
         # Update the credits display
         credits_label.config(text=f"Your credits: {self.player_data['credits']}")
-        
+
         # Add a note about the purchase
         add_note(self.player_data, f"Purchased {drink_name} at the bar for {drink_details['price']} credits.")
-        
+
+        # Refresh menu so quantity updates or the drink is removed
+        if refresh_menu:
+            refresh_menu()
+
         # Show confirmation message
-        tk.messagebox.showinfo("Order Successful", 
-                           f"You've ordered a {drink_name} for {drink_details['price']} credits. Enjoy!", 
+        tk.messagebox.showinfo("Order Successful",
+                           f"You've ordered a {drink_name} for {drink_details['price']} credits. Enjoy!",
                            parent=popup)
     
     def socialize(self):

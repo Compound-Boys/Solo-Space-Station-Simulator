@@ -410,7 +410,15 @@ class DrinkMixer:
         drink_match, drink_data = match_recipe(ingredients)
 
         if drink_match:
-            result_text = f"Success! You've mixed a {drink_match}.\n{drink_data['desc']}"
+            stock = self.player_data.setdefault("bar_mixed_stock", {})
+            stock[drink_match] = stock.get(drink_match, 0) + 1
+            qty = stock[drink_match]
+
+            result_text = (
+                f"Success! You've mixed a {drink_match}.\n"
+                f"{drink_data['desc']}\n"
+                f"(Qty: {qty})"
+            )
             result_label.config(text=result_text, fg="light green")
 
             if "notes" not in self.player_data:

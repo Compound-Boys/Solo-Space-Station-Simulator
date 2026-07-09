@@ -50,7 +50,11 @@ class SpaceStationGame(ItemInventoryMixin):
         self.root = root
         self.base_path = base_path
         self.root.title("Space Station 13 Text Clone")
-        self.root.geometry("920x690")
+        width, height = 1012, 759  # 920x690 + 10%
+        self.root.update_idletasks()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
         self.root.configure(bg="black")
         configure_message_buffer(self.root)
 
@@ -456,7 +460,7 @@ class SpaceStationGame(ItemInventoryMixin):
         self._ensure_game_running()
 
         # Configure window size
-        self.root.geometry("920x805")  # Increased height to accommodate all content
+        self.root.geometry("1012x886")  # 920x805 + 10%
 
         # Store the previous screen to return to
         self.previous_screen = getattr(self, 'previous_screen', 'show_hallway')
