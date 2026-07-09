@@ -16,6 +16,7 @@ from game.helper_methods.oxygen_helper import (
 )
 from game.special_rooms.shared import (
     add_note,
+    build_npc_contact_section,
     build_room_shell,
     open_room_in_main_window,
     try_leave_through_door,
@@ -56,12 +57,37 @@ class Engineering:
         # Engineering options - Changed "Examine Tools" to "Access Fabricator"
         fabricator_btn = tk.Button(self.button_frame, text="Access Fabricator", font=("Arial", 14), width=20, command=self.access_fabricator)
         fabricator_btn.pack(pady=10)
-        
+
+        # Talk to engineer option (or "Call" them if they've stepped away)
+        build_npc_contact_section(
+            self.button_frame,
+            self.player_data,
+            self.station_crew,
+            "Engineer",
+            self.engineering_window,
+            talk_label="Talk to Engineer",
+            talk_command=self.talk_to_engineer,
+            refresh_callback=self.show_room_options,
+            absent_flavor="The engineer is away from the bay.",
+        )
+
         if can_control_door(self.player_data, DOOR_KEY):
             back_btn = tk.Button(self.button_frame, text="Back to Station Menu", font=("Arial", 14), width=20, 
                                command=self.show_station_menu)
             back_btn.pack(pady=10)
-    
+
+    def talk_to_engineer(self):
+        self.engineering_window.after(
+            10,
+            lambda: messagebox.showinfo(
+                "Engineer",
+                "The engineer barely glances up from the console. 'Kinda busy here.'",
+                parent=self.engineering_window,
+            ),
+        )
+        self.engineering_window.after(20, self.engineering_window.lift)
+        self.engineering_window.focus_force()
+
     def access_fabricator(self):
         """Open the fabricator interface using the new item system"""
         _panel, fab_popup = open_modal_panel(self.engineering_window, title="Fabricator")

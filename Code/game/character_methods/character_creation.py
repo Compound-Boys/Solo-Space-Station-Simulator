@@ -5,6 +5,7 @@ from tkinter import messagebox
 
 from game.objects.items import build_default_locker_inventory
 from game.helper_methods.stock_market import default_stock_market_state, serialize_companies
+from game.helper_methods.npc_movement import location_for_post, pick_random_hallway_location
 
 # List of potential NPC names
 NPC_NAMES = [
@@ -349,6 +350,8 @@ class CharacterCreation:
         }
         self.player_data["alcohol_percent"] = 0
         self.player_data["warrant"] = False
+        self.player_data["in_jail"] = False
+        self.player_data["jail_release_at"] = None
 
         self.player_data["credits"] = job_info["credits"]
 
@@ -387,13 +390,18 @@ class CharacterCreation:
                 "subdepartment": assistant_info["subdepartment"],
                 "credits": assistant_info["credits"],
                 "inventory": [],
-                "location": {"x": -1, "y": 0},
+                # Staff Assistants have no fixed post, so they start out
+                # wandering the hallway ring rather than parked in quarters.
+                "location": pick_random_hallway_location(),
+                "room_visit_remaining": 0,
                 "limbs": {
                     "left_arm": 100, "right_arm": 100, "left_leg": 100,
                     "right_leg": 100, "chest": 100, "head": 100,
                 },
                 "damage": {"burn": 0, "poison": 0, "oxygen": 0},
                 "warrant": False,
+                "in_jail": False,
+                "jail_release_at": None,
                 "permissions": permissions_for_job("Staff Assistant"),
             }
 
@@ -410,13 +418,17 @@ class CharacterCreation:
                 "subdepartment": captain_info["subdepartment"],
                 "credits": department_heads["Captain"]["credits"],
                 "inventory": [],
-                "location": {"x": -1, "y": 0},
+                "location": location_for_post("Captain"),
+                "on_duty": True,
+                "room_visit_remaining": 0,
                 "limbs": {
                     "left_arm": 100, "right_arm": 100, "left_leg": 100,
                     "right_leg": 100, "chest": 100, "head": 100,
                 },
                 "damage": {"burn": 0, "poison": 0, "oxygen": 0},
                 "warrant": False,
+                "in_jail": False,
+                "jail_release_at": None,
                 "permissions": permissions_for_job("Captain"),
             }
             station_crew.append(captain_data)
@@ -440,13 +452,17 @@ class CharacterCreation:
                         "job": npc_job,
                         "credits": data["credits"],
                         "inventory": [],
-                        "location": {"x": -1, "y": 0},
+                        "location": location_for_post(npc_job),
+                        "on_duty": True,
+                        "room_visit_remaining": 0,
                         "limbs": {
                             "left_arm": 100, "right_arm": 100, "left_leg": 100,
                             "right_leg": 100, "chest": 100, "head": 100,
                         },
                         "damage": {"burn": 0, "poison": 0, "oxygen": 0},
                         "warrant": False,
+                        "in_jail": False,
+                        "jail_release_at": None,
                         "permissions": {
                             s: (j == npc_job)
                             for j, d in department_heads.items()

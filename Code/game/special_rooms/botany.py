@@ -5,6 +5,7 @@ import random
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
 from game.special_rooms.shared import (
     add_note,
+    build_npc_contact_section,
     build_room_shell,
     open_room_in_main_window,
     try_leave_through_door,
@@ -66,12 +67,37 @@ class Botany:
         # View plants option
         view_plants_btn = tk.Button(self.button_frame, text="View Plants", font=("Arial", 14), width=20, command=self.view_plants)
         view_plants_btn.pack(pady=10)
-        
+
+        # Talk to botanist option (or "Call" them if they've stepped away)
+        build_npc_contact_section(
+            self.button_frame,
+            self.player_data,
+            self.station_crew,
+            "Botanist",
+            self.botany_window,
+            talk_label="Talk to Botanist",
+            talk_command=self.talk_to_botanist,
+            refresh_callback=self.show_room_options,
+            absent_flavor="The botanist is away from the lab.",
+        )
+
         if can_control_door(self.player_data, DOOR_KEY):
             back_btn = tk.Button(self.button_frame, text="Back to Station Menu", font=("Arial", 14), width=20, 
                                command=self.show_station_menu)
             back_btn.pack(pady=10)
-    
+
+    def talk_to_botanist(self):
+        self.botany_window.after(
+            10,
+            lambda: messagebox.showinfo(
+                "Botanist",
+                "The botanist continues tending to the plants without looking up.",
+                parent=self.botany_window,
+            ),
+        )
+        self.botany_window.after(20, self.botany_window.lift)
+        self.botany_window.focus_force()
+
     def view_plants(self):
         """View the plants in the botany lab"""
         # Create a new top-level window for viewing plants

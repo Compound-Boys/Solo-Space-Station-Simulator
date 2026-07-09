@@ -6,6 +6,7 @@ from game.helper_methods.door_control import can_control_door, toggle_door_lock 
 from game.helper_methods.oxygen_helper import DOCTOR_REQUIRED_FLOOR
 from game.special_rooms.shared import (
     add_note,
+    build_npc_contact_section,
     build_room_shell,
     open_room_in_main_window,
     try_leave_through_door,
@@ -187,10 +188,19 @@ class MedBay:
         health_check_btn = tk.Button(self.button_frame, text="Request Health Check", font=("Arial", 14), width=20, command=self.health_check)
         health_check_btn.pack(pady=10)
         
-        # Talk to doctor option
-        talk_doctor_btn = tk.Button(self.button_frame, text="Talk to Doctor", font=("Arial", 14), width=20, command=self.talk_to_doctor)
-        talk_doctor_btn.pack(pady=10)
-        
+        # Talk to doctor option (or "Call" them if they've stepped away)
+        build_npc_contact_section(
+            self.button_frame,
+            self.player_data,
+            self.station_crew,
+            "Doctor",
+            self.medbay_window,
+            talk_label="Talk to Doctor",
+            talk_command=self.talk_to_doctor,
+            refresh_callback=self.show_room_options,
+            absent_flavor="The doctor is currently away from MedBay.",
+        )
+
         if can_control_door(self.player_data, DOOR_KEY):
             back_btn = tk.Button(self.button_frame, text="Back to Station Menu", font=("Arial", 14), width=20, 
                                command=self.show_station_menu)

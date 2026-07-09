@@ -6,6 +6,7 @@ from game.helper_methods.door_control import can_control_door, toggle_door_lock 
 from game.objects.drinks import DRINKS_MENU, MIXED_DRINKS, DrinkMixer, is_drink_alcoholic
 from game.special_rooms.shared import (
     add_note,
+    build_npc_contact_section,
     build_room_shell,
     leave_room,
     open_room_in_main_window,
@@ -48,10 +49,19 @@ class Bar:
         for widget in self.button_frame.winfo_children():
             widget.destroy()
             
-        # Order drinks button
-        order_btn = tk.Button(self.button_frame, text="Order Drinks", font=("Arial", 14), width=20, command=self.show_drink_menu)
-        order_btn.pack(pady=10)
-        
+        # Order drinks button (or "Call" the bartender if they've stepped away)
+        build_npc_contact_section(
+            self.button_frame,
+            self.player_data,
+            self.station_crew,
+            "Bartender",
+            self.bar_window,
+            talk_label="Order Drinks",
+            talk_command=self.show_drink_menu,
+            refresh_callback=self.show_room_options,
+            absent_flavor="The bartender is away from the bar.",
+        )
+
         # Socialize option
         socialize_btn = tk.Button(self.button_frame, text="Socialize", font=("Arial", 14), width=20, command=self.socialize)
         socialize_btn.pack(pady=10)
