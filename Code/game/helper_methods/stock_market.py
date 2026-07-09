@@ -1,9 +1,31 @@
 import tkinter as tk
+import math
 import random
 import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter import messagebox, ttk
+
+DEFAULT_COMPANY_NAMES = [
+    "TechCorp",
+    "GlobalBank",
+    "HealthCare Plus",
+    "EnergyCo",
+    "FoodChain",
+    "AutoMakers",
+    "RetailGiant",
+    "PharmaTech",
+    "RealEstate Co",
+    "MediaGroup",
+    "Aerospace Inc",
+    "TechStart",
+    "GreenEnergy",
+    "DigitalBank",
+    "SmartHome",
+]
+
+UPDATE_INTERVAL_SECONDS = 60
+CYCLES_PER_DAY = 5
 
 class Company:
     def __init__(self, name, starting_value):
@@ -31,237 +53,419 @@ class Company:
         if len(self.price_history) > 50:
             self.price_history.pop(0)
 
+
+def create_default_companies(history_cycles=5):
+    """Create the default company list with optional price history."""
+    companies = [Company(name, random.uniform(10, 1000)) for name in DEFAULT_COMPANY_NAMES]
+    for _ in range(history_cycles):
+        for company in companies:
+            company.update_value()
+    return companies
+
+
+def serialize_companies(companies):
+    """Serialize live company objects for player_data storage."""
+    return [
+        {
+            "name": company.name,
+            "current_value": company.current_value,
+            "previous_value": company.previous_value,
+            "price_history": company.price_history,
+            "owned_shares": company.owned_shares if hasattr(company, "owned_shares") else 0,
+        }
+        for company in companies
+    ]
+
+
+def apply_companies_from_save(companies, company_data_list):
+    """Restore live company objects from saved player_data."""
+    if not company_data_list or len(company_data_list) != len(companies):
+        return
+
+    for i, company_data in enumerate(company_data_list):
+        companies[i].name = company_data["name"]
+        companies[i].current_value = company_data["current_value"]
+        companies[i].previous_value = company_data["previous_value"]
+        companies[i].price_history = company_data["price_history"]
+        companies[i].owned_shares = company_data.get("owned_shares", 0)
+
+
+def sync_holdings_to_companies(companies, stock_holdings):
+    """Sync player stock holdings onto company owned_shares fields."""
+    holdings = stock_holdings or {}
+    for company in companies:
+        company.owned_shares = holdings.get(company.name, 0)
+
+
+def refresh_companies_from_player_data(companies, player_data):
+    """Apply saved company prices, then restore ownership from stock_holdings."""
+    market_data = player_data.get("stock_market", {})
+    apply_companies_from_save(companies, market_data.get("companies"))
+    sync_holdings_to_companies(companies, player_data.get("stock_holdings"))
+
+
+def migrate_stock_holdings_from_companies(player_data):
+    """Backfill stock_holdings from serialized company owned_shares for old saves."""
+    if player_data.get("stock_holdings"):
+        return
+
+    market_data = player_data.get("stock_market", {})
+    companies = market_data.get("companies")
+    if not companies:
+        return
+
+    holdings = {
+        company["name"]: company["owned_shares"]
+        for company in companies
+        if company.get("owned_shares", 0) > 0
+    }
+    if holdings:
+        player_data["stock_holdings"] = holdings
+
+
+def get_seconds_until_update(last_update_time, interval=UPDATE_INTERVAL_SECONDS):
+    """Calculate seconds remaining until the next market update."""
+    now = datetime.datetime.now()
+    elapsed = (now - last_update_time).total_seconds()
+    return int(max(0, interval - elapsed))
+
+
+def default_stock_market_state():
+    """Return a fresh stock_market block for player_data."""
+    return {
+        "cycle_number": 1,
+        "day_number": 1,
+        "companies": [],
+        "last_update_time": datetime.datetime.now().isoformat(),
+        "trade_log": [],
+    }
+
+
+def truncate_credits(value):
+    """Truncate credits to 2 decimal places (toward zero, never round up)."""
+    return math.trunc(value * 100) / 100
+
+
+def record_trade(player_data, cycle, day, side, company_name, shares, price, total):
+    """Append or merge a buy/sell entry in the current cycle trade log."""
+    if "stock_market" not in player_data:
+        player_data["stock_market"] = {}
+
+    if "trade_log" not in player_data["stock_market"]:
+        player_data["stock_market"]["trade_log"] = []
+
+    current_cycle_entry = None
+    for entry in player_data["stock_market"]["trade_log"]:
+        if entry.get("cycle") == cycle and entry.get("day") == day:
+            current_cycle_entry = entry
+            break
+
+    if not current_cycle_entry:
+        current_cycle_entry = {
+            "cycle": cycle,
+            "day": day,
+            "trades": {"bought": {}, "sold": {}},
+        }
+        player_data["stock_market"]["trade_log"].append(current_cycle_entry)
+
+    if side not in current_cycle_entry["trades"]:
+        current_cycle_entry["trades"][side] = {}
+
+    side_trades = current_cycle_entry["trades"][side]
+    if company_name in side_trades:
+        existing = side_trades[company_name]
+        existing["amount"] += shares
+        existing["total"] += total
+        existing["price"] = existing["total"] / existing["amount"]
+    else:
+        side_trades[company_name] = {
+            "amount": shares,
+            "price": price,
+            "total": total,
+        }
+
+
+def generate_market_tip(companies_data):
+    """Return a random overheard market tip, or None if no companies exist."""
+    if not companies_data:
+        return None
+
+    company = random.choice(companies_data)
+    direction = random.choice(["rise", "fall"])
+    name = company["name"]
+
+    if direction == "rise":
+        return f"Overheard that {name} stock is expected to rise soon!"
+    return f"Overheard that {name} stock might be dropping in value soon!"
+
+
+class StockMarketEngine:
+    """Owns live market state and background tick logic."""
+
+    def __init__(self, companies=None):
+        self.companies = companies if companies is not None else create_default_companies()
+        self.cycle_number = 1
+        self.day_number = 1
+        self.last_update_time = datetime.datetime.now()
+
+    def tick_if_due(self):
+        """Advance the market if the update interval has elapsed."""
+        now = datetime.datetime.now()
+        elapsed = (now - self.last_update_time).total_seconds()
+        if elapsed < UPDATE_INTERVAL_SECONDS:
+            return False
+
+        for company in self.companies:
+            company.update_value()
+
+        self.cycle_number += 1
+        if self.cycle_number > CYCLES_PER_DAY:
+            self.cycle_number = 1
+            self.day_number += 1
+
+        self.last_update_time = now
+        return True
+
+    def sync_to_player_data(self, player_data):
+        """Write current market state into player_data."""
+        if "stock_market" not in player_data:
+            player_data["stock_market"] = default_stock_market_state()
+
+        sync_holdings_to_companies(self.companies, player_data.get("stock_holdings"))
+
+        player_data["stock_market"].update({
+            "cycle_number": self.cycle_number,
+            "day_number": self.day_number,
+            "companies": serialize_companies(self.companies),
+            "last_update_time": self.last_update_time.isoformat(),
+        })
+
+        if "trade_log" not in player_data["stock_market"]:
+            player_data["stock_market"]["trade_log"] = []
+
+    def load_from_player_data(self, player_data):
+        """Restore market state from player_data."""
+        if "stock_market" not in player_data:
+            return
+
+        market_data = player_data["stock_market"]
+        self.cycle_number = market_data.get("cycle_number", 0)
+        self.day_number = market_data.get("day_number", 1)
+
+        if "last_update_time" in market_data:
+            try:
+                self.last_update_time = datetime.datetime.fromisoformat(market_data["last_update_time"])
+            except (ValueError, TypeError):
+                self.last_update_time = datetime.datetime.now()
+        else:
+            self.last_update_time = datetime.datetime.now()
+
+        migrate_stock_holdings_from_companies(player_data)
+
+        if "companies" in market_data:
+            refresh_companies_from_player_data(self.companies, player_data)
+
+
+def hydrate_companies(companies):
+    """Return live Company objects from Company instances or serialized dicts."""
+    if not companies:
+        return create_default_companies()
+    if all(isinstance(company, Company) for company in companies):
+        return list(companies)
+    live = create_default_companies(history_cycles=0)
+    apply_companies_from_save(live, companies)
+    return live
+
+
 class StockMarket:
     def __init__(self, parent_window, player_data, companies, cycle_number, day_number, return_callback):
-        # Create a new toplevel window
-        self.stock_window = tk.Toplevel(parent_window)
-        self.stock_window.title("Stock Market")
-        self.stock_window.geometry("1000x750")  # Increased height from 700 to 750 for more space
-        self.stock_window.configure(bg="black")
-        
-        # Set a minimum window size to prevent UI elements from getting cut off
-        self.stock_window.minsize(900, 700)
-        
         # Store references
         self.parent_window = parent_window
         self.player_data = player_data
-        self.companies = companies
+        self.companies = hydrate_companies(companies)
         self.cycle_number = cycle_number
         self.day_number = day_number
         self.return_callback = return_callback
         self.current_company = None
-        
+
         # Track transactions for notes
         self.stock_transactions = []
-        
+
         # Filter state
         self.current_filter = "All" # Default filter shows all stocks
-        
+
         # Sort order: "price_asc" (low to high) or "price_desc" (high to low)
         self.sort_order = "price_asc"
-        
-        # Ownership filter: "all", "owned", "not_owned" 
+
+        # Ownership filter: "all", "owned", "not_owned"
         self.ownership_filter = "all"
-        
-        # Bind window closing
+
+        # Trend filter: "all", "rising", "falling"
+        self.trend_filter = "all"
+
+        # Dedicated window (matplotlib needs a real Toplevel, not an overlay Frame)
+        self.stock_window = tk.Toplevel(parent_window)
+        self.stock_window.title("Stock Market")
+        self.stock_window.geometry("1150x978")
+        self.stock_window.configure(bg="black")
+        self.stock_window.minsize(1035, 805)
         self.stock_window.protocol("WM_DELETE_WINDOW", self.on_closing)
-        
-        # Ensure this window stays on top
         self.stock_window.transient(parent_window)
         self.stock_window.grab_set()
-        
+
         # Load company owned shares from player data
-        if "stock_holdings" in player_data:
-            for company in self.companies:
-                company.owned_shares = player_data["stock_holdings"].get(company.name, 0)
-        
+        sync_holdings_to_companies(self.companies, player_data.get("stock_holdings"))
+
         # Create main frames
         self.left_frame = tk.Frame(self.stock_window, bg="black", width=300)
-        self.left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=10)
-        
-        # Create a scrollable canvas for the left frame content
-        self.left_canvas = tk.Canvas(self.left_frame, bg="black", highlightthickness=0)
-        self.left_scrollbar = tk.Scrollbar(self.left_frame, orient="vertical", command=self.left_canvas.yview)
-        self.left_canvas.configure(yscrollcommand=self.left_scrollbar.set)
-        
-        # Pack the canvas and scrollbar
-        self.left_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.left_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Create a frame inside the canvas to hold all left content
-        self.left_content = tk.Frame(self.left_canvas, bg="black")
-        self.left_canvas_window = self.left_canvas.create_window((0, 0), window=self.left_content, anchor="nw", width=280)
-        
-        # Configure mousewheel scrolling for left frame
-        def _on_left_mousewheel(event):
-            try:
-                # Windows style scrolling
-                self.left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-            except Exception as e:
-                try:
-                    # Linux style scrolling
-                    if event.num == 4:
-                        self.left_canvas.yview_scroll(-1, "units")
-                    elif event.num == 5:
-                        self.left_canvas.yview_scroll(1, "units")
-                except:
-                    pass  # Ignore errors if the canvas was destroyed
-        
-        # Bind mousewheel to left canvas and content
-        self.left_canvas.bind("<MouseWheel>", _on_left_mousewheel)
-        self.left_canvas.bind("<Button-4>", _on_left_mousewheel)
-        self.left_canvas.bind("<Button-5>", _on_left_mousewheel)
-        self.left_content.bind("<MouseWheel>", _on_left_mousewheel)
-        self.left_content.bind("<Button-4>", _on_left_mousewheel)
-        self.left_content.bind("<Button-5>", _on_left_mousewheel)
-        
-        # Ensure scrolling works when mouse is over widgets in the left content
-        def _bind_mousewheel_to_children(widget):
-            widget.bind("<MouseWheel>", _on_left_mousewheel)
-            for child in widget.winfo_children():
-                _bind_mousewheel_to_children(child)
-        
-        # Function to update canvas scrolling configuration
-        def _configure_left_canvas(event=None):
-            # Update the scrollregion to encompass the inner frame
-            self.left_canvas.configure(scrollregion=self.left_canvas.bbox("all"))
-            
-            # Make sure the inner frame is wide enough
-            self.left_canvas.itemconfig(self.left_canvas_window, width=self.left_canvas.winfo_width())
-            
-            # After all widgets are added and configured, bind mousewheel to all children
-            _bind_mousewheel_to_children(self.left_content)
-            
-        # Bind canvas and window resize events
-        self.left_content.bind("<Configure>", _configure_left_canvas)
-        self.left_canvas.bind("<Configure>", lambda e: self.left_canvas.itemconfig(self.left_canvas_window, width=e.width))
-        
+        self.left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=5)
+
+        # Left column: filters → listbox → trade → History/Back (normal pack order)
+        self.left_content = tk.Frame(self.left_frame, bg="black")
+        self.left_content.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
         self.right_frame = tk.Frame(self.stock_window, bg="black")
-        self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Info labels
-        self.info_frame = tk.Frame(self.left_content, bg="black")
-        self.info_frame.pack(fill=tk.X, pady=10)
-        
-        self.cycle_label = tk.Label(self.info_frame, text=f"Cycle: {self.cycle_number}", 
+        self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        # Right header: status (left) + company info (further right)
+        self.header_frame = tk.Frame(self.right_frame, bg="black")
+        self.header_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 0))
+
+        self.info_frame = tk.Frame(self.header_frame, bg="black")
+        self.info_frame.pack(side=tk.LEFT, anchor="nw", padx=(0, 20))
+
+        self.cycle_label = tk.Label(self.info_frame, text=f"Cycle: {self.cycle_number}",
                                    font=("Arial", 12), bg="black", fg="white")
-        self.cycle_label.grid(row=0, column=0, sticky="w", pady=2)
-        
-        self.day_label = tk.Label(self.info_frame, text=f"Day: {self.day_number}", 
+        self.cycle_label.grid(row=0, column=0, sticky="w", pady=1)
+
+        self.day_label = tk.Label(self.info_frame, text=f"Day: {self.day_number}",
                                  font=("Arial", 12), bg="black", fg="white")
-        self.day_label.grid(row=1, column=0, sticky="w", pady=2)
-        
-        # Add timer for next update
-        self.timer_label = tk.Label(self.info_frame, text="Next Update: Calculating...", 
+        self.day_label.grid(row=1, column=0, sticky="w", pady=1)
+
+        self.timer_label = tk.Label(self.info_frame, text="Next Update: Calculating...",
                                   font=("Arial", 12), bg="black", fg="yellow")
-        self.timer_label.grid(row=2, column=0, sticky="w", pady=2)
-        
-        self.credits_label = tk.Label(self.info_frame, text=f"Credits: {player_data['credits']:.2f}", 
+        self.timer_label.grid(row=2, column=0, sticky="w", pady=1)
+
+        self.credits_label = tk.Label(self.info_frame, text=f"Credits: {player_data['credits']:.2f}",
                                     font=("Arial", 12), bg="black", fg="white")
-        self.credits_label.grid(row=3, column=0, sticky="w", pady=2)
-        
-        # Sort and filter options
+        self.credits_label.grid(row=3, column=0, sticky="w", pady=1)
+
+        self.company_info_frame = tk.Frame(self.header_frame, bg="black")
+        self.company_info_frame.pack(side=tk.RIGHT, anchor="ne", fill=tk.X, expand=True)
+
+        # Sort and filter options (left column starts here so content sits higher)
         self.filter_frame = tk.Frame(self.left_content, bg="black")
-        self.filter_frame.pack(fill=tk.X, pady=5)
-        
-        filter_label = tk.Label(self.filter_frame, text="Filter Stocks:", 
+        self.filter_frame.pack(fill=tk.X, pady=(0, 2))
+
+        filter_label = tk.Label(self.filter_frame, text="Filter Stocks:",
                              font=("Arial", 12), bg="black", fg="white")
-        filter_label.pack(anchor="w", pady=(5,0))
-        
-        # Filter buttons
+        filter_label.pack(anchor="w", pady=(0, 0))
+
         self.filter_buttons_frame = tk.Frame(self.filter_frame, bg="black")
-        self.filter_buttons_frame.pack(fill=tk.X, pady=5)
-        
-        # Show All button
-        self.all_btn = tk.Button(self.filter_buttons_frame, text="Show All", 
+        self.filter_buttons_frame.pack(fill=tk.X, pady=2)
+
+        self.all_btn = tk.Button(self.filter_buttons_frame, text="Show All",
                             font=("Arial", 10), bg="#333333", fg="white", relief=tk.SUNKEN,
                             command=lambda: self.filter_companies("All"))
         self.all_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # Affordable button (can buy at least 1 share)
-        self.affordable_btn = tk.Button(self.filter_buttons_frame, text="Affordable", 
+
+        self.affordable_btn = tk.Button(self.filter_buttons_frame, text="Affordable",
                                  font=("Arial", 10), bg="#333333", fg="white",
                                  command=lambda: self.filter_companies("Affordable"))
         self.affordable_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # Expensive button (can't afford any shares)
-        self.expensive_btn = tk.Button(self.filter_buttons_frame, text="Expensive", 
+
+        self.expensive_btn = tk.Button(self.filter_buttons_frame, text="Expensive",
                                 font=("Arial", 10), bg="#333333", fg="white",
                                 command=lambda: self.filter_companies("Expensive"))
         self.expensive_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # Sort options
-        sort_label = tk.Label(self.filter_frame, text="Sort By Price:", 
+
+        sort_label = tk.Label(self.filter_frame, text="Sort By Price:",
                             font=("Arial", 12), bg="black", fg="white")
-        sort_label.pack(anchor="w", pady=(10,0))
-        
-        # Sort buttons
+        sort_label.pack(anchor="w", pady=(4, 0))
+
         self.sort_buttons_frame = tk.Frame(self.filter_frame, bg="black")
-        self.sort_buttons_frame.pack(fill=tk.X, pady=5)
-        
-        # Low to High button
-        self.low_high_btn = tk.Button(self.sort_buttons_frame, text="Low to High", 
+        self.sort_buttons_frame.pack(fill=tk.X, pady=2)
+
+        self.low_high_btn = tk.Button(self.sort_buttons_frame, text="Low to High",
                                   font=("Arial", 10), bg="#333333", fg="white", relief=tk.SUNKEN,
                                   command=lambda: self.sort_companies("price_asc"))
         self.low_high_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # High to Low button
-        self.high_low_btn = tk.Button(self.sort_buttons_frame, text="High to Low", 
+
+        self.high_low_btn = tk.Button(self.sort_buttons_frame, text="High to Low",
                                   font=("Arial", 10), bg="#333333", fg="white",
                                   command=lambda: self.sort_companies("price_desc"))
         self.high_low_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # Ownership filter options
-        ownership_label = tk.Label(self.filter_frame, text="Ownership:", 
+
+        ownership_label = tk.Label(self.filter_frame, text="Ownership:",
                                  font=("Arial", 12), bg="black", fg="white")
-        ownership_label.pack(anchor="w", pady=(10,0))
-        
-        # Ownership filter buttons
+        ownership_label.pack(anchor="w", pady=(4, 0))
+
         self.ownership_buttons_frame = tk.Frame(self.filter_frame, bg="black")
-        self.ownership_buttons_frame.pack(fill=tk.X, pady=5)
-        
-        # All Stocks button
-        self.all_ownership_btn = tk.Button(self.ownership_buttons_frame, text="All Stocks", 
+        self.ownership_buttons_frame.pack(fill=tk.X, pady=2)
+
+        self.all_ownership_btn = tk.Button(self.ownership_buttons_frame, text="All Stocks",
                                           font=("Arial", 10), bg="#333333", fg="white", relief=tk.SUNKEN,
                                           command=lambda: self.filter_by_ownership("all"))
         self.all_ownership_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # Owned Stocks button
-        self.owned_btn = tk.Button(self.ownership_buttons_frame, text="Owned", 
+
+        self.owned_btn = tk.Button(self.ownership_buttons_frame, text="Owned",
                                   font=("Arial", 10), bg="#333333", fg="white",
                                   command=lambda: self.filter_by_ownership("owned"))
         self.owned_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
-        # Not Owned Stocks button
-        self.not_owned_btn = tk.Button(self.ownership_buttons_frame, text="Not Owned", 
+
+        self.not_owned_btn = tk.Button(self.ownership_buttons_frame, text="Not Owned",
                                      font=("Arial", 10), bg="#333333", fg="white",
                                      command=lambda: self.filter_by_ownership("not_owned"))
         self.not_owned_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        
+
+        trend_label = tk.Label(self.filter_frame, text="Trend:",
+                                 font=("Arial", 12), bg="black", fg="white")
+        trend_label.pack(anchor="w", pady=(4, 0))
+
+        self.trend_buttons_frame = tk.Frame(self.filter_frame, bg="black")
+        self.trend_buttons_frame.pack(fill=tk.X, pady=2)
+
+        self.all_trend_btn = tk.Button(self.trend_buttons_frame, text="All",
+                                          font=("Arial", 10), bg="#333333", fg="white", relief=tk.SUNKEN,
+                                          command=lambda: self.filter_by_trend("all"))
+        self.all_trend_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+
+        self.rising_btn = tk.Button(self.trend_buttons_frame, text="Rising",
+                                  font=("Arial", 10), bg="#333333", fg="white",
+                                  command=lambda: self.filter_by_trend("rising"))
+        self.rising_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+
+        self.falling_btn = tk.Button(self.trend_buttons_frame, text="Falling",
+                                     font=("Arial", 10), bg="#333333", fg="white",
+                                     command=lambda: self.filter_by_trend("falling"))
+        self.falling_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+
         # Companies list
-        self.companies_listbox = tk.Listbox(self.left_content, 
+        self.companies_listbox = tk.Listbox(self.left_content,
                                          font=("Arial", 12), bg="black", fg="white",
                                          selectbackground="#333333", selectforeground="white",
-                                         width=30, height=15)
-        self.companies_listbox.pack(pady=10, fill=tk.BOTH, expand=True)
-        
-        # Add Trade History button
-        self.history_btn = tk.Button(self.left_content, text="View Trade History", 
+                                         width=30, height=8)
+        self.companies_listbox.pack(pady=(4, 2), fill=tk.X)
+
+        # Trade controls directly under the listbox
+        self.trade_frame = tk.Frame(self.left_content, bg="black")
+        self.trade_frame.pack(fill=tk.X, pady=(4, 2))
+
+        # Navigation under buy/sell so it stays on screen
+        self.left_bottom_frame = tk.Frame(self.left_content, bg="black")
+        self.left_bottom_frame.pack(fill=tk.X, pady=(2, 0))
+
+        self.history_btn = tk.Button(self.left_bottom_frame, text="View Trade History",
                                    font=("Arial", 12), bg="#333333", fg="white",
                                    command=self.show_trade_history)
-        self.history_btn.pack(pady=10, fill=tk.X)
-        
-        # Back button
-        self.back_btn = tk.Button(self.left_content, text="Back to Computer", 
+        self.history_btn.pack(pady=(2, 1), fill=tk.X)
+
+        self.back_btn = tk.Button(self.left_bottom_frame, text="Back to Computer",
                                 font=("Arial", 12), bg="#333333", fg="white",
                                 command=self.on_closing)
-        self.back_btn.pack(pady=10, fill=tk.X)
-        
-        # Right frame contents (will be populated when company is selected)
-        self.company_info_frame = tk.Frame(self.right_frame, bg="black")
-        self.company_info_frame.pack(fill=tk.X, pady=10)
-        
-        # Set up the figure for the graph
+        self.back_btn.pack(pady=(1, 2), fill=tk.X)
+
+        # Right pane: header + graph only
         self.fig = plt.Figure(figsize=(5, 3), dpi=100)
         self.fig.patch.set_facecolor('black')
         self.ax = self.fig.add_subplot(111)
@@ -271,15 +475,16 @@ class StockMarket:
         self.ax.spines['top'].set_color('white')
         self.ax.spines['left'].set_color('white')
         self.ax.spines['right'].set_color('white')
-        
+
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.right_frame)
         self.canvas_widget = self.canvas.get_tk_widget()
         self.canvas_widget.configure(bg="black", highlightbackground="black")
-        self.canvas_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Trade buttons frame
-        self.trade_frame = tk.Frame(self.right_frame, bg="black")
-        self.trade_frame.pack(fill=tk.X, pady=10)
+        # Less top padding so the plot sits higher; bottom margin keeps x-axis label visible
+        self.fig.subplots_adjust(left=0.12, right=0.95, top=0.90, bottom=0.18)
+        self.canvas_widget.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+
+        self._timer_after_id = None
+        self._closed = False
         
         # Bind selection event for the listbox AFTER all frames are created
         self.companies_listbox.bind('<<ListboxSelect>>', self.on_company_select)
@@ -298,94 +503,77 @@ class StockMarket:
             
         # Start the timer
         self.update_timer()
-        
-        # Initial update of scrollable area
-        self.update_scrollable_area()
+
+    def _refresh_companies_from_player_data(self):
+        """Apply saved company prices and ownership from player_data."""
+        refresh_companies_from_player_data(self.companies, self.player_data)
+
+    def _sync_cycle_day_from_player_data(self):
+        """Update cycle/day labels from player_data if they changed."""
+        market_data = self.player_data.get("stock_market", {})
+        poll_cycle = market_data.get("cycle_number", 0)
+        poll_day = market_data.get("day_number", 1)
+
+        if poll_cycle != self.last_seen_cycle or poll_day != self.last_seen_day:
+            self.cycle_number = poll_cycle
+            self.day_number = poll_day
+            self.last_seen_cycle = poll_cycle
+            self.last_seen_day = poll_day
+            self.cycle_label.config(text=f"Cycle: {self.cycle_number}")
+            self.day_label.config(text=f"Day: {self.day_number}")
+            return True
+
+        return False
     
     def update_timer(self):
         """Update the countdown timer for next stock update"""
-        # Poll for changes in player_data
-        if "stock_market" in self.player_data:
-            poll_cycle = self.player_data["stock_market"].get("cycle_number", 0)
-            poll_day = self.player_data["stock_market"].get("day_number", 1)
-            
-            # If cycle or day has changed in player_data, update our values
-            if poll_cycle != self.last_seen_cycle or poll_day != self.last_seen_day:
-                self.cycle_number = poll_cycle
-                self.day_number = poll_day
-                self.last_seen_cycle = poll_cycle
-                self.last_seen_day = poll_day
-                
-                # Directly update UI
-                self.cycle_label.config(text=f"Cycle: {self.cycle_number}")
-                self.day_label.config(text=f"Day: {self.day_number}")
-                
-                # Force update company data
-                if "companies" in self.player_data["stock_market"]:
-                    for i, company_data in enumerate(self.player_data["stock_market"]["companies"]):
-                        if i < len(self.companies):
-                            self.companies[i].current_value = company_data["current_value"]
-                            self.companies[i].previous_value = company_data["previous_value"]
-                            self.companies[i].price_history = company_data["price_history"]
-                
-                # Refresh the company list with current filters and sorting
-                self.populate_companies_listbox()
-                
-                # Try to maintain the same company selection
-                if self.current_company:
-                    selected_name = self.current_company.name
-                    # Find this company in the list
-                    for i in range(self.companies_listbox.size()):
-                        item_text = self.companies_listbox.get(i)
-                        if item_text == selected_name:
-                            self.companies_listbox.selection_clear(0, tk.END)
-                            self.companies_listbox.selection_set(i)
-                            self.companies_listbox.see(i)
-                            self.on_company_select(None)  # Refresh display
-                            break
-        
-        # Get the last update time from player data
+        if getattr(self, "_closed", False):
+            return
+        try:
+            if not self.stock_window.winfo_exists():
+                return
+        except tk.TclError:
+            return
+
+        cycle_day_changed = self._sync_cycle_day_from_player_data()
+        if cycle_day_changed:
+            self._refresh_companies_from_player_data()
+            self.populate_companies_listbox()
+
+            if self.current_company:
+                selected_name = self.current_company.name
+                for i in range(self.companies_listbox.size()):
+                    item_text = self.companies_listbox.get(i)
+                    if item_text == selected_name:
+                        self.companies_listbox.selection_clear(0, tk.END)
+                        self.companies_listbox.selection_set(i)
+                        self.companies_listbox.see(i)
+                        self.on_company_select(None)
+                        break
+
         if "stock_market" in self.player_data and "last_update_time" in self.player_data["stock_market"]:
             try:
                 last_update = datetime.datetime.fromisoformat(self.player_data["stock_market"]["last_update_time"])
-                now = datetime.datetime.now()
-                elapsed = (now - last_update).total_seconds()
-                remaining = max(0, 60 - elapsed)  # Update every 60 seconds
-                
+                remaining = get_seconds_until_update(last_update)
+
                 if remaining <= 0:
-                    # Timer has reached zero - update the display with new data
                     self.timer_label.config(text="Updating Market...", fg="green")
-                    
-                    # Directly update from player data
+
                     if "stock_market" in self.player_data:
-                        # Always update our cycle/day display to match player_data
                         self.cycle_number = self.player_data["stock_market"].get("cycle_number", self.cycle_number)
                         self.day_number = self.player_data["stock_market"].get("day_number", self.day_number)
-                        
-                        # Update the UI
                         self.cycle_label.config(text=f"Cycle: {self.cycle_number}")
                         self.day_label.config(text=f"Day: {self.day_number}")
-                        
-                        # Update company data from player_data
-                        if "companies" in self.player_data["stock_market"]:
-                            for i, company_data in enumerate(self.player_data["stock_market"]["companies"]):
-                                if i < len(self.companies):
-                                    self.companies[i].current_value = company_data["current_value"]
-                                    self.companies[i].previous_value = company_data["previous_value"]
-                                    self.companies[i].price_history = company_data["price_history"]
-                    
-                    # Remember which company was selected before the update
+                        self._refresh_companies_from_player_data()
+
                     selected_company = None
-                    selected_idx = -1
                     if self.companies_listbox.curselection():
                         selected_idx = self.companies_listbox.curselection()[0]
                         if selected_idx < self.companies_listbox.size():
                             selected_company = self.companies_listbox.get(selected_idx)
-                    
-                    # Refresh the company list with proper filtering
+
                     self.populate_companies_listbox()
-                    
-                    # Try to restore the previous selection
+
                     if selected_company:
                         for i in range(self.companies_listbox.size()):
                             if self.companies_listbox.get(i) == selected_company:
@@ -394,32 +582,28 @@ class StockMarket:
                                 self.on_company_select(None)
                                 break
                         else:
-                            # If company not found in new filtered list, select first item if available
                             if self.companies_listbox.size() > 0:
                                 self.companies_listbox.selection_set(0)
                                 self.on_company_select(None)
                     elif self.companies_listbox.size() > 0:
-                        # If no previous selection, select the first company
                         self.companies_listbox.selection_set(0)
                         self.on_company_select(None)
-                    
-                    # Wait briefly before next check to avoid spamming updates
-                    self.stock_window.after(1000, self.update_timer)
+
+                    self._timer_after_id = self.stock_window.after(1000, self.update_timer)
                     return
-                else:
-                    minutes = int(remaining // 60)
-                    seconds = int(remaining % 60)
-                    self.timer_label.config(text=f"Next Update: {minutes:02d}:{seconds:02d}", 
-                                           fg="yellow" if remaining > 15 else "orange" if remaining > 5 else "red")
+
+                minutes = int(remaining // 60)
+                seconds = int(remaining % 60)
+                self.timer_label.config(
+                    text=f"Next Update: {minutes:02d}:{seconds:02d}",
+                    fg="yellow" if remaining > 15 else "orange" if remaining > 5 else "red",
+                )
             except (ValueError, TypeError):
-                # If there's an error parsing the time, show unknown
                 self.timer_label.config(text="Next Update: Unknown", fg="gray")
         else:
-            # If last update time is not available
             self.timer_label.config(text="Next Update: Unknown", fg="gray")
-        
-        # Schedule next update in 1 second
-        self.stock_window.after(1000, self.update_timer)
+
+        self._timer_after_id = self.stock_window.after(1000, self.update_timer)
     
     def on_company_select(self, event):
         """Handle company selection from the listbox"""
@@ -518,7 +702,8 @@ class StockMarket:
         
         # Remove grid
         self.ax.grid(False)
-        
+        self.fig.subplots_adjust(left=0.12, right=0.95, top=0.90, bottom=0.18)
+
         # Draw the canvas
         self.canvas.draw()
     
@@ -527,7 +712,7 @@ class StockMarket:
         # Shares to trade label and entry
         shares_label = tk.Label(self.trade_frame, text="Shares:", 
                               font=("Arial", 12), bg="black", fg="white")
-        shares_label.grid(row=0, column=0, padx=5, pady=10)
+        shares_label.grid(row=0, column=0, padx=5, pady=(5, 2))
         
         # Dropdown for predefined amounts
         share_options = [1, 5, 10, 25, 50, 100]
@@ -535,19 +720,24 @@ class StockMarket:
         
         shares_dropdown = ttk.Combobox(self.trade_frame, textvariable=self.shares_var, 
                                      values=share_options, width=5)
-        shares_dropdown.grid(row=0, column=1, padx=5, pady=10)
+        shares_dropdown.grid(row=0, column=1, padx=5, pady=(5, 2))
         
         # Make the dropdown user editable
         shares_dropdown.config(state="normal")
         
-        # Calculate max shares that can be bought
+        # Calculate max shares that can be bought or sold
         max_can_buy = int(self.player_data["credits"] / self.current_company.current_value)
+        max_can_sell = self.current_company.owned_shares
         
-        # Add max button
-        max_buy_btn = tk.Button(self.trade_frame, text=f"Max ({max_can_buy})", 
+        max_buy_btn = tk.Button(self.trade_frame, text=f"Max Buy ({max_can_buy})", 
                               font=("Arial", 10), bg="#333333", fg="white",
                               command=lambda: self.shares_var.set(str(max_can_buy)))
-        max_buy_btn.grid(row=0, column=2, padx=5, pady=10)
+        max_buy_btn.grid(row=1, column=0, padx=5, pady=5)
+        
+        max_sell_btn = tk.Button(self.trade_frame, text=f"Max Sell ({max_can_sell})", 
+                               font=("Arial", 10), bg="#333333", fg="white",
+                               command=lambda: self.shares_var.set(str(max_can_sell)))
+        max_sell_btn.grid(row=1, column=1, padx=5, pady=5)
         
         # Calculate total cost
         def update_total_cost(*args):
@@ -579,19 +769,19 @@ class StockMarket:
         # Total cost label
         total_label = tk.Label(self.trade_frame, text="Total: 0.00", 
                             font=("Arial", 12), bg="black", fg="white")
-        total_label.grid(row=0, column=3, padx=20, pady=10)
+        total_label.grid(row=0, column=2, padx=20, pady=(5, 2))
         
         # Buy button
         buy_btn = tk.Button(self.trade_frame, text="Buy", font=("Arial", 12), 
                          bg="green", fg="white", width=8,
                          command=self.buy_stock)
-        buy_btn.grid(row=1, column=0, padx=10, pady=10)
+        buy_btn.grid(row=2, column=0, padx=10, pady=10)
         
         # Sell button
         sell_btn = tk.Button(self.trade_frame, text="Sell", font=("Arial", 12), 
                           bg="red", fg="white", width=8,
                           command=self.sell_stock)
-        sell_btn.grid(row=1, column=1, padx=10, pady=10)
+        sell_btn.grid(row=2, column=1, padx=10, pady=10)
         
         # Initialize button states
         update_total_cost()
@@ -612,6 +802,7 @@ class StockMarket:
                 
             # Update player credits
             self.player_data["credits"] -= total_cost
+            self.player_data["credits"] = truncate_credits(self.player_data["credits"])
             
             # Update company owned shares
             self.current_company.owned_shares += shares
@@ -635,49 +826,17 @@ class StockMarket:
                 "timestamp": datetime.datetime.now().isoformat()
             }
             self.stock_transactions.append(transaction)
-            
-            # Add to trade log for history
-            if "stock_market" not in self.player_data:
-                self.player_data["stock_market"] = {}
-                
-            if "trade_log" not in self.player_data["stock_market"]:
-                self.player_data["stock_market"]["trade_log"] = []
-                
-            # Check if there's an entry for the current cycle/day
-            current_cycle_entry = None
-            for entry in self.player_data["stock_market"]["trade_log"]:
-                if entry.get("cycle") == self.cycle_number and entry.get("day") == self.day_number:
-                    current_cycle_entry = entry
-                    break
-                    
-            # Create a new entry if needed
-            if not current_cycle_entry:
-                current_cycle_entry = {
-                    "cycle": self.cycle_number,
-                    "day": self.day_number,
-                    "trades": {"bought": {}, "sold": {}}
-                }
-                self.player_data["stock_market"]["trade_log"].append(current_cycle_entry)
-                
-            # Add the buy transaction
-            if "bought" not in current_cycle_entry["trades"]:
-                current_cycle_entry["trades"]["bought"] = {}
-                
-            company_name = self.current_company.name
-            if company_name in current_cycle_entry["trades"]["bought"]:
-                # Update existing entry
-                existing = current_cycle_entry["trades"]["bought"][company_name]
-                existing["amount"] += shares
-                existing["total"] += total_cost
-                # Update average price
-                existing["price"] = existing["total"] / existing["amount"]
-            else:
-                # Add new entry
-                current_cycle_entry["trades"]["bought"][company_name] = {
-                    "amount": shares,
-                    "price": self.current_company.current_value,
-                    "total": total_cost
-                }
+
+            record_trade(
+                self.player_data,
+                self.cycle_number,
+                self.day_number,
+                "bought",
+                self.current_company.name,
+                shares,
+                self.current_company.current_value,
+                total_cost,
+            )
             
             # Update display
             self.credits_label.config(text=f"Credits: {self.player_data['credits']:.2f}")
@@ -710,6 +869,7 @@ class StockMarket:
             
             # Update player credits
             self.player_data["credits"] += total_value
+            self.player_data["credits"] = truncate_credits(self.player_data["credits"])
             
             # Update company owned shares
             self.current_company.owned_shares -= shares
@@ -746,49 +906,17 @@ class StockMarket:
                 "timestamp": datetime.datetime.now().isoformat()
             }
             self.stock_transactions.append(transaction)
-            
-            # Add to trade log for history
-            if "stock_market" not in self.player_data:
-                self.player_data["stock_market"] = {}
-                
-            if "trade_log" not in self.player_data["stock_market"]:
-                self.player_data["stock_market"]["trade_log"] = []
-                
-            # Check if there's an entry for the current cycle/day
-            current_cycle_entry = None
-            for entry in self.player_data["stock_market"]["trade_log"]:
-                if entry.get("cycle") == self.cycle_number and entry.get("day") == self.day_number:
-                    current_cycle_entry = entry
-                    break
-                    
-            # Create a new entry if needed
-            if not current_cycle_entry:
-                current_cycle_entry = {
-                    "cycle": self.cycle_number,
-                    "day": self.day_number,
-                    "trades": {"bought": {}, "sold": {}}
-                }
-                self.player_data["stock_market"]["trade_log"].append(current_cycle_entry)
-                
-            # Add the sell transaction
-            if "sold" not in current_cycle_entry["trades"]:
-                current_cycle_entry["trades"]["sold"] = {}
-                
-            company_name = self.current_company.name
-            if company_name in current_cycle_entry["trades"]["sold"]:
-                # Update existing entry
-                existing = current_cycle_entry["trades"]["sold"][company_name]
-                existing["amount"] += shares
-                existing["total"] += total_value
-                # Update average price
-                existing["price"] = existing["total"] / existing["amount"]
-            else:
-                # Add new entry
-                current_cycle_entry["trades"]["sold"][company_name] = {
-                    "amount": shares,
-                    "price": self.current_company.current_value,
-                    "total": total_value
-                }
+
+            record_trade(
+                self.player_data,
+                self.cycle_number,
+                self.day_number,
+                "sold",
+                self.current_company.name,
+                shares,
+                self.current_company.current_value,
+                total_value,
+            )
             
             # Update display
             self.credits_label.config(text=f"Credits: {self.player_data['credits']:.2f}")
@@ -810,60 +938,47 @@ class StockMarket:
             messagebox.showerror("Input Error", "Please enter a valid number of shares.")
     
     def show_trade_history(self):
-        """Show the trade history log"""
-        # Create a new toplevel window
+        """Show the trade history log in a child window."""
         history_window = tk.Toplevel(self.stock_window)
         history_window.title("Trade History")
-        history_window.geometry("650x550")  # Increased size for better visibility
+        history_window.geometry("650x550")
         history_window.configure(bg="black")
-        
-        # Set minimum size
         history_window.minsize(500, 400)
-        
-        # Ensure this window stays on top
         history_window.transient(self.stock_window)
         history_window.grab_set()
-        
-        # Title
-        title_label = tk.Label(history_window, text="Trade History", 
+
+        title_label = tk.Label(history_window, text="Trade History",
                              font=("Arial", 18), bg="black", fg="white")
         title_label.pack(pady=10)
-        
-        # Create frame with scrollbar
+
         frame = tk.Frame(history_window, bg="black")
         frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
-        
-        # Add a scrollbar
+
         scrollbar = tk.Scrollbar(frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        
-        # Create the trade log text widget with tags for color formatting
-        trade_log = tk.Text(frame, font=("Arial", 12), 
+
+        trade_log = tk.Text(frame, font=("Arial", 12),
                           bg="black", fg="white", width=60, height=20,
                           yscrollcommand=scrollbar.set, wrap=tk.WORD)
         trade_log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.config(command=trade_log.yview)
-        
-        # Create tags for colored text
+
         trade_log.tag_configure("header", foreground="yellow", font=("Arial", 14, "bold"))
         trade_log.tag_configure("cycle", foreground="cyan", font=("Arial", 12, "bold"))
         trade_log.tag_configure("bought", foreground="green", font=("Arial", 12))
         trade_log.tag_configure("sold", foreground="red", font=("Arial", 12))
         trade_log.tag_configure("company", foreground="white", font=("Arial", 12))
-        
-        # Populate the trade log
+
         if "stock_market" in self.player_data and "trade_log" in self.player_data["stock_market"]:
             trade_log.insert(tk.END, "TRADE HISTORY\n\n", "header")
-            
-            # Display trade log entries in reverse order (newest first)
+
             for entry in reversed(self.player_data["stock_market"]["trade_log"]):
                 cycle = entry.get("cycle", 0)
                 day = entry.get("day", 0)
                 trade_log.insert(tk.END, f"Cycle {cycle} (Day {day}):\n", "cycle")
-                
+
                 trades = entry.get("trades", {})
-                
-                # Bought trades
+
                 if "bought" in trades and trades["bought"]:
                     trade_log.insert(tk.END, "  BOUGHT:\n", "bought")
                     for company, data in trades["bought"].items():
@@ -871,8 +986,7 @@ class StockMarket:
                         price = data.get("price", 0)
                         total = data.get("total", 0)
                         trade_log.insert(tk.END, f"    {company}: {amount} shares @ {price:.2f} cr each = {total:.2f} cr\n", "company")
-                
-                # Sold trades
+
                 if "sold" in trades and trades["sold"]:
                     trade_log.insert(tk.END, "  SOLD:\n", "sold")
                     for company, data in trades["sold"].items():
@@ -880,85 +994,88 @@ class StockMarket:
                         price = data.get("price", 0)
                         total = data.get("total", 0)
                         trade_log.insert(tk.END, f"    {company}: {amount} shares @ {price:.2f} cr each = {total:.2f} cr\n", "company")
-                
+
                 trade_log.insert(tk.END, "\n")
         else:
             trade_log.insert(tk.END, "No trade history available.")
-        
-        # Make the text widget read-only
+
         trade_log.config(state=tk.DISABLED)
-        
-        # Mouse wheel binding for scrolling
+
         def _on_trade_mousewheel(event):
             try:
-                # Windows style scrolling (positive or negative delta)
                 trade_log.yview_scroll(int(-1*(event.delta/120)), "units")
-            except Exception as e:
+            except Exception:
                 try:
-                    # Linux style scrolling (positive delta for scroll up, negative for down)
                     if event.num == 4:
                         trade_log.yview_scroll(-1, "units")
                     elif event.num == 5:
                         trade_log.yview_scroll(1, "units")
-                except:
-                    pass  # Ignore errors if the widget was destroyed
-        
-        # Bind mousewheel to trade log and all parent widgets to ensure it works everywhere
-        trade_log.bind("<MouseWheel>", _on_trade_mousewheel)  # Windows
-        trade_log.bind("<Button-4>", _on_trade_mousewheel)    # Linux scroll up
-        trade_log.bind("<Button-5>", _on_trade_mousewheel)    # Linux scroll down
-        
+                except Exception:
+                    pass
+
+        trade_log.bind("<MouseWheel>", _on_trade_mousewheel)
+        trade_log.bind("<Button-4>", _on_trade_mousewheel)
+        trade_log.bind("<Button-5>", _on_trade_mousewheel)
         frame.bind("<MouseWheel>", _on_trade_mousewheel)
-        frame.bind("<Button-4>", _on_trade_mousewheel)
-        frame.bind("<Button-5>", _on_trade_mousewheel)
-        
         history_window.bind("<MouseWheel>", _on_trade_mousewheel)
-        history_window.bind("<Button-4>", _on_trade_mousewheel)
-        history_window.bind("<Button-5>", _on_trade_mousewheel)
-        
-        # Override destroy method to cleanup bindings
+
         orig_destroy = history_window.destroy
         def _destroy_and_cleanup():
             try:
                 history_window.unbind("<MouseWheel>")
                 history_window.unbind("<Button-4>")
                 history_window.unbind("<Button-5>")
-            except:
+            except tk.TclError:
                 pass
             orig_destroy()
-        
+
         history_window.destroy = _destroy_and_cleanup
-        
-        # Close button
-        close_btn = tk.Button(history_window, text="Close", 
+
+        close_btn = tk.Button(history_window, text="Close",
                             font=("Arial", 12), bg="#333333", fg="white",
                             command=history_window.destroy)
         close_btn.pack(pady=10)
-    
+
     def on_closing(self):
-        """Handle window closing"""
-        # Add the stock transactions to the player data to be logged as notes
+        """Handle closing the stock market window."""
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+
         if self.stock_transactions:
             self.player_data["stock_transactions"] = self.stock_transactions
-        
-        # Cleanup any bindings to prevent errors
+
+        if getattr(self, "_timer_after_id", None) is not None:
+            try:
+                self.stock_window.after_cancel(self._timer_after_id)
+            except (tk.TclError, ValueError):
+                pass
+            self._timer_after_id = None
+
         try:
-            self.left_canvas.unbind("<MouseWheel>")
-            self.left_canvas.unbind("<Button-4>")
-            self.left_canvas.unbind("<Button-5>")
-        except:
+            self.stock_window.grab_release()
+        except tk.TclError:
             pass
-            
-        # Release the grab and return control to the parent window
-        self.stock_window.grab_release()
-        
-        # Return player data to the main game
-        if self.return_callback:
-            self.return_callback(self.player_data)
-            
-        # Destroy the window
-        self.stock_window.destroy()
-    
+
+        callback = self.return_callback
+        self.return_callback = None
+
+        try:
+            self.canvas.get_tk_widget().destroy()
+        except Exception:
+            pass
+        try:
+            plt.close(self.fig)
+        except Exception:
+            pass
+
+        try:
+            self.stock_window.destroy()
+        except tk.TclError:
+            pass
+
+        if callback:
+            callback(self.player_data)
     def filter_companies(self, filter_type):
         """Filter companies based on selected filter"""
         # Update filter state
@@ -986,9 +1103,6 @@ class StockMarket:
         # Repopulate the listbox with filtered companies
         self.populate_companies_listbox()
         
-        # Update scrollable area after UI changes
-        self.update_scrollable_area()
-        
         # Try to restore selection
         if selected_company:
             for i in range(self.companies_listbox.size()):
@@ -1004,13 +1118,12 @@ class StockMarket:
             self.on_company_select(None)  # Explicitly call after selection is made
     
     def sort_companies(self, sort_order):
-        """Sort companies based on price"""
+        """Sort companies by price; does not alter active filters."""
         self.sort_order = sort_order
-        
-        # Update button appearance
+
         self.low_high_btn.config(relief=tk.RAISED)
         self.high_low_btn.config(relief=tk.RAISED)
-        
+
         if sort_order == "price_asc":
             self.low_high_btn.config(relief=tk.SUNKEN)
         else:
@@ -1025,9 +1138,6 @@ class StockMarket:
         
         # Repopulate the listbox with sorted companies
         self.populate_companies_listbox()
-        
-        # Update scrollable area after UI changes
-        self.update_scrollable_area()
         
         # Try to restore selection
         if selected_company:
@@ -1070,9 +1180,6 @@ class StockMarket:
         # Repopulate the listbox with filtered companies
         self.populate_companies_listbox()
         
-        # Update scrollable area after UI changes
-        self.update_scrollable_area()
-        
         # Try to restore selection
         if selected_company:
             for i in range(self.companies_listbox.size()):
@@ -1086,6 +1193,41 @@ class StockMarket:
         if self.companies_listbox.size() > 0:
             self.companies_listbox.selection_set(0)
             self.on_company_select(None)  # Explicitly call after selection is made
+    
+    def filter_by_trend(self, trend_filter):
+        """Filter companies by price trend; does not alter active sort order."""
+        self.trend_filter = trend_filter
+
+        self.all_trend_btn.config(relief=tk.RAISED)
+        self.rising_btn.config(relief=tk.RAISED)
+        self.falling_btn.config(relief=tk.RAISED)
+
+        if trend_filter == "all":
+            self.all_trend_btn.config(relief=tk.SUNKEN)
+        elif trend_filter == "rising":
+            self.rising_btn.config(relief=tk.SUNKEN)
+        elif trend_filter == "falling":
+            self.falling_btn.config(relief=tk.SUNKEN)
+
+        selected_company = None
+        if self.companies_listbox.curselection():
+            selected_idx = self.companies_listbox.curselection()[0]
+            if selected_idx < self.companies_listbox.size():
+                selected_company = self.companies_listbox.get(selected_idx)
+
+        self.populate_companies_listbox()
+
+        if selected_company:
+            for i in range(self.companies_listbox.size()):
+                if self.companies_listbox.get(i) == selected_company:
+                    self.companies_listbox.selection_set(i)
+                    self.companies_listbox.see(i)
+                    self.on_company_select(None)
+                    return
+
+        if self.companies_listbox.size() > 0:
+            self.companies_listbox.selection_set(0)
+            self.on_company_select(None)
     
     def populate_companies_listbox(self):
         """Populate the companies listbox based on current filter and sort order"""
@@ -1117,64 +1259,28 @@ class StockMarket:
                 (self.ownership_filter == "owned" and is_owned) or
                 (self.ownership_filter == "not_owned" and not is_owned)
             )
+
+            price_change = company.current_value - company.previous_value
+            passes_trend = (
+                self.trend_filter == "all"
+                or (self.trend_filter == "rising" and price_change > 0)
+                or (self.trend_filter == "falling" and price_change < 0)
+            )
             
-            # Add to filtered list if it passes both filters
-            if passes_affordability and passes_ownership:
-                filtered_companies.append((company.name, company.current_value))
+            # Add to filtered list if it passes all filters
+            if passes_affordability and passes_ownership and passes_trend:
+                filtered_companies.append((company.name, company.current_value, price_change))
         
         # Sort the filtered companies
         if self.sort_order == "price_asc":
-            # Sort by price, low to high
             filtered_companies.sort(key=lambda x: x[1])
         else:
-            # Sort by price, high to low
             filtered_companies.sort(key=lambda x: x[1], reverse=True)
         
         # Add sorted companies to the listbox
-        for company_name, price in filtered_companies:
+        for company_name, price, _price_change in filtered_companies:
             # Add company to listbox
             self.companies_listbox.insert(tk.END, company_name)
         
-        # Make sure all widgets are properly arranged for scrolling
-        self.left_content.update_idletasks()
-        self.left_canvas.configure(scrollregion=self.left_canvas.bbox("all"))
-        
         # Do NOT automatically select a company here - that happens in __init__ or filter_companies
     
-    def update_scrollable_area(self):
-        """Update the scrollable area to ensure all content is accessible"""
-        # Update the left content to get accurate sizes
-        self.left_content.update_idletasks()
-        
-        # Update the canvas scroll region
-        self.left_canvas.configure(scrollregion=self.left_canvas.bbox("all"))
-        
-        # Rebind mousewheel to all children
-        def _on_left_mousewheel(event):
-            try:
-                # Windows style scrolling
-                self.left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-            except Exception as e:
-                try:
-                    # Linux style scrolling
-                    if event.num == 4:
-                        self.left_canvas.yview_scroll(-1, "units")
-                    elif event.num == 5:
-                        self.left_canvas.yview_scroll(1, "units")
-                except:
-                    pass  # Ignore errors if the canvas was destroyed
-                
-        def _bind_mousewheel_to_children(widget):
-            widget.bind("<MouseWheel>", _on_left_mousewheel)
-            widget.bind("<Button-4>", _on_left_mousewheel)
-            widget.bind("<Button-5>", _on_left_mousewheel)
-            for child in widget.winfo_children():
-                _bind_mousewheel_to_children(child)
-                
-        # Bind to all children
-        _bind_mousewheel_to_children(self.left_content)
-        
-        # Make sure the canvas is properly sized
-        width = self.left_canvas.winfo_width()
-        if width > 0:  # Only update if we have a valid width
-            self.left_canvas.itemconfig(self.left_canvas_window, width=width)

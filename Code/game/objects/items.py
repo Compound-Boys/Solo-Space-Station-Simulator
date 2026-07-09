@@ -1,4 +1,10 @@
-# game/items.py
+# game/objects/items.py
+
+import tkinter as tk
+from tkinter import messagebox
+
+from game.helper_methods.ui_panels import open_modal_panel
+from game.maps.donut import render_map_text
 
 # Base structure for items
 # { 
@@ -31,27 +37,9 @@ IMPORTANT TIPS:
 We hope you enjoy your stay and contribute to our thriving community!
 """
 
-STATION_MAP_CONTENT = """SPACE STATION EXPLORER - STATION MAP
-
-NORTH SECTION:
-- Bridge (Command Center)
-- North Hallway
-
-EAST SECTION:
-- Medical Bay
-- East Hallway
-- Bar
-
-NORTHEAST SECTION:
-- Security
-- Engineering Bay
-
-CENTRAL:
-- Personal Quarters
-- Hallway Junction
-
-Remember to use navigation panels to move between sections.
-"""
+# Generated from the map's own coordinate data (see game/maps/donut.py) so it
+# always matches the actual station layout.
+STATION_MAP_CONTENT = render_map_text()
 
 MAINTENANCE_MANUAL_CONTENT = """SPACE STATION MAINTENANCE MANUAL
 
@@ -398,25 +386,318 @@ ALL_ITEMS = {
         "attributes": {},
         "actions": ["examine", "use", "drop"]
     },
-
-    # --- Junk Items (Example) ---
-    # "used_power_cell": {
-    #     "id": "used_power_cell",
-    #     "name": "Used Power Cell",
-    #     "description": "A depleted power cell. Likely useless.",
-    #     "category": "Junk",
-    #     "attributes": {},
-    #     "actions": ["examine", "drop"]
-    # },
 }
 
-# --- Helper Functions --- 
+# --- Helper Functions ---
+DEFAULT_LOCKER_ITEM_IDS = [
+    "welcome_guide",
+    "flashlight",
+    "station_map",
+    "emergency_rations",
+    "basic_tools",
+    "id_card_reader",
+    "portable_scanner",
+    "maintenance_manual",
+    "emergency_beacon",
+    "first_aid_kit",
+]
+
+
 def get_item_definition(item_id):
     """Returns a copy of the item definition from the master dictionary."""
     if item_id in ALL_ITEMS:
         return ALL_ITEMS[item_id].copy() # Return a copy to prevent modification of the original
     return None
 
-def get_items_by_category(category_name):
-    """Returns a list of item definitions for a given category."""
-    return [item.copy() for item in ALL_ITEMS.values() if item["category"] == category_name] 
+
+def build_default_locker_inventory(exclude_item_ids=None):
+    """Return default locker item dicts, optionally skipping IDs already held."""
+    exclude = exclude_item_ids or set()
+    items = []
+    for item_id in DEFAULT_LOCKER_ITEM_IDS:
+        if item_id in exclude:
+            continue
+        item_def = get_item_definition(item_id)
+        if item_def:
+            items.append(item_def)
+    return items
+
+
+def ensure_locker_inventory(player_data):
+    """Return persistent locker inventory, seeding once for older saves."""
+    if "locker_inventory" in player_data and isinstance(player_data["locker_inventory"], list):
+        return player_data["locker_inventory"]
+
+    player_inventory_ids = {
+        item.get("id")
+        for item in player_data.get("inventory", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    player_data["locker_inventory"] = build_default_locker_inventory(player_inventory_ids)
+    return player_data["locker_inventory"]
+
+
+class ItemInventoryMixin:
+    """Inventory UI and item action handlers. Requires host to provide root, player_data, and add_note()."""
+
+    def show_inventory_popup(self):
+        """Show inventory as an in-main-window overlay."""
+        panel, popup = open_modal_panel(self.root, title="Inventory")
+
+        title_label = tk.Label(popup, text="Inventory", font=("Arial", 18), bg="black", fg="white")
+        title_label.pack(pady=10)
+
+        list_frame = tk.Frame(popup, bg="black")
+        list_frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
+
+        scrollbar = tk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        inventory_list = tk.Listbox(list_frame, bg="black", fg="white", font=("Arial", 12),
+                                  width=30, height=15, yscrollcommand=scrollbar.set, exportselection=False)
+        inventory_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=inventory_list.yview)
+
+        player_inventory = self.player_data.get('inventory', [])
+        if not player_inventory:
+            inventory_list.insert(tk.END, "Your inventory is empty.")
+            inventory_list.itemconfig(tk.END, {'fg': "gray"})
+        else:
+            for item in player_inventory:
+                if isinstance(item, dict) and 'name' in item:
+                    inventory_list.insert(tk.END, item['name'])
+                else:
+                    inventory_list.insert(tk.END, str(item))
+                    inventory_list.itemconfig(tk.END, {'fg': "red"})
+
+        button_frame = tk.Frame(popup, bg="black")
+        button_frame.pack(pady=(5, 10), fill=tk.X, padx=20)
+        button_frame.columnconfigure((0, 1, 2), weight=1)
+
+        examine_btn = tk.Button(button_frame, text="Examine", font=("Arial", 12), width=10,
+                            command=lambda: self.examine_item(inventory_list, popup),
+                            state=tk.DISABLED)
+        examine_btn.grid(row=0, column=0, padx=5, pady=5)
+
+        actions_btn = tk.Button(button_frame, text="Actions", font=("Arial", 12), width=10,
+                           command=lambda: self.show_item_actions_popup(inventory_list, panel),
+                           state=tk.DISABLED)
+        actions_btn.grid(row=0, column=1, padx=5, pady=5)
+
+        close_btn = tk.Button(button_frame, text="Close", font=("Arial", 12), width=10, command=panel.close)
+        close_btn.grid(row=0, column=2, padx=5, pady=5)
+
+        def check_selection(event=None, ex_btn=examine_btn, act_btn=actions_btn):
+            selection = inventory_list.curselection()
+            if not selection:
+                ex_btn.config(state=tk.DISABLED)
+                act_btn.config(state=tk.DISABLED)
+                return
+
+            try:
+                item, item_inventory_index = self._get_selected_item_from_inventory(inventory_list)
+
+                if item is None:
+                    raise IndexError("Failed to get selected item")
+
+                if isinstance(item, dict):
+                    actions = item.get('actions', [])
+                    ex_btn.config(state=tk.NORMAL)
+                    other_actions = [a for a in actions if a != 'examine']
+                    act_btn.config(state=tk.NORMAL if other_actions else tk.DISABLED)
+                else:
+                    ex_btn.config(state=tk.DISABLED)
+                    act_btn.config(state=tk.DISABLED)
+
+            except (IndexError, ValueError, TypeError) as e:
+                print(f"Error checking selection: {e}")
+                ex_btn.config(state=tk.DISABLED)
+                act_btn.config(state=tk.DISABLED)
+
+        inventory_list.bind('<<ListboxSelect>>', check_selection)
+        check_selection(ex_btn=examine_btn, act_btn=actions_btn)
+
+        def _on_inventory_mousewheel(event):
+            try:
+                inventory_list.yview_scroll(int(-1*(event.delta/120)), "units")
+            except tk.TclError:
+                pass
+        inventory_list.bind("<MouseWheel>", _on_inventory_mousewheel)
+
+    def _get_selected_item_from_inventory(self, inventory_list):
+        """Helper to get the selected item dictionary and its index from the inventory list."""
+        selection = inventory_list.curselection()
+        if not selection:
+            return None, -1 # No selection
+
+        selected_listbox_index = selection[0]
+
+        # Re-scan inventory and listbox to find the matching index reliably after potential deletes
+        current_player_inventory = self.player_data.get("inventory", [])
+        listbox_item_count = inventory_list.size()
+        valid_item_count = 0
+        inventory_index_map = [] # List to store inventory indices corresponding to listbox entries
+
+        for inv_idx, item in enumerate(current_player_inventory):
+            if isinstance(item, dict) and 'name' in item:
+                inventory_index_map.append(inv_idx)
+                valid_item_count += 1
+            elif isinstance(item, str): # Handle legacy strings
+                inventory_index_map.append(inv_idx)
+                valid_item_count += 1
+
+        # Check consistency
+        if valid_item_count != listbox_item_count and listbox_item_count > 0 and inventory_list.get(0) != "Your inventory is empty.":
+            print("Warning: Listbox count doesn't match inventory item count.")
+
+        if 0 <= selected_listbox_index < len(inventory_index_map):
+            item_inventory_index = inventory_index_map[selected_listbox_index]
+            if 0 <= item_inventory_index < len(current_player_inventory):
+                return current_player_inventory[item_inventory_index], item_inventory_index
+            else:
+                print(f"Error: Mapped inventory index {item_inventory_index} out of bounds.")
+                return None, -1
+        else:
+            print(f"Error: Selected listbox index {selected_listbox_index} out of bounds for map.")
+            return None, -1
+
+    def examine_item(self, inventory_list, parent_popup):
+        """Show the description of the selected item."""
+        item, item_inventory_index = self._get_selected_item_from_inventory(inventory_list)
+
+        if not item:
+            messagebox.showerror("Error", "Could not identify the selected item.", parent=parent_popup)
+            return
+
+        if not isinstance(item, dict):
+            messagebox.showinfo("Cannot Examine", "This item cannot be examined properly.", parent=parent_popup)
+            return
+
+        item_name = item.get('name', 'Unknown Item')
+        description = item.get('description', 'No description available.')
+
+        self.add_note(f"Examined the {item_name}.")
+
+        messagebox.showinfo(f"Examine: {item_name}", description, parent=parent_popup)
+
+    def show_item_actions_popup(self, inventory_list, main_inventory_popup):
+        """Shows an overlay with available actions for the selected item."""
+        item, item_inventory_index = self._get_selected_item_from_inventory(inventory_list)
+
+        if not isinstance(item, dict):
+            messagebox.showerror("Error", "Cannot perform actions on this item.", parent=main_inventory_popup)
+            return
+
+        item_name = item.get('name', 'Item')
+        actions = item.get('actions', [])
+        available_actions = [a for a in actions if a != 'examine']
+
+        if not available_actions:
+            messagebox.showinfo("No Actions", f"No special actions available for {item_name}.", parent=main_inventory_popup)
+            return
+
+        panel, actions_popup = open_modal_panel(self.root, title=f"Actions: {item_name}")
+
+        action_frame = tk.Frame(actions_popup, bg="black", padx=15, pady=15)
+        action_frame.pack(fill=tk.BOTH, expand=True)
+
+        for action in available_actions:
+            action_text = action.capitalize()
+            callback = None
+
+            if action == "read":
+                callback = lambda i=item, p=panel: self.read_item_action(i, p)
+            elif action == "drop":
+                callback = lambda idx=item_inventory_index, ap=panel, mp=main_inventory_popup: self.drop_item_action(idx, ap, mp)
+            else:
+                callback = lambda a=action: messagebox.showinfo("WIP", f"Action '{a}' not yet implemented.", parent=actions_popup)
+
+            if callback:
+                btn = tk.Button(action_frame, text=action_text, font=("Arial", 12), width=15, command=callback)
+                btn.pack(pady=5)
+
+        cancel_btn = tk.Button(action_frame, text="Cancel", font=("Arial", 12), width=15, command=panel.close)
+        cancel_btn.pack(pady=(10,0))
+
+    def read_item_action(self, item, actions_popup):
+        """Action handler for reading an item. Displays content in an overlay."""
+        if not isinstance(item, dict) or 'read' not in item.get('actions', []):
+            messagebox.showwarning("Cannot Read", "This item cannot be read.", parent=actions_popup)
+            return
+
+        item_name = item.get('name', 'Readable Item')
+        content = item.get('attributes', {}).get('content', '[No content found]')
+        is_map = item.get('id') == 'station_map'
+
+        panel, read_content_popup = open_modal_panel(self.root, title=f"Reading: {item_name}")
+
+        title_label = tk.Label(read_content_popup, text=item_name, font=("Arial", 18), bg="black", fg="white")
+        title_label.pack(pady=10)
+
+        content_frame = tk.Frame(read_content_popup, bg="black")
+        content_frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
+
+        content_scrollbar = tk.Scrollbar(content_frame)
+        content_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        content_font = ("Courier New", 11) if is_map else ("Arial", 12)
+        content_wrap = tk.NONE if is_map else tk.WORD
+        content_text = tk.Text(content_frame, bg="black", fg="white", font=content_font,
+                             wrap=content_wrap, yscrollcommand=content_scrollbar.set)
+        content_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        content_scrollbar.config(command=content_text.yview)
+
+        content_text.insert(tk.END, content)
+        content_text.config(state=tk.DISABLED)
+
+        self.add_note(f"Read the {item_name}.")
+
+        def _on_read_content_mousewheel(event):
+            try:
+                content_text.yview_scroll(int(-1*(event.delta/120)), "units")
+            except tk.TclError:
+                pass
+        read_content_popup.bind("<MouseWheel>", _on_read_content_mousewheel)
+
+        def _close_read():
+            try:
+                read_content_popup.unbind("<MouseWheel>")
+            except tk.TclError:
+                pass
+            panel.close()
+
+        close_read_btn = tk.Button(read_content_popup, text="Close", font=("Arial", 12), width=10, command=_close_read)
+        close_read_btn.pack(pady=10)
+
+    def drop_item_action(self, item_inventory_index, actions_popup, main_inventory_popup):
+        """Action handler for dropping an item. Refreshes main inventory."""
+        if not (0 <= item_inventory_index < len(self.player_data['inventory'])):
+             messagebox.showerror("Error", "Invalid item index provided for drop action.", parent=actions_popup)
+             return
+
+        item = self.player_data['inventory'][item_inventory_index]
+        item_name = item.get('name', str(item)) if isinstance(item, dict) else str(item)
+
+        if not messagebox.askyesno("Confirm Drop",
+                                f"Are you sure you want to drop the {item_name}? It will be gone forever!",
+                                parent=self.root):
+            return
+
+        try:
+            del self.player_data['inventory'][item_inventory_index]
+
+            if hasattr(actions_popup, 'close'):
+                actions_popup.close()
+            else:
+                actions_popup.destroy()
+            if hasattr(main_inventory_popup, 'close'):
+                main_inventory_popup.close()
+            else:
+                main_inventory_popup.destroy()
+            self.show_inventory_popup()
+
+            self.add_note(f"Dropped the {item_name}.")
+
+        except (IndexError, ValueError, TypeError) as e:
+            print(f"Error dropping item via action: {e}")
+            messagebox.showerror("Error", "Could not drop the selected item.", parent=actions_popup)
