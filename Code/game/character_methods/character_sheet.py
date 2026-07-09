@@ -168,50 +168,32 @@ def render_character_sheet(
 
     limb_container = tk.Frame(info_frame, bg="black")
     limb_container.pack(fill=tk.X, padx=20, pady=5)
-
-    row1_frame = tk.Frame(limb_container, bg="black")
-    row1_frame.pack(fill=tk.X, pady=2)
-
-    row2_frame = tk.Frame(limb_container, bg="black")
-    row2_frame.pack(fill=tk.X, pady=2)
+    for col in range(3):
+        limb_container.columnconfigure(col, weight=1)
 
     limb_order = ["head", "chest", "left_arm", "right_arm", "left_leg", "right_leg"]
 
-    for limb_name in limb_order[:3]:
-        if limb_name in player_data["limbs"]:
-            health = player_data["limbs"][limb_name]
-            display_name = limb_name.replace("_", " ").title()
-            color = "green" if health > 75 else "yellow" if health > 40 else "red"
+    for index, limb_name in enumerate(limb_order):
+        if limb_name not in player_data["limbs"]:
+            continue
+        health = player_data["limbs"][limb_name]
+        display_name = limb_name.replace("_", " ").title()
+        color = "green" if health > 75 else "yellow" if health > 40 else "red"
 
-            cell = tk.Frame(row1_frame, bg="black", width=200)
-            cell.pack(side=tk.LEFT, padx=10, expand=True)
-
-            limb_health_label = tk.Label(
-                cell,
-                text=f"{display_name}: {health}%",
-                font=("Arial", 12),
-                bg="black",
-                fg=color,
-            )
-            limb_health_label.pack(side=tk.LEFT)
-
-    for limb_name in limb_order[3:]:
-        if limb_name in player_data["limbs"]:
-            health = player_data["limbs"][limb_name]
-            display_name = limb_name.replace("_", " ").title()
-            color = "green" if health > 75 else "yellow" if health > 40 else "red"
-
-            cell = tk.Frame(row2_frame, bg="black", width=200)
-            cell.pack(side=tk.LEFT, padx=10, expand=True)
-
-            limb_health_label = tk.Label(
-                cell,
-                text=f"{display_name}: {health}%",
-                font=("Arial", 12),
-                bg="black",
-                fg=color,
-            )
-            limb_health_label.pack(side=tk.LEFT)
+        limb_health_label = tk.Label(
+            limb_container,
+            text=f"{display_name}: {health}%",
+            font=("Arial", 12),
+            bg="black",
+            fg=color,
+            anchor="center",
+        )
+        limb_health_label.grid(
+            row=index // 3,
+            column=index % 3,
+            sticky="ew",
+            pady=2,
+        )
 
     limb_health = sum(player_data["limbs"].values()) / len(player_data["limbs"])
     damage_health = 100 - (
