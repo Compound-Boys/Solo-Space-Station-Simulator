@@ -386,10 +386,6 @@ class Bridge:
                              command=lambda: messagebox.showinfo("Access Control", "Access control system ready. No pending requests.", parent=self.bridge_window))
         access_btn.pack(pady=5)
         
-        records_btn = tk.Button(self.button_frame, text="Personnel Records", font=("Arial", 14), width=20, 
-                              command=lambda: messagebox.showinfo("Personnel Records", "Personnel records database online. All records up to date.", parent=self.bridge_window))
-        records_btn.pack(pady=5)
-        
         # Back button
         back_btn = tk.Button(self.button_frame, text="Back to Bridge Menu", font=("Arial", 14), width=20, command=self.show_station_menu)
         back_btn.pack(pady=15)
