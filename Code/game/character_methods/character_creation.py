@@ -3,8 +3,8 @@ import datetime
 import random
 from tkinter import messagebox
 
-from game.items import build_default_locker_inventory
-from game.stock_market import default_stock_market_state, serialize_companies
+from game.objects.items import build_default_locker_inventory
+from game.helper_methods.stock_market import default_stock_market_state, serialize_companies
 
 # List of potential NPC names
 NPC_NAMES = [

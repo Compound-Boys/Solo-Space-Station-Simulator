@@ -2,8 +2,8 @@ import tkinter as tk
 from tkinter import messagebox
 import random
 
-from game.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock, is_door_locked
-from game.drinks import DRINKS_MENU, MIXED_DRINKS, DrinkMixer, is_drink_alcoholic
+from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock, is_door_locked
+from game.objects.drinks import DRINKS_MENU, MIXED_DRINKS, DrinkMixer, is_drink_alcoholic
 from game.special_rooms.shared import add_note, leave_room, open_room_in_main_window, show_station_menu as render_station_menu
 
 DOOR_KEY = "0,-1"

@@ -2,11 +2,11 @@ import datetime
 import tkinter as tk
 from tkinter import messagebox
 
-from game.character_sheet import render_character_sheet
-from game.game import Game
-from game.items import ItemInventoryMixin, ensure_locker_inventory, get_item_definition
+from game.character_methods.character_sheet import render_character_sheet
+from game.helper_methods.game import Game
+from game.objects.items import ItemInventoryMixin, ensure_locker_inventory, get_item_definition
 from game.special_rooms.shared import add_note, leave_room, open_room_in_main_window
-from game.stock_market import StockMarket, sync_holdings_to_companies
+from game.helper_methods.stock_market import StockMarket, sync_holdings_to_companies
 
 
 class Quarters(ItemInventoryMixin):

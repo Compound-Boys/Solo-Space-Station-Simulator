@@ -3,7 +3,7 @@ import datetime
 import tkinter as tk
 from tkinter import messagebox
 
-from game.door_control import can_control_door, is_door_locked
+from game.helper_methods.door_control import can_control_door, is_door_locked
 
 ROOM_GEOMETRY = "800x600"
 

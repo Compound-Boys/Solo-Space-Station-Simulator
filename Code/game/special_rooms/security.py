@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import messagebox
 
-from game.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
+from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
 from game.special_rooms.shared import (
     open_room_in_main_window,
     show_crew_manifest as render_crew_manifest,

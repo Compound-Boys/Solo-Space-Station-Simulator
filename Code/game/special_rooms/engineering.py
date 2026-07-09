@@ -2,9 +2,9 @@ import tkinter as tk
 from tkinter import messagebox
 import datetime
 
-from game.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
-from game.items import get_item_definition
-from game.power_constants import SYSTEM_POWER_RATES
+from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
+from game.objects.items import get_item_definition
+from game.helper_methods.power_constants import SYSTEM_POWER_RATES
 from game.special_rooms.shared import add_note, open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
 
 DOOR_KEY = "6,3"
@@ -710,7 +710,7 @@ class Engineering:
                                      font=("Arial", 10, "italic"), bg="#222222", fg="#AAAAAA", wraplength=500)
             power_draw_info.pack(anchor="w", pady=5)
             
-            # Power consumption rates for each system at max level (see power_constants.py)
+            # Power consumption rates for each system at max level (see helper_methods/power_constants.py)
             system_power_rates = SYSTEM_POWER_RATES
             
             # Dictionary to store power draw labels

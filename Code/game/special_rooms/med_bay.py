@@ -3,7 +3,7 @@ from tkinter import messagebox
 import datetime
 import math
 
-from game.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
+from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
 from game.special_rooms.shared import add_note, open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
 
 DOOR_KEY = "0,6"

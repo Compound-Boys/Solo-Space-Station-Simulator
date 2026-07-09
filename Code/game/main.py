@@ -7,17 +7,17 @@ import datetime
 import random
 from tkinter import messagebox
 
-from game.stock_market import (
+from game.helper_methods.stock_market import (
     StockMarketEngine,
     default_stock_market_state,
     generate_market_tip,
 )
-from game.game import Game
+from game.helper_methods.game import Game
 from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany, Quarters
-from game.items import get_item_definition, ALL_ITEMS, ItemInventoryMixin
-from game.character_creation import CharacterCreation
-from game.character_sheet import render_character_sheet
-from game.power_constants import (
+from game.objects.items import get_item_definition, ALL_ITEMS, ItemInventoryMixin
+from game.character_methods.character_creation import CharacterCreation
+from game.character_methods.character_sheet import render_character_sheet
+from game.helper_methods.power_constants import (
     LOW_POWER_SYSTEM_LEVELS,
     HIGH_MODE_SOLAR_DRAIN,
     calculate_discharge,
