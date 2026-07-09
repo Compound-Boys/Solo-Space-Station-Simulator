@@ -1,8 +1,10 @@
 import tkinter as tk
 from tkinter import messagebox
 
-from game.door_control import toggle_door_lock as toggle_room_door_lock
-from game.special_rooms.shared import open_room_in_main_window, try_leave_through_door
+from game.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
+from game.special_rooms.shared import open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
+
+DOOR_KEY = "6,6"
 
 class Security:
     def __init__(self, parent_window, player_data, station_crew, return_callback):
@@ -26,25 +28,8 @@ class Security:
         # Room actions
         self.button_frame = tk.Frame(self.security_window, bg="black")
         self.button_frame.pack(pady=20)
-        
-        # Check if user has special access
-        has_security_access = "permissions" in self.player_data and self.player_data["permissions"].get("security_station", False)
-        
-        if has_security_access:
-            # Show station access button for authorized personnel
-            station_btn = tk.Button(self.button_frame, text="Enter Security Station", font=("Arial", 14), width=20, command=self.access_security_station)
-            station_btn.pack(pady=10)
-            
-            # Add door lock/unlock button for authorized personnel
-            door_btn = tk.Button(self.button_frame, text="Lock/Unlock Door", font=("Arial", 14), width=20, command=self.toggle_door_lock)
-            door_btn.pack(pady=10)
-            
-            # Add "Room Options" button to show regular options
-            options_btn = tk.Button(self.button_frame, text="Room Options", font=("Arial", 14), width=20, command=self.show_room_options)
-            options_btn.pack(pady=10)
-        else:
-            # Show regular options for unauthorized personnel
-            self.show_room_options()
+
+        self._build_station_menu()
         
         # Exit button
         exit_btn = tk.Button(self.security_window, text="Exit Room", font=("Arial", 14), width=15, command=self.on_closing)
@@ -60,10 +45,7 @@ class Security:
         guard_btn = tk.Button(self.button_frame, text="Talk to Security Guard", font=("Arial", 14), width=20, command=self.talk_to_guard)
         guard_btn.pack(pady=10)
         
-        # Only show "Back to Station Menu" if player has access
-        has_security_access = "permissions" in self.player_data and self.player_data["permissions"].get("security_station", False)
-        if has_security_access:
-            # Back to station menu button
+        if can_control_door(self.player_data, DOOR_KEY):
             back_btn = tk.Button(self.button_frame, text="Back to Station Menu", font=("Arial", 14), width=20, 
                                command=self.show_station_menu)
             back_btn.pack(pady=10)
@@ -81,38 +63,31 @@ class Security:
         self.security_window.focus_force()
     
     def toggle_door_lock(self):
-        toggle_room_door_lock(self.player_data, "6,6", self.security_window)
+        toggle_room_door_lock(self.player_data, DOOR_KEY, self.security_window)
     
     def on_closing(self):
         try_leave_through_door(
             self.security_window,
             self.player_data,
-            "6,6",
+            DOOR_KEY,
             self.return_callback,
             self.station_crew,
         )
 
+    def _build_station_menu(self, before_show=None):
+        render_station_menu(
+            self.button_frame,
+            self.player_data,
+            door_key=DOOR_KEY,
+            stations=[{
+                "label": "Enter Security Station",
+                "command": self.access_security_station,
+            }],
+            show_room_options=self.show_room_options,
+            toggle_door_lock=self.toggle_door_lock,
+            before_show=before_show,
+        )
+
     def show_station_menu(self):
         """Return to main station menu options"""
-        # Clear existing buttons
-        for widget in self.button_frame.winfo_children():
-            widget.destroy()
-            
-        # Check if user has special access
-        has_security_access = "permissions" in self.player_data and self.player_data["permissions"].get("security_station", False)
-        
-        if has_security_access:
-            # Show station access button for authorized personnel
-            station_btn = tk.Button(self.button_frame, text="Enter Security Station", font=("Arial", 14), width=20, command=self.access_security_station)
-            station_btn.pack(pady=10)
-            
-            # Add door lock/unlock button for authorized personnel
-            door_btn = tk.Button(self.button_frame, text="Lock/Unlock Door", font=("Arial", 14), width=20, command=self.toggle_door_lock)
-            door_btn.pack(pady=10)
-            
-            # Add "Room Options" button to show regular options
-            options_btn = tk.Button(self.button_frame, text="Room Options", font=("Arial", 14), width=20, command=self.show_room_options)
-            options_btn.pack(pady=10)
-        else:
-            # Show regular options for unauthorized personnel
-            self.show_room_options()
+        self._build_station_menu()
