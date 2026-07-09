@@ -99,9 +99,9 @@ def render_character_sheet(
     damage_frame.pack(fill=tk.X, padx=20, pady=5)
 
     damage_types = [
-        {"name": "Burn", "key": "burn", "icon": "🔥"},
-        {"name": "Poison", "key": "poison", "icon": "☣️"},
-        {"name": "Oxygen", "key": "oxygen", "icon": "💨"},
+        {"name": "Burn", "key": "burn"},
+        {"name": "Poison", "key": "poison"},
+        {"name": "Oxygen", "key": "oxygen"},
     ]
 
     for damage_type in damage_types:
@@ -122,11 +122,11 @@ def render_character_sheet(
 
         type_label = tk.Label(
             type_frame,
-            text=f"{damage_type['icon']}{damage_type['name']}:",
+            text=f"{damage_type['name']}:",
             font=("Arial", 12),
             bg="black",
             fg="white",
-            width=12,
+            width=10,
             anchor="w",
         )
         type_label.grid(row=0, column=0, sticky="w", padx=(5, 0))
@@ -221,40 +221,49 @@ def render_character_sheet(
     def _health_color(value):
         return "green" if value > 75 else "yellow" if value > 40 else "red"
 
+    totals_frame = tk.Frame(info_frame, bg="black")
+    totals_frame.pack(anchor="w", fill=tk.X, padx=10, pady=5)
+
+    non_limb_col = tk.Frame(totals_frame, bg="black")
+    non_limb_col.pack(side=tk.LEFT, padx=(0, 40))
+
     non_limb_label = tk.Label(
-        info_frame,
+        non_limb_col,
         text="Non-Limb Health:",
         font=("Arial", 14),
         bg="black",
         fg="white",
     )
-    non_limb_label.pack(anchor="w", padx=10, pady=5)
+    non_limb_label.pack(anchor="w")
 
     non_limb_health_label = tk.Label(
-        info_frame,
+        non_limb_col,
         text=f"{damage_health:.1f}%",
         font=("Arial", 16, "bold"),
         bg="black",
         fg=_health_color(damage_health),
     )
-    non_limb_health_label.pack(anchor="w", padx=10, pady=5)
+    non_limb_health_label.pack(anchor="w", pady=5)
+
+    limb_col = tk.Frame(totals_frame, bg="black")
+    limb_col.pack(side=tk.LEFT)
 
     limb_total_label = tk.Label(
-        info_frame,
+        limb_col,
         text="Limb Health:",
         font=("Arial", 14),
         bg="black",
         fg="white",
     )
-    limb_total_label.pack(anchor="w", padx=10, pady=5)
+    limb_total_label.pack(anchor="w")
 
     limb_health_total_label = tk.Label(
-        info_frame,
+        limb_col,
         text=f"{limb_health:.1f}%",
         font=("Arial", 16, "bold"),
         bg="black",
         fg=_health_color(limb_health),
     )
-    limb_health_total_label.pack(anchor="w", padx=10, pady=5)
+    limb_health_total_label.pack(anchor="w", pady=5)
 
     return info_frame
