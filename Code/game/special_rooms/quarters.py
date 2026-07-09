@@ -389,11 +389,6 @@ class Quarters(ItemInventoryMixin):
         else:
             player_inventory.append(taken_item)
 
-        messagebox.showinfo(
-            "Item Taken",
-            f"You took the {item_name}.",
-            parent=self.quarters_window,
-        )
         note_text = f"Took {item_name}" + (f" ({item_id})" if item_id else "") + " from locker."
         add_note(self.player_data, note_text)
         self._close_storage_panel(storage_window)
@@ -416,15 +411,9 @@ class Quarters(ItemInventoryMixin):
 
         del player_inventory[item_index]
         if isinstance(item_to_store, dict):
-            locker_inventory.append(item_to_store.copy())
+            locker_inventory.insert(0, item_to_store.copy())
         else:
-            locker_inventory.append(item_to_store)
-
-        messagebox.showinfo(
-            "Item Stored",
-            f"You placed the {item_name} in the storage locker.",
-            parent=self.quarters_window,
-        )
+            locker_inventory.insert(0, item_to_store)
 
         note_text = f"Stored {item_name}" + (f" ({item_id})" if item_id else "") + " in locker."
         add_note(self.player_data, note_text)
