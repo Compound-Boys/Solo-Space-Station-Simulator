@@ -5,6 +5,15 @@ import datetime
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
 from game.objects.items import get_item_definition
 from game.helper_methods.power_constants import SYSTEM_POWER_RATES
+from game.helper_methods.oxygen_helper import (
+    LIFE_SUPPORT_DAMAGE_BEGIN_TITLE,
+    LIFE_SUPPORT_DAMAGE_BEGIN_MESSAGE,
+    OXYGEN_DEPLETION_ANNOUNCEMENT_TEXT,
+    OXYGEN_DEPLETION_MODAL_BODY,
+    OXYGEN_DEPLETION_FOLLOWUP_TITLE,
+    OXYGEN_DEPLETION_FOLLOWUP_MESSAGE,
+    life_support_entering_damage_range,
+)
 from game.special_rooms.shared import add_note, open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
 from game.helper_methods.ui_panels import open_modal_panel, report_message
 from game.maps.donut import ENGINEERING_KEY as DOOR_KEY
@@ -694,6 +703,7 @@ class Engineering:
             def update_system_level(system_name, value):
                 value = int(value)  # Convert to integer
                 system_key = system_name.lower().replace(" ", "_")
+                previous_value = self.player_data["station_power"]["system_levels"].get(system_key, 10)
                 self.player_data["station_power"]["system_levels"][system_key] = value
                 
                 # Update power draw label for this system
@@ -745,6 +755,15 @@ class Engineering:
                     if value == 0:
                         # If life support is set to 0, announce oxygen depletion
                         self.announce_oxygen_depletion()
+                    elif life_support_entering_damage_range(previous_value, value):
+                        # Entering the damage range (levels 4–0)
+                        report_message(
+                            LIFE_SUPPORT_DAMAGE_BEGIN_TITLE,
+                            LIFE_SUPPORT_DAMAGE_BEGIN_MESSAGE,
+                            kind="warning",
+                            parent=self.engineering_window,
+                        )
+                        self.announcement_active = False
                     else:
                         # If life support is greater than 0, reset the flag so another
                         # announcement can happen if it drops to 0 again
@@ -960,7 +979,7 @@ class Engineering:
                 
             announcement = {
                 "timestamp": datetime.datetime.now().isoformat(),
-                "text": "CRITICAL ALERT: Life support systems offline! Oxygen levels dropping to critical levels. All crew are advised to evacuate or obtain emergency oxygen supplies immediately.",
+                "text": OXYGEN_DEPLETION_ANNOUNCEMENT_TEXT,
                 "type": "emergency",
                 "seen": False
             }
@@ -992,8 +1011,8 @@ class Engineering:
                     self.engineering_window.focus_force()
 
                 report_message(
-                    "CRITICAL SYSTEM ALERT",
-                    "STATION ALERT: Life support systems have been deactivated!\n\nOxygen levels will rapidly deplete. All crew will begin to suffer oxygen damage in approximately 1 minute.",
+                    OXYGEN_DEPLETION_FOLLOWUP_TITLE,
+                    OXYGEN_DEPLETION_FOLLOWUP_MESSAGE,
                     kind="warning",
                     parent=self.engineering_window,
                 )
@@ -1032,7 +1051,7 @@ class Engineering:
             
             # Alert message
             message_text = tk.Label(content_frame, 
-                                  text="LIFE SUPPORT SYSTEMS OFFLINE!\n\nOxygen levels dropping to critical levels.\n\nAll crew are advised to evacuate or obtain emergency oxygen supplies immediately.",
+                                  text=OXYGEN_DEPLETION_MODAL_BODY,
                                   font=("Arial", 14), bg="#990000", fg="white", justify=tk.CENTER, wraplength=500)
             message_text.pack(pady=20)
             
@@ -1055,9 +1074,11 @@ class Engineering:
             # Reset flag if there's an error so it can try again
             self.announcement_active = False
             # Show a simple warning as fallback
-            messagebox.showwarning("CRITICAL SYSTEM ALERT", 
-                                 "STATION ALERT: Life support systems have been deactivated!\n\nOxygen levels will rapidly deplete. All crew will begin to suffer oxygen damage in approximately 1 minute.", 
-                                 parent=self.engineering_window)
+            messagebox.showwarning(
+                OXYGEN_DEPLETION_FOLLOWUP_TITLE,
+                OXYGEN_DEPLETION_FOLLOWUP_MESSAGE,
+                parent=self.engineering_window,
+            )
     
     def toggle_door_lock(self):
         toggle_room_door_lock(self.player_data, DOOR_KEY, self.engineering_window)

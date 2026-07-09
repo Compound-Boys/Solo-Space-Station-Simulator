@@ -3,6 +3,7 @@ from tkinter import messagebox
 import math
 
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
+from game.helper_methods.oxygen_helper import DOCTOR_REQUIRED_FLOOR
 from game.special_rooms.shared import add_note, open_room_in_main_window, try_leave_through_door, show_station_menu as render_station_menu
 from game.helper_methods.ui_panels import open_modal_panel
 from game.maps.donut import MEDBAY_KEY as DOOR_KEY
@@ -227,6 +228,21 @@ class MedBay:
                 health_report += (
                     f"\n• Non-limb damage detected: {', '.join(assessment['active_damage_types'])}."
                 )
+
+            oxygen_damage = assessment["non_limb"]["oxygen"]["value"]
+            if oxygen_damage > 0:
+                if oxygen_damage >= DOCTOR_REQUIRED_FLOOR:
+                    health_report += (
+                        f"\n• Oxygen damage is at {oxygen_damage:.0f}% "
+                        f"(at or above {DOCTOR_REQUIRED_FLOOR}%). "
+                        "You must be healed by the doctor to fully recover."
+                    )
+                else:
+                    health_report += (
+                        f"\n• Oxygen damage is at {oxygen_damage:.0f}% "
+                        f"(below {DOCTOR_REQUIRED_FLOOR}%). "
+                        "You can rest to restore yourself while life support is functional."
+                    )
 
             if overall_health < 75:
                 health_report += "\n• Movement and performance significantly impaired."

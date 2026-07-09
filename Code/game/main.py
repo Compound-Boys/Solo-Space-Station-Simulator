@@ -26,6 +26,15 @@ from game.helper_methods.power_constants import (
     calculate_solar_charge,
     default_station_power,
 )
+from game.helper_methods.oxygen_helper import (
+    OXYGEN_TICK_SECONDS,
+    OXYGEN_WARNING_MESSAGES,
+    OXYGEN_DEATH_TITLE,
+    OXYGEN_DEATH_MESSAGE,
+    OXYGEN_DEATH_NOTE,
+    apply_oxygen_tick,
+    apply_oxygen_death_state,
+)
 from game.helper_methods.ui_panels import (
     open_modal_panel,
     configure_message_buffer,
@@ -257,83 +266,29 @@ class SpaceStationGame(ItemInventoryMixin):
             print(f"Error updating battery: {e}")
             self.player_data["station_power"]["last_update_time"] = datetime.datetime.now().isoformat()
 
-        # Poll every 2 seconds
-        self.battery_timer_id = self.root.after(2000, self.update_battery)
+        # Poll on the same interval as oxygen damage ticks
+        self.battery_timer_id = self.root.after(OXYGEN_TICK_SECONDS * 1000, self.update_battery)
     
     def check_life_support_status(self, elapsed_seconds):
         """Check life support status and apply oxygen damage to player and NPCs if necessary"""
         try:
-            # Get life support level
-            life_support_level = self.player_data["station_power"]["system_levels"].get("life_support", 10)
-            
-            # Combine player and NPCs for processing
-            all_crew = [self.player_data] + self.station_crew
-            
-            # Determine damage or recovery rates based on life support level
-            oxygen_damage_rate = 0
-            recovery_rate_per_second = 0
-            apply_damage = False
-            apply_recovery = False
-            
-            if life_support_level == 0:
-                # Life support OFF: High oxygen damage rate (10% per minute)
-                oxygen_damage_rate = (elapsed_seconds * (10 / 60.0))
-                max_damage_per_update = 10.0  # Limit max damage per update
-                oxygen_damage_rate = min(oxygen_damage_rate, max_damage_per_update)
-                apply_damage = True
-            elif life_support_level < 5:
-                # Life support LOW: Slow oxygen damage rate (5% per minute)
-                oxygen_damage_rate = (elapsed_seconds * (5 / 60.0))
-                max_damage_per_update = 5.0 # Limit max damage per update
-                oxygen_damage_rate = min(oxygen_damage_rate, max_damage_per_update)
-                apply_damage = True
-            else:
-                # Life support FUNCTIONAL: Recover oxygen damage (1% per 30 seconds)
-                recovery_rate_per_second = 1 / 30.0
-                apply_recovery = True
-                
-            # Apply damage or recovery to all crew members
-            for crew_member in all_crew:
-                is_player = (crew_member == self.player_data)
-                current_oxygen_damage = crew_member["damage"].get("oxygen", 0)
-                
-                if apply_damage and oxygen_damage_rate > 0:
-                    new_oxygen_damage = min(100, current_oxygen_damage + oxygen_damage_rate)
-                    crew_member["damage"]["oxygen"] = new_oxygen_damage
-                    
-                    # Show warnings/handle death only for the player for now
-                    if is_player:
-                        print(f"Player Oxygen damage: Current={current_oxygen_damage:.1f}%, Adding={oxygen_damage_rate:.1f}% -> New={new_oxygen_damage:.1f}% (elapsed={elapsed_seconds:.1f}s)")
-                        if current_oxygen_damage < 30 and new_oxygen_damage >= 30:
-                            self.show_oxygen_warning(30)
-                        elif current_oxygen_damage < 60 and new_oxygen_damage >= 60:
-                            self.show_oxygen_warning(60)
-                        elif current_oxygen_damage < 90 and new_oxygen_damage >= 90:
-                            self.show_oxygen_warning(90)
-                        if new_oxygen_damage >= 100:
-                            self.handle_oxygen_death()
-
-                elif apply_recovery and current_oxygen_damage > 0:
-                    recovery_amount = min(current_oxygen_damage, elapsed_seconds * recovery_rate_per_second)
-                    new_oxygen_damage = max(0, current_oxygen_damage - recovery_amount)
-                    crew_member["damage"]["oxygen"] = new_oxygen_damage
-                    
-                    if is_player:
-                         print(f"Player Oxygen recovery: Current={current_oxygen_damage:.1f}%, Recovered={recovery_amount:.1f}% -> New={new_oxygen_damage:.1f}% (elapsed={elapsed_seconds:.1f}s)")
-
+            events = apply_oxygen_tick(self.player_data, self.station_crew, elapsed_seconds)
+            for threshold in events["crossed_warnings"]:
+                self.show_oxygen_warning(threshold)
+            if events["died"]:
+                self.handle_oxygen_death()
         except Exception as e:
             print(f"Error checking life support status for crew: {e}")
     
     def show_oxygen_warning(self, threshold):
         """Show a warning about oxygen levels"""
-        warnings = {
-            30: "You're feeling light-headed and having difficulty breathing. Oxygen levels are dropping.",
-            60: "Your vision is beginning to blur and you're experiencing severe difficulty breathing. Oxygen deprivation is worsening.",
-            90: "You're on the verge of losing consciousness. Severe oxygen deprivation detected. Immediate action required."
-        }
-        
         try:
-            report_message("Oxygen Warning", warnings[threshold], kind="warning", parent=self.root)
+            report_message(
+                "Oxygen Warning",
+                OXYGEN_WARNING_MESSAGES[threshold],
+                kind="warning",
+                parent=self.root,
+            )
             self.add_note(f"Suffered {threshold}% oxygen damage due to life support failure.")
         except Exception as e:
             print(f"Error showing oxygen warning: {e}")
@@ -342,24 +297,13 @@ class SpaceStationGame(ItemInventoryMixin):
         """Handle player death from oxygen deprivation"""
         try:
             report_message(
-                "CRITICAL: Oxygen Depleted",
-                "You have succumbed to oxygen deprivation. Emergency medical protocols have been activated, and you have been revived at minimal health levels.",
+                OXYGEN_DEATH_TITLE,
+                OXYGEN_DEATH_MESSAGE,
                 kind="error",
                 parent=self.root,
             )
-            
-            # Reset oxygen damage
-            self.player_data["damage"]["oxygen"] = 50
-            
-            # Set all limbs to critical levels
-            for limb in self.player_data["limbs"]:
-                self.player_data["limbs"][limb] = 20
-                
-            # Add note about near-death
-            self.add_note("CRITICAL EVENT: Nearly died from oxygen deprivation. Emergency medical systems intervened.")
-            
-            # Return player to quarters
-            self.player_data["location"] = dict(donut.QUARTERS_LOCATION)
+            apply_oxygen_death_state(self.player_data)
+            self.add_note(OXYGEN_DEATH_NOTE)
             self.show_hallway()
         except Exception as e:
             print(f"Error handling oxygen death: {e}")
