@@ -6,6 +6,7 @@ from game.helper_methods.door_control import can_control_door, toggle_door_lock 
 from game.helper_methods.oxygen_helper import DOCTOR_REQUIRED_FLOOR
 from game.special_rooms.shared import (
     add_note,
+    build_room_shell,
     open_room_in_main_window,
     try_leave_through_door,
     show_station_menu as render_station_menu,
@@ -163,20 +164,12 @@ class MedBay:
         self.medbay_window = open_room_in_main_window(
             parent_window, "MedBay", player_data, station_crew, return_callback
         )
-        
-        # Title
-        room_label = tk.Label(self.medbay_window, text="Station Medical Bay", font=("Arial", 24), bg="black", fg="white")
-        room_label.pack(pady=30)
-        
-        # Description
-        desc_label = tk.Label(self.medbay_window, 
-                              text="The medical bay is clean and orderly. Various medical equipment lines the walls, and a few examination beds are visible. The station's medical staff handle everything from routine checkups to emergency trauma care.",
-                              font=("Arial", 12), bg="black", fg="white", wraplength=600)
-        desc_label.pack(pady=10)
-        
-        # Room actions
-        self.button_frame = tk.Frame(self.medbay_window, bg="black")
-        self.button_frame.pack(pady=20)
+        _, self.button_frame = build_room_shell(
+            self.medbay_window,
+            self.player_data,
+            "Station Medical Bay",
+            "The medical bay is clean and orderly. Various medical equipment lines the walls, and a few examination beds are visible. The station's medical staff handle everything from routine checkups to emergency trauma care.",
+        )
 
         self._build_station_menu()
         

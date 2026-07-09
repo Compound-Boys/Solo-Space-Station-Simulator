@@ -16,6 +16,7 @@ from game.helper_methods.oxygen_helper import (
 )
 from game.special_rooms.shared import (
     add_note,
+    build_room_shell,
     open_room_in_main_window,
     try_leave_through_door,
     show_station_menu as render_station_menu,
@@ -33,20 +34,12 @@ class Engineering:
         self.engineering_window = open_room_in_main_window(
             parent_window, "Engineering Bay", player_data, station_crew, return_callback
         )
-        
-        # Title
-        room_label = tk.Label(self.engineering_window, text="Station Engineering Bay", font=("Arial", 24), bg="black", fg="white")
-        room_label.pack(pady=30)
-        
-        # Description
-        desc_label = tk.Label(self.engineering_window, 
-                              text="The engineering bay is filled with equipment and tools. Various machines hum with power, and spare parts are organized on shelves. This is where the station's systems are maintained and repaired.",
-                              font=("Arial", 12), bg="black", fg="white", wraplength=600)
-        desc_label.pack(pady=10)
-        
-        # Room actions
-        self.button_frame = tk.Frame(self.engineering_window, bg="black")
-        self.button_frame.pack(pady=20)
+        _, self.button_frame = build_room_shell(
+            self.engineering_window,
+            self.player_data,
+            "Station Engineering Bay",
+            "The engineering bay is filled with equipment and tools. Various machines hum with power, and spare parts are organized on shelves. This is where the station's systems are maintained and repaired.",
+        )
 
         self._build_station_menu()
         
@@ -931,7 +924,18 @@ class Engineering:
             def update_battery_display_timer():
                 # Force an immediate battery update from player_data values
                 update_battery_display()
-                
+
+                # Keep Hallway Lighting slider in sync when battery band clamp changes it
+                if "hallway_lighting" in system_sliders:
+                    current = int(
+                        self.player_data["station_power"]["system_levels"].get(
+                            "hallway_lighting", 5
+                        )
+                    )
+                    slider = system_sliders["hallway_lighting"]
+                    if int(float(slider.get())) != current:
+                        slider.set(current)
+
                 # Schedule the next update - update more frequently (500ms instead of 2000ms)
                 self.battery_display_timer = panel_window.after(500, update_battery_display_timer)
             

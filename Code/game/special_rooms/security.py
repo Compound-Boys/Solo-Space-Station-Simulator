@@ -3,6 +3,7 @@ from tkinter import messagebox
 
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
 from game.special_rooms.shared import (
+    build_room_shell,
     open_room_in_main_window,
     show_crew_manifest as render_crew_manifest,
     try_leave_through_door,
@@ -20,20 +21,12 @@ class Security:
         self.security_window = open_room_in_main_window(
             parent_window, "Security", player_data, station_crew, return_callback
         )
-        
-        # Title
-        room_label = tk.Label(self.security_window, text="Station Security Office", font=("Arial", 24), bg="black", fg="white")
-        room_label.pack(pady=30)
-        
-        # Description
-        desc_label = tk.Label(self.security_window, 
-                              text="The security office is filled with monitoring equipment. Screens showing various parts of the station line the walls. A few security officers monitor the feeds, while weapon lockers are secured along one wall.",
-                              font=("Arial", 12), bg="black", fg="white", wraplength=600)
-        desc_label.pack(pady=10)
-        
-        # Room actions
-        self.button_frame = tk.Frame(self.security_window, bg="black")
-        self.button_frame.pack(pady=20)
+        _, self.button_frame = build_room_shell(
+            self.security_window,
+            self.player_data,
+            "Station Security Office",
+            "The security office is filled with monitoring equipment. Screens showing various parts of the station line the walls. A few security officers monitor the feeds, while weapon lockers are secured along one wall.",
+        )
 
         self._build_station_menu()
         

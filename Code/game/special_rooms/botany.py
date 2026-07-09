@@ -5,6 +5,7 @@ import random
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
 from game.special_rooms.shared import (
     add_note,
+    build_room_shell,
     open_room_in_main_window,
     try_leave_through_door,
     show_station_menu as render_station_menu,
@@ -43,20 +44,12 @@ class Botany:
         self.botany_window = open_room_in_main_window(
             parent_window, "Botany Lab", player_data, station_crew, return_callback
         )
-        
-        # Title
-        room_label = tk.Label(self.botany_window, text="Station Botany Lab", font=("Arial", 24), bg="black", fg="white")
-        room_label.pack(pady=30)
-        
-        # Description
-        desc_label = tk.Label(self.botany_window, 
-                              text="The botany lab is filled with plants of all varieties. Hydroponic systems line the walls, and bright grow lights illuminate rows of planters. The air is humid and smells of fresh soil and vegetation.",
-                              font=("Arial", 12), bg="black", fg="white", wraplength=600)
-        desc_label.pack(pady=10)
-        
-        # Room actions
-        self.button_frame = tk.Frame(self.botany_window, bg="black")
-        self.button_frame.pack(pady=20)
+        _, self.button_frame = build_room_shell(
+            self.botany_window,
+            self.player_data,
+            "Station Botany Lab",
+            "The botany lab is filled with plants of all varieties. Hydroponic systems line the walls, and bright grow lights illuminate rows of planters. The air is humid and smells of fresh soil and vegetation.",
+        )
 
         self._build_station_menu()
         

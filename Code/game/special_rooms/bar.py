@@ -6,6 +6,7 @@ from game.helper_methods.door_control import can_control_door, toggle_door_lock 
 from game.objects.drinks import DRINKS_MENU, MIXED_DRINKS, DrinkMixer, is_drink_alcoholic
 from game.special_rooms.shared import (
     add_note,
+    build_room_shell,
     leave_room,
     open_room_in_main_window,
     show_station_menu as render_station_menu,
@@ -27,20 +28,13 @@ class Bar:
         # Track bartender mode
         self.bartender_mode = False
         self.drink_mixer = DrinkMixer(self.bar_window, self.player_data)
-        
-        # Title
-        room_label = tk.Label(self.bar_window, text="Station Bar", font=("Arial", 24), bg="black", fg="white")
-        room_label.pack(pady=30)
-        
-        # Description
-        desc_label = tk.Label(self.bar_window, 
-                              text="The station's bar is lively and well-furnished. A long counter runs along one wall, with shelves of drinks behind it. Tables and chairs are scattered about, and soft music plays in the background.",
-                              font=("Arial", 12), bg="black", fg="white", wraplength=600)
-        desc_label.pack(pady=10)
-        
-        # Room actions
-        self.button_frame = tk.Frame(self.bar_window, bg="black")
-        self.button_frame.pack(pady=20)
+
+        _, self.button_frame = build_room_shell(
+            self.bar_window,
+            self.player_data,
+            "Station Bar",
+            "The station's bar is lively and well-furnished. A long counter runs along one wall, with shelves of drinks behind it. Tables and chairs are scattered about, and soft music plays in the background.",
+        )
 
         self._build_station_menu()
         

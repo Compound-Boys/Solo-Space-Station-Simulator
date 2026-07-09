@@ -26,6 +26,11 @@ from game.helper_methods.power_constants import (
     calculate_solar_charge,
     default_station_power,
 )
+from game.helper_methods.lighting_helper import (
+    clamp_lighting_for_battery,
+    ensure_station_power_lighting,
+    lighting_style,
+)
 from game.helper_methods.oxygen_helper import (
     OXYGEN_TICK_SECONDS,
     OXYGEN_WARNING_MESSAGES,
@@ -251,6 +256,7 @@ class SpaceStationGame(ItemInventoryMixin):
 
             self.player_data["station_power"]["battery_level"] = new_level
             self.player_data["station_power"]["last_update_time"] = now.isoformat()
+            clamp_lighting_for_battery(self.player_data["station_power"])
             
             # Check oxygen levels based on life support setting
             self.check_life_support_status(elapsed_seconds)
@@ -354,6 +360,7 @@ class SpaceStationGame(ItemInventoryMixin):
         for widget in self.root.winfo_children():
             widget.destroy()
 
+        self.root.configure(bg="black")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         # Title
@@ -582,23 +589,13 @@ class SpaceStationGame(ItemInventoryMixin):
                 return
 
         location = self.ship_map[loc_key]
-        battery_level = 100.0  # Default to full power
-        if "station_power" in self.player_data:
-            battery_level = self.player_data["station_power"].get("battery_level", 100.0)
-        
-        # Set background color based on battery level
-        hallway_bg = "black"  # Default
-        desc_fg = "white"     # Default text color
-        
-        if battery_level <= 5:
-            # Critical - emergency red lighting only
-            hallway_bg = "#220000"  # Very dark red
-            desc_fg = "#FF5555"     # Bright red text
-        elif battery_level <= 15:
-            # Low power - dim lighting
-            hallway_bg = "#111111"  # Very dark gray
-            desc_fg = "#BBBBBB"     # Light gray text
-        
+        station_power = ensure_station_power_lighting(self.player_data)
+        lighting_level = station_power["system_levels"].get("hallway_lighting", 5)
+        style = lighting_style(lighting_level, place="hallway")
+        hallway_bg = style["bg"]
+        desc_fg = style["fg"]
+        power_desc = style["power_desc"]
+
         # Set window background
         self.root.configure(bg=hallway_bg)
         
@@ -607,17 +604,7 @@ class SpaceStationGame(ItemInventoryMixin):
         hallway_label.pack(pady=30)
         
         # Description with power status info
-        base_desc = location["desc"]
-        
-        # Add lighting condition to the description
-        if battery_level <= 5:
-            power_desc = "\n\nEmergency lighting casts an eerie red glow. Most systems are offline."
-        elif battery_level <= 15:
-            power_desc = "\n\nThe lights are dimmed to conserve power."
-        else:
-            power_desc = ""
-            
-        full_desc = base_desc + power_desc
+        full_desc = location["desc"] + power_desc
         
         desc_label = tk.Label(self.root, text=full_desc, font=("Arial", 12), 
                            bg=hallway_bg, fg=desc_fg, wraplength=600)
