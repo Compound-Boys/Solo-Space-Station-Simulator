@@ -4,6 +4,7 @@ import random
 
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock, is_door_locked
 from game.objects.drinks import DRINKS_MENU, MIXED_DRINKS, DrinkMixer, is_drink_alcoholic
+from game.objects.items import add_to_inventory
 from game.special_rooms.shared import (
     add_note,
     build_npc_contact_section,
@@ -85,28 +86,30 @@ class Bar:
                              font=("Arial", 14), bg="black", fg="white")
         credits_label.pack(pady=5)
         
-        # Create menu tabs for different categories
+        # Create menu tabs for different categories (centered)
         tab_frame = tk.Frame(menu_popup, bg="black")
         tab_frame.pack(fill=tk.X, padx=20, pady=(10, 5))
-        alcohol_tab_frame = tk.Frame(menu_popup, bg="black")
-        alcohol_tab_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
+        tab_inner = tk.Frame(tab_frame, bg="black")
+        tab_inner.pack(anchor=tk.CENTER)
         
-        # Pin action buttons to the bottom so they stay visible
+        # Pin action buttons to the bottom so they stay visible (centered)
         btn_frame = tk.Frame(menu_popup, bg="black")
-        btn_frame.pack(side=tk.BOTTOM, pady=10)
+        btn_frame.pack(side=tk.BOTTOM, pady=10, fill=tk.X)
+        btn_inner = tk.Frame(btn_frame, bg="black")
+        btn_inner.pack(anchor=tk.CENTER)
         
-        # Create frame for the menu
+        # Create frame for the menu (sized by listbox; do not stretch full width)
         menu_frame = tk.Frame(menu_popup, bg="black")
-        menu_frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
+        menu_frame.pack(padx=20, pady=10, anchor=tk.CENTER)
         
         # Create scrollbar
         scrollbar = tk.Scrollbar(menu_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Create listbox for the drinks
+        # Create listbox for the drinks (character width only; no fill/expand override)
         drink_listbox = tk.Listbox(menu_frame, bg="black", fg="white", font=("Arial", 12),
-                                width=50, height=15, yscrollcommand=scrollbar.set)
-        drink_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                                width=25, height=15, yscrollcommand=scrollbar.set)
+        drink_listbox.pack(side=tk.LEFT, fill=tk.Y)
         scrollbar.config(command=drink_listbox.yview)
         
         # Description frame
@@ -201,24 +204,24 @@ class Bar:
         def refresh_menu():
             show_category(current_category["name"])
 
-        # Create the category buttons with more spacing
-        all_btn = tk.Button(tab_frame, text="All Drinks", font=("Arial", 12), width=12,
+        # Create the category buttons with more spacing (centered)
+        all_btn = tk.Button(tab_inner, text="All Drinks", font=("Arial", 12), width=12,
                          command=lambda: show_category("All Drinks"))
         all_btn.pack(side=tk.LEFT, padx=15)
 
-        basic_btn = tk.Button(tab_frame, text="Basic Drinks", font=("Arial", 12), width=12,
+        basic_btn = tk.Button(tab_inner, text="Basic Drinks", font=("Arial", 12), width=12,
                            command=lambda: show_category("Basic Drinks"))
         basic_btn.pack(side=tk.LEFT, padx=15)
 
-        mixed_btn = tk.Button(tab_frame, text="Mixed Drinks", font=("Arial", 12), width=12,
+        mixed_btn = tk.Button(tab_inner, text="Mixed Drinks", font=("Arial", 12), width=12,
                            command=lambda: show_category("Mixed Drinks"))
         mixed_btn.pack(side=tk.LEFT, padx=15)
 
-        alcoholic_btn = tk.Button(tab_frame, text="Alcoholic", font=("Arial", 12), width=12,
+        alcoholic_btn = tk.Button(tab_inner, text="Alcoholic", font=("Arial", 12), width=12,
                                command=lambda: show_category("Alcoholic"))
         alcoholic_btn.pack(side=tk.LEFT, padx=15)
 
-        non_alcoholic_btn = tk.Button(tab_frame, text="Non-Alcoholic", font=("Arial", 12), width=12,
+        non_alcoholic_btn = tk.Button(tab_inner, text="Non-Alcoholic", font=("Arial", 12), width=12,
                                    command=lambda: show_category("Non-Alcoholic"))
         non_alcoholic_btn.pack(side=tk.LEFT, padx=15)
 
@@ -253,14 +256,14 @@ class Bar:
         drink_listbox.bind('<<ListboxSelect>>', on_select)
 
         # Order button
-        order_btn = tk.Button(btn_frame, text="Order Selected Drink", font=("Arial", 12),
+        order_btn = tk.Button(btn_inner, text="Order Selected Drink", font=("Arial", 12),
                            command=lambda: self.order_drink_from_menu(
                                selected_drink, menu_popup, credits_label, refresh_menu
                            ))
         order_btn.pack(side=tk.LEFT, padx=10)
         
         # Close button
-        close_btn = tk.Button(btn_frame, text="Close Menu", font=("Arial", 12), command=menu_popup.destroy)
+        close_btn = tk.Button(btn_inner, text="Close Menu", font=("Arial", 12), command=menu_popup.destroy)
         close_btn.pack(side=tk.LEFT, padx=10)
     
     def order_drink_from_menu(self, selected_drink, popup, credits_label, refresh_menu=None):
@@ -302,17 +305,22 @@ class Bar:
         self.player_data['credits'] -= drink_details['price']
 
         # Add the drink to inventory
+        alcoholic = is_drink_alcoholic(drink_name, drink_details)
         drink_item = {
             "id": f"drink_{drink_name.lower().replace(' ', '_')}",
             "name": drink_name,
             "description": drink_details["desc"],
             "category": "Drink",
             "attributes": {
-                "alcoholic": is_drink_alcoholic(drink_name, drink_details),
+                "alcoholic": alcoholic,
+                "alcohol_content": drink_details.get(
+                    "alcohol_content",
+                    2 if alcoholic else 0,
+                ),
             },
             "actions": ["examine", "drink", "drop"],
         }
-        self.player_data.setdefault("inventory", []).append(drink_item)
+        add_to_inventory(self.player_data, drink_item)
 
         # Update the credits display
         credits_label.config(text=f"Your credits: {self.player_data['credits']}")

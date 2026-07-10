@@ -4,6 +4,7 @@ import math
 
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
 from game.helper_methods.oxygen_helper import DOCTOR_REQUIRED_FLOOR
+from game.helper_methods.alcohol_helper import DOCTOR_SOBER_FLOOR, sober_up_cost
 from game.special_rooms.shared import (
     add_note,
     build_npc_contact_section,
@@ -210,13 +211,29 @@ class MedBay:
         assessment = assess_injuries(self.player_data)
         overall_health = assessment["overall_limb_health"]
         has_non_limb = bool(assessment["active_damage_types"])
+        alcohol = self.player_data.get("alcohol_percent", 0) or 0
+        sober_cost = sober_up_cost(alcohol)
 
         health_report = "Health Check Results:\n\n"
         if assessment["limbs"]:
             health_report += f"Overall Limb Health: {overall_health:.1f}%\n\n"
         health_report += format_damage_sections(assessment)
 
-        needs_attention = overall_health < 60 or has_non_limb
+        if alcohol > 0:
+            health_report += f"\n\nBlood Alcohol: {alcohol:.1f}%"
+            if alcohol >= DOCTOR_SOBER_FLOOR:
+                health_report += (
+                    f"\n• Intoxication is at or above {DOCTOR_SOBER_FLOOR}%. "
+                    f"Doctor treatment is required to sober up "
+                    f"({sober_cost} credits)."
+                )
+            else:
+                health_report += (
+                    "\n• Alcohol will metabolize over time "
+                    "(about 5% every 2 minutes)."
+                )
+
+        needs_attention = overall_health < 60 or has_non_limb or alcohol >= DOCTOR_SOBER_FLOOR
         health_report += "\n\nRecommendation: "
         if needs_attention:
             health_report += "Medical attention recommended."
@@ -259,11 +276,15 @@ class MedBay:
             elif overall_health < 90 and assessment["limbs"]:
                 health_report += "\n• Some physical activities may be difficult."
 
-        if assessment["total_cost"] > 0:
+        injury_cost = assessment["total_cost"]
+        combined_cost = injury_cost + sober_cost
+        if combined_cost > 0:
             health_report += "\n\nEstimated Treatment Cost:"
             for line in format_cost_breakdown(assessment):
                 health_report += f"\n{line}"
-            health_report += f"\nTotal: {assessment['total_cost']} credits"
+            if sober_cost > 0:
+                health_report += f"\n- Sober up: {sober_cost} credits"
+            health_report += f"\nTotal: {combined_cost} credits"
             health_report += "\n(Talk to Doctor to receive treatment)"
         else:
             health_report += "\n\nNo treatment needed."
@@ -278,7 +299,10 @@ class MedBay:
     def talk_to_doctor(self):
         """Talk to a doctor who can provide healing for a fee based on damage"""
         assessment = assess_injuries(self.player_data)
-        total_cost = assessment["total_cost"]
+        injury_cost = assessment["total_cost"]
+        alcohol = self.player_data.get("alcohol_percent", 0) or 0
+        sober_cost = sober_up_cost(alcohol)
+        total_cost = injury_cost + sober_cost
 
         if total_cost == 0:
             message = "The doctor examines you. 'You're in perfect health! No treatment needed.'"
@@ -290,9 +314,13 @@ class MedBay:
 
         message = "The doctor examines you.\n\n"
         message += format_damage_sections(assessment)
+        if alcohol > 0:
+            message += f"\n\nBlood Alcohol: {alcohol:.1f}%"
         message += "\n\nTreatment Cost:"
         for line in format_cost_breakdown(assessment):
             message += f"\n{line}"
+        if sober_cost > 0:
+            message += f"\n- Sober up: {sober_cost} credits"
         message += f"\nTotal: {total_cost} credits"
         message += "\n\nWould you like to proceed with treatment?"
 
@@ -310,14 +338,14 @@ class MedBay:
             btn_frame,
             text=f"Yes ({total_cost} credits)",
             font=("Arial", 12),
-            command=lambda: self.pay_for_healing(dialog, total_cost),
+            command=lambda: self.pay_for_healing(dialog, total_cost, sober_cost),
         )
         yes_btn.pack(side=tk.LEFT, padx=10)
 
         no_btn = tk.Button(btn_frame, text="No", font=("Arial", 12), command=dialog.destroy)
         no_btn.pack(side=tk.LEFT, padx=10)
 
-    def pay_for_healing(self, dialog, total_cost):
+    def pay_for_healing(self, dialog, total_cost, sober_cost=0):
         """Pay credits for healing based on the calculated cost"""
         if self.player_data["credits"] < total_cost:
             message = "You don't have enough credits for treatment. Come back when you can afford it."
@@ -332,12 +360,20 @@ class MedBay:
 
         original_health = self.player_data["limbs"].copy()
         original_damage = self.player_data["damage"].copy()
+        original_alcohol = self.player_data.get("alcohol_percent", 0) or 0
 
         for limb in self.player_data["limbs"]:
             self.player_data["limbs"][limb] = 100
 
         for damage_type in self.player_data["damage"]:
             self.player_data["damage"][damage_type] = 0
+
+        sobered = False
+        if sober_cost > 0:
+            self.player_data["alcohol_percent"] = 0
+            timers = self.player_data.setdefault("damage_timers", {})
+            timers["alcohol_decay_acc"] = 0.0
+            sobered = True
 
         dialog.destroy()
 
@@ -351,13 +387,16 @@ class MedBay:
         ]
         has_injuries = bool(injured_limbs) or bool(injured_damage)
 
-        message = f"You pay {total_cost} credits. The doctor treats your injuries.\n\n"
+        message = f"You pay {total_cost} credits. The doctor treats you.\n\n"
         if has_injuries:
             message += "Healed:\n"
             if injured_limbs:
                 message += f"- Blunt damage: {', '.join(injured_limbs)}\n"
             if injured_damage:
                 message += f"- Other damage: {', '.join(injured_damage)}\n"
+        if sobered:
+            message += f"- Intoxication cleared (was {original_alcohol:.1f}%).\n"
+        if has_injuries or sobered:
             message += "\nYou feel much better now."
         else:
             message += "No injuries were found."
@@ -368,7 +407,7 @@ class MedBay:
         )
 
         if "notes" in self.player_data:
-            if has_injuries:
+            if has_injuries or sobered:
                 healed_parts = []
                 if injured_limbs:
                     healed_parts.append(
@@ -377,6 +416,10 @@ class MedBay:
                 if injured_damage:
                     healed_parts.append(
                         f"Other Damage ({', '.join(injured_damage)}) fully healed."
+                    )
+                if sobered:
+                    healed_parts.append(
+                        f"Sobered up from {original_alcohol:.1f}% alcohol."
                     )
                 note_text = (
                     f"Paid {total_cost} credits for medical treatment. "

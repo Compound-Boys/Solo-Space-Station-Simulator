@@ -16,6 +16,7 @@ ADD_TIME_SECONDS = 60
 BRIBE_CHANCE = 0.35
 BRIBE_MIN_CREDITS = 5
 BRIBE_MAX_CREDITS = 50
+FINE_REFUSE_CHANCE = 0.15
 
 
 def _location_dict_from_key(key):
@@ -37,6 +38,172 @@ def ensure_jail_fields(member):
     member.setdefault("in_jail", False)
     member.setdefault("jail_release_at", None)
     member.setdefault("warrant", False)
+    member.setdefault("warrant_reason", "")
+    member.setdefault("fine_amount", 0)
+    member.setdefault("fine_reason", "")
+
+
+def warrant_reason_text(member, default="No reason on file"):
+    """Return the warrant reason string, or default if missing/blank."""
+    reason = (member.get("warrant_reason") or "").strip()
+    return reason if reason else default
+
+
+def has_fine(member):
+    """Return True if the member has an unpaid fine."""
+    try:
+        return float(member.get("fine_amount", 0) or 0) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def fine_amount_value(member):
+    try:
+        return max(0, float(member.get("fine_amount", 0) or 0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def fine_reason_text(member, default="No reason on file"):
+    reason = (member.get("fine_reason") or "").strip()
+    return reason if reason else default
+
+
+def clear_fine(member):
+    member["fine_amount"] = 0
+    member["fine_reason"] = ""
+
+
+def _jail_for_fine(
+    member,
+    *,
+    parent,
+    game,
+    is_player,
+    guard_name,
+    amount,
+    reason,
+    name,
+    refuse=False,
+):
+    """Arrest someone over an unpaid/refused fine. Returns 'jailed'."""
+    if refuse:
+        jail_message = (
+            f"{guard_name} demands your unpaid fine of {amount:.0f} credits "
+            f"({reason}), but you refuse to pay.\nYou are under arrest!"
+            if is_player
+            else (
+                f"{name} refuses to pay their {amount:.0f}-credit fine ({reason}), "
+                f"even though they have the credits.\n"
+                f"{guard_name} arrests them."
+            )
+        )
+        note = f"{name} was jailed for refusing to pay a {amount:.0f}-credit fine."
+        player_note = f"Jailed for refusing to pay a {amount:.0f}-credit fine ({reason})."
+    else:
+        jail_message = (
+            f"{guard_name} demands your unpaid fine of {amount:.0f} credits "
+            f"({reason}), but you cannot pay.\nYou are under arrest for non-payment!"
+            if is_player
+            else (
+                f"{name} cannot pay their {amount:.0f}-credit fine ({reason}).\n"
+                f"{guard_name} arrests them for non-payment."
+            )
+        )
+        note = f"{name} was jailed for failing to pay a {amount:.0f}-credit fine."
+        player_note = f"Jailed for failing to pay a {amount:.0f}-credit fine ({reason})."
+
+    arrest_member(
+        member,
+        reason=jail_message,
+        game=game,
+        is_player=is_player,
+        show_message=bool(game),
+    )
+    if game is None:
+        if parent is not None:
+            messagebox.showinfo("Arrested", jail_message, parent=parent)
+        else:
+            messagebox.showinfo("Arrested", jail_message)
+    if game is not None and hasattr(game, "add_note"):
+        game.add_note(note)
+    elif is_player:
+        _add_player_note(member, None, player_note)
+    return "jailed"
+
+
+def resolve_fine_with_guard(
+    member,
+    *,
+    parent,
+    game=None,
+    is_player=False,
+    guard_name="Security",
+):
+    """Collect an unpaid fine when the member meets a security guard.
+
+    Pays if they can afford it (85% of the time); 15% chance they refuse and
+    go to jail even with enough credits. Cannot afford -> jail.
+    Returns 'paid', 'jailed', or None if there was no fine.
+    """
+    ensure_jail_fields(member)
+    if not has_fine(member) or is_jailed(member):
+        return None
+
+    amount = fine_amount_value(member)
+    reason = fine_reason_text(member)
+    name = member.get("name", "Someone")
+    credits = float(member.get("credits", 0) or 0)
+
+    if credits >= amount:
+        # Even with enough money, they may stubbornly refuse to pay.
+        if random.random() < FINE_REFUSE_CHANCE:
+            return _jail_for_fine(
+                member,
+                parent=parent,
+                game=game,
+                is_player=is_player,
+                guard_name=guard_name,
+                amount=amount,
+                reason=reason,
+                name=name,
+                refuse=True,
+            )
+
+        member["credits"] = credits - amount
+        clear_fine(member)
+        message = (
+            f"{guard_name} collects your unpaid fine of {amount:.0f} credits.\n"
+            f"Reason: {reason}"
+            if is_player
+            else (
+                f"{guard_name} collects {name}'s unpaid fine of {amount:.0f} credits.\n"
+                f"Reason: {reason}"
+            )
+        )
+        if parent is not None:
+            messagebox.showinfo("Fine Paid", message, parent=parent)
+        else:
+            messagebox.showinfo("Fine Paid", message)
+        if game is not None and hasattr(game, "add_note"):
+            game.add_note(f"{name} paid a {amount:.0f}-credit fine ({reason}).")
+        elif is_player:
+            _add_player_note(
+                member, None, f"Paid a {amount:.0f}-credit fine ({reason})."
+            )
+        return "paid"
+
+    return _jail_for_fine(
+        member,
+        parent=parent,
+        game=game,
+        is_player=is_player,
+        guard_name=guard_name,
+        amount=amount,
+        reason=reason,
+        name=name,
+        refuse=False,
+    )
 
 
 def ensure_crew_jail_fields(player_data, station_crew):
@@ -80,6 +247,11 @@ def _member_location_key(member):
     return f"{location.get('x')},{location.get('y')}"
 
 
+def member_location_key(member):
+    """Return 'x,y' location key for a crew member, or None."""
+    return _member_location_key(member)
+
+
 def members_in_room(station_crew, room_key, *, exclude=None):
     """Return non-jailed NPCs whose location matches room_key."""
     found = []
@@ -100,6 +272,15 @@ def wanted_in_room(room_key, player_data, station_crew, *, exclude=None):
         if npc.get("warrant", False):
             wanted.append(npc)
     return wanted
+
+
+def fined_in_room(room_key, player_data, station_crew, *, exclude=None):
+    """Return non-jailed NPCs in room_key who have an unpaid fine."""
+    fined = []
+    for npc in members_in_room(station_crew, room_key, exclude=exclude):
+        if has_fine(npc):
+            fined.append(npc)
+    return fined
 
 
 def arrest_member(member, *, reason="", game=None, is_player=False, show_message=True):
@@ -154,6 +335,7 @@ def release_member(member, *, is_player=False, game=None, show_message=True):
     member["in_jail"] = False
     member["jail_release_at"] = None
     member["warrant"] = False
+    member["warrant_reason"] = ""
     member["room_visit_remaining"] = 0
 
     if is_player:
@@ -238,9 +420,13 @@ def arrest_wanted_in_room(room_key, player_data, station_crew, *, game=None, gua
     for npc in members_in_room(station_crew, room_key, exclude=guard):
         if npc.get("warrant", False) and not is_jailed(npc):
             name = npc.get("name", "A crew member")
+            charge = warrant_reason_text(npc)
             if arrest_member(
                 npc,
-                reason=f"{name} was arrested by security and sent to jail.",
+                reason=(
+                    f"{name} was arrested by security and sent to jail.\n"
+                    f"Charge: {charge}"
+                ),
                 game=game,
                 is_player=False,
                 show_message=bool(game),
@@ -252,9 +438,13 @@ def arrest_wanted_in_room(room_key, player_data, station_crew, *, game=None, gua
         and not is_jailed(player_data)
         and _member_location_key(player_data) == room_key
     ):
+        charge = warrant_reason_text(player_data)
         if arrest_member(
             player_data,
-            reason="A security guard found you while you were wanted. You are under arrest!",
+            reason=(
+                "A security guard found you while you were wanted. You are under arrest!\n"
+                f"Charge: {charge}"
+            ),
             game=game,
             is_player=True,
             show_message=True,
@@ -337,6 +527,7 @@ def offer_player_arrest_choice(player_data, npc, *, parent, game=None, place="ha
 
     name = npc.get("name", "A crew member")
     job = npc.get("job", "Crew")
+    charge = warrant_reason_text(npc)
     bribe_amount = None
     if random.random() < BRIBE_CHANCE:
         bribe_amount = random.randint(BRIBE_MIN_CREDITS, BRIBE_MAX_CREDITS)
@@ -344,25 +535,32 @@ def offer_player_arrest_choice(player_data, npc, *, parent, game=None, place="ha
     if place == "room":
         lines = [
             f"You scan the room and spot {name} ({job}).",
-            "They have an active warrant.",
+            f"They have an active warrant.\nCharge: {charge}",
         ]
-        arrest_reason = f"You arrest {name} in the room and send them to jail."
+        arrest_reason = (
+            f"You arrest {name} in the room and send them to jail.\nCharge: {charge}"
+        )
         let_go_note = f"Let wanted crew member {name} go after scanning a room."
         let_go_plain = f"You look the other way. {name} stays in the room."
     elif place == "call":
         lines = [
             f"{name} ({job}) answers your call and arrives.",
-            "Your scan shows they have an active warrant.",
+            f"Your scan shows they have an active warrant.\nCharge: {charge}",
         ]
-        arrest_reason = f"You arrest {name} after calling them back and send them to jail."
+        arrest_reason = (
+            f"You arrest {name} after calling them back and send them to jail.\n"
+            f"Charge: {charge}"
+        )
         let_go_note = f"Let wanted crew member {name} go after calling them back."
         let_go_plain = f"You look the other way. {name} remains at their post."
     else:
         lines = [
             f"You stop {name} ({job}) in the hall.",
-            "They have an active warrant.",
+            f"They have an active warrant.\nCharge: {charge}",
         ]
-        arrest_reason = f"You arrest {name} in the hallway and send them to jail."
+        arrest_reason = (
+            f"You arrest {name} in the hallway and send them to jail.\nCharge: {charge}"
+        )
         let_go_note = f"Let wanted crew member {name} go in the hallway."
         let_go_plain = f"You wave {name} on. They disappear down the hallway."
 
@@ -390,6 +588,7 @@ def offer_player_arrest_choice(player_data, npc, *, parent, game=None, place="ha
     if bribe_amount is not None:
         player_data["credits"] = player_data.get("credits", 0) + bribe_amount
         npc["warrant"] = False
+        npc["warrant_reason"] = ""
         messagebox.showinfo(
             "Let Go",
             f"You look the other way. {name} slips you {bribe_amount} credits and hurries off.\n"

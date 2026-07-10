@@ -350,6 +350,9 @@ class CharacterCreation:
         }
         self.player_data["alcohol_percent"] = 0
         self.player_data["warrant"] = False
+        self.player_data["warrant_reason"] = ""
+        self.player_data["fine_amount"] = 0
+        self.player_data["fine_reason"] = ""
         self.player_data["in_jail"] = False
         self.player_data["jail_release_at"] = None
 
@@ -400,6 +403,9 @@ class CharacterCreation:
                 },
                 "damage": {"burn": 0, "poison": 0, "oxygen": 0},
                 "warrant": False,
+                "warrant_reason": "",
+                "fine_amount": 0,
+                "fine_reason": "",
                 "in_jail": False,
                 "jail_release_at": None,
                 "permissions": permissions_for_job("Staff Assistant"),
@@ -427,6 +433,9 @@ class CharacterCreation:
                 },
                 "damage": {"burn": 0, "poison": 0, "oxygen": 0},
                 "warrant": False,
+                "warrant_reason": "",
+                "fine_amount": 0,
+                "fine_reason": "",
                 "in_jail": False,
                 "jail_release_at": None,
                 "permissions": permissions_for_job("Captain"),
@@ -461,6 +470,9 @@ class CharacterCreation:
                         },
                         "damage": {"burn": 0, "poison": 0, "oxygen": 0},
                         "warrant": False,
+                        "warrant_reason": "",
+                        "fine_amount": 0,
+                        "fine_reason": "",
                         "in_jail": False,
                         "jail_release_at": None,
                         "permissions": {

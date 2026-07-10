@@ -24,12 +24,16 @@ from game.helper_methods.npc_movement import (
 from game.helper_methods.jail import (
     arrest_member,
     ensure_crew_jail_fields,
+    fined_in_room,
     format_jail_time,
+    has_fine,
     is_jailed,
     jail_seconds_remaining,
     offer_player_arrest_choice,
+    resolve_fine_with_guard,
     tick_jail_releases,
     wanted_in_room,
+    warrant_reason_text,
 )
 from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany, Quarters
 from game.objects.items import ItemInventoryMixin
@@ -55,6 +59,11 @@ from game.helper_methods.oxygen_helper import (
     OXYGEN_DEATH_NOTE,
     apply_oxygen_tick,
     apply_oxygen_death_state,
+)
+from game.helper_methods.alcohol_helper import (
+    apply_alcohol_tick,
+    stumble_chance,
+    fall_chance,
 )
 from game.helper_methods.ui_panels import (
     open_modal_panel,
@@ -124,6 +133,9 @@ class SpaceStationGame(ItemInventoryMixin):
             },
             "alcohol_percent": 0,
             "warrant": False,
+            "warrant_reason": "",
+            "fine_amount": 0,
+            "fine_reason": "",
             "in_jail": False,
             "jail_release_at": None,
             "station_power": default_station_power(),
@@ -261,6 +273,12 @@ class SpaceStationGame(ItemInventoryMixin):
             
             # Check oxygen levels based on life support setting
             self.check_life_support_status(elapsed_seconds)
+
+            # Metabolize alcohol over time while intoxicated
+            try:
+                apply_alcohol_tick(self.player_data, elapsed_seconds)
+            except Exception as e:
+                print(f"Error applying alcohol tick: {e}")
 
             # Release anyone whose jail sentence has expired
             try:
@@ -804,6 +822,52 @@ class SpaceStationGame(ItemInventoryMixin):
         # Show the hallway
         self.show_hallway()
     
+    def _try_alcohol_movement_impairment(self):
+        """Roll stumble (then optional fall) before moving. Return True if move is cancelled."""
+        alcohol = self.player_data.get("alcohol_percent", 0) or 0
+        s_chance = stumble_chance(alcohol)
+        if s_chance <= 0 or random.random() >= (s_chance / 100.0):
+            return False
+
+        f_chance = fall_chance(alcohol)
+        if f_chance > 0 and random.random() < (f_chance / 100.0):
+            limbs = self.player_data.get("limbs") or {}
+            if limbs:
+                limb = random.choice(list(limbs.keys()))
+                damage = random.randint(1, 5)
+                original_health = limbs[limb]
+                limbs[limb] = max(0, original_health - damage)
+                limb_name = limb.replace("_", " ").title()
+                messagebox.showinfo(
+                    "You Fall",
+                    f"You stumble and fall hard!\n\n"
+                    f"Your {limb_name} took {damage}% blunt damage "
+                    f"and is now at {limbs[limb]}%.",
+                )
+                self.add_note(
+                    f"Fell while intoxicated ({alcohol:.1f}% alcohol). "
+                    f"{limb_name} took {damage}% blunt damage "
+                    f"(from {original_health}% to {limbs[limb]}%)."
+                )
+            else:
+                messagebox.showinfo(
+                    "You Fall",
+                    "You stumble and fall hard!",
+                )
+                self.add_note(
+                    f"Fell while intoxicated ({alcohol:.1f}% alcohol)."
+                )
+            return True
+
+        messagebox.showinfo(
+            "You Stumble",
+            "You stumble and lose your footing. You stay where you are.",
+        )
+        self.add_note(
+            f"Stumbled while intoxicated ({alcohol:.1f}% alcohol) and failed to move."
+        )
+        return True
+
     def move_direction(self, direction):
         """Move in the specified direction with random event chance"""
         if is_jailed(self.player_data):
@@ -812,6 +876,9 @@ class SpaceStationGame(ItemInventoryMixin):
                 "In Jail",
                 f"You are in jail. Time remaining: {remaining}.",
             )
+            return
+
+        if self._try_alcohol_movement_impairment():
             return
 
         x = self.player_data["location"]["x"]
@@ -878,17 +945,47 @@ class SpaceStationGame(ItemInventoryMixin):
     def _handle_hallway_security_encounter(self, npc):
         """Arrest on hallway pass-by if one party is Security and the other is wanted.
 
+        Also collects unpaid fines when a fined person meets a security guard.
         Returns True if an arrest (or security-specific handling) occurred.
         """
         npc_is_guard = npc.get("job") == "Security Guard"
         player_is_guard = self.player_data.get("job") == "Security Guard"
 
+        # Unpaid fines: pay or go to jail when meeting security.
+        if npc_is_guard and has_fine(self.player_data) and not is_jailed(self.player_data):
+            result = resolve_fine_with_guard(
+                self.player_data,
+                parent=self.root,
+                game=self,
+                is_player=True,
+                guard_name=npc.get("name", "A security guard"),
+            )
+            if result == "jailed":
+                return True
+            # Paid: still allow warrant handling below if wanted.
+
+        if (
+            player_is_guard
+            and has_fine(npc)
+            and not is_jailed(npc)
+        ):
+            result = resolve_fine_with_guard(
+                npc,
+                parent=self.root,
+                game=self,
+                is_player=False,
+                guard_name=self.player_data.get("name", "Security"),
+            )
+            if result is not None:
+                return True
+
         if npc_is_guard and self.player_data.get("warrant", False) and not is_jailed(self.player_data):
+            charge = warrant_reason_text(self.player_data)
             arrest_member(
                 self.player_data,
                 reason=(
                     f"{npc.get('name', 'A security guard')} stops you in the hall. "
-                    "You are under arrest!"
+                    f"You are under arrest!\nCharge: {charge}"
                 ),
                 game=self,
                 is_player=True,
@@ -907,11 +1004,22 @@ class SpaceStationGame(ItemInventoryMixin):
         return False
 
     def _scan_room_for_warrants(self, room_key):
-        """As a Security Guard player, offer Arrest/Let Go for each wanted person in the room."""
+        """As a Security Guard player, collect fines and offer Arrest/Let Go for wanted people."""
         if self.player_data.get("job") != "Security Guard":
             return
         if is_jailed(self.player_data):
             return
+
+        for npc in list(fined_in_room(room_key, self.player_data, self.station_crew)):
+            if is_jailed(npc) or not has_fine(npc):
+                continue
+            resolve_fine_with_guard(
+                npc,
+                parent=self.root,
+                game=self,
+                is_player=False,
+                guard_name=self.player_data.get("name", "Security"),
+            )
 
         for npc in list(wanted_in_room(room_key, self.player_data, self.station_crew)):
             if is_jailed(npc) or not npc.get("warrant", False):

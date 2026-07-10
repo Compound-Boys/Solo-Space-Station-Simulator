@@ -5,7 +5,7 @@ from tkinter import messagebox
 
 from game.helper_methods.stock_market import generate_market_tip
 from game.helper_methods.ui_panels import report_message
-from game.objects.items import ALL_ITEMS, get_item_definition
+from game.objects.items import ALL_ITEMS, add_to_inventory, get_item_definition
 
 HALLWAY_EVENT_CHANCE = 0.20
 
@@ -255,7 +255,7 @@ def add_random_item(game):
 
     game.player_data.setdefault("inventory", [])
 
-    game.player_data["inventory"].append(item_def)
+    add_to_inventory(game.player_data, item_def)
     item_name = item_def.get("name", "an item")
     _report_effect(
         game,
@@ -390,14 +390,21 @@ def bot_moves_by(game):
                 "A security bot rolls past your cell without stopping.",
             )
         elif game.player_data.get("warrant", False):
+            from game.helper_methods.jail import warrant_reason_text
+
+            charge = warrant_reason_text(game.player_data)
             _report_effect(
                 game,
                 "Security Bot",
-                "A security bot locks onto you. You are wanted — you are under arrest!",
+                "A security bot locks onto you. You are wanted — you are under arrest!\n"
+                f"Charge: {charge}",
             )
             arrest_member(
                 game.player_data,
-                reason="A security bot locks onto you. You are wanted — you are under arrest!",
+                reason=(
+                    "A security bot locks onto you. You are wanted — you are under arrest!\n"
+                    f"Charge: {charge}"
+                ),
                 game=game,
                 is_player=True,
                 show_message=False,
@@ -426,7 +433,7 @@ def add_snack(game):
         return
 
     game.player_data.setdefault("inventory", [])
-    game.player_data["inventory"].append(item_def)
+    add_to_inventory(game.player_data, item_def)
     _report_effect(
         game,
         "Free Snack",

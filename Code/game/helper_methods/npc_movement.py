@@ -62,6 +62,8 @@ def npcs_for_job(station_crew, job_name):
 def on_duty_npc_for_job(station_crew, job_name):
     """Return the first NPC holding job_name who is currently on duty, or None."""
     for npc in npcs_for_job(station_crew, job_name):
+        if npc.get("in_jail", False):
+            continue
         if npc.get("on_duty", True):
             return npc
     return None
@@ -121,6 +123,9 @@ def ensure_npc_movement_fields(station_crew):
         npc.setdefault("in_jail", False)
         npc.setdefault("jail_release_at", None)
         npc.setdefault("warrant", False)
+        npc.setdefault("warrant_reason", "")
+        npc.setdefault("fine_amount", 0)
+        npc.setdefault("fine_reason", "")
         if npc.get("in_jail", False):
             npc["location"] = _location_dict_from_key(donut.SECURITY_KEY)
             npc["room_visit_remaining"] = 0
@@ -185,6 +190,12 @@ def call_npc(npc):
     Returns (success, message).
     """
     name = npc.get("name", "They")
+    if npc.get("in_jail", False):
+        from game.helper_methods.jail import format_jail_time, jail_seconds_remaining
+
+        remaining = format_jail_time(jail_seconds_remaining(npc))
+        return False, f"{name} is in jail and will be released in {remaining}."
+
     if npc.get("on_duty", True):
         return True, f"{name} is already at their post."
 
@@ -312,7 +323,44 @@ def _enter_room(npc, room_key, game=None, player_data=None, station_crew=None):
 
     # Security Guards check warrants when they enter a room.
     if npc.get("job") == "Security Guard" and station_crew is not None:
-        from game.helper_methods.jail import arrest_wanted_in_room
+        from game.helper_methods.jail import (
+            arrest_wanted_in_room,
+            has_fine,
+            is_jailed,
+            member_location_key,
+            resolve_fine_with_guard,
+        )
+
+        # Collect unpaid fines from anyone already in the room (including the player).
+        if (
+            player_data
+            and has_fine(player_data)
+            and not is_jailed(player_data)
+            and member_location_key(player_data) == room_key
+        ):
+            resolve_fine_with_guard(
+                player_data,
+                parent=getattr(game, "root", None) if game is not None else None,
+                game=game,
+                is_player=True,
+                guard_name=npc.get("name", "A security guard"),
+            )
+
+        for other in list(station_crew):
+            if other is npc:
+                continue
+            if (
+                has_fine(other)
+                and not is_jailed(other)
+                and member_location_key(other) == room_key
+            ):
+                resolve_fine_with_guard(
+                    other,
+                    parent=getattr(game, "root", None) if game is not None else None,
+                    game=game,
+                    is_player=False,
+                    guard_name=npc.get("name", "A security guard"),
+                )
 
         arrest_wanted_in_room(
             room_key,

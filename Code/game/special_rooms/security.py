@@ -9,6 +9,7 @@ from game.helper_methods.jail import (
     jail_seconds_remaining,
     list_prisoners,
     release_member,
+    warrant_reason_text,
 )
 from game.special_rooms.shared import (
     build_npc_contact_section,
@@ -69,9 +70,32 @@ class Security:
             back_btn.pack(pady=10)
     
     def talk_to_guard(self):
-        # Show dialog with the room window as parent to keep focus within the room
-        self.security_window.after(10, lambda: messagebox.showinfo("Security Guard", "The security agent waves you away without looking up from the cameras.", parent=self.security_window))
-        # Make sure the window stays on top after dialog
+        from game.helper_methods.jail import has_fine, is_jailed, resolve_fine_with_guard
+
+        # Paying an unpaid fine takes priority when talking to the on-duty guard.
+        if has_fine(self.player_data) and not is_jailed(self.player_data):
+            result = resolve_fine_with_guard(
+                self.player_data,
+                parent=self.security_window,
+                game=None,
+                is_player=True,
+                guard_name="The security guard",
+            )
+            if result == "jailed":
+                # Player can't leave Security while jailed; refresh room options.
+                self.show_room_options()
+            self.security_window.after(20, self.security_window.lift)
+            self.security_window.focus_force()
+            return
+
+        self.security_window.after(
+            10,
+            lambda: messagebox.showinfo(
+                "Security Guard",
+                "The security agent waves you away without looking up from the cameras.",
+                parent=self.security_window,
+            ),
+        )
         self.security_window.after(20, self.security_window.lift)
         self.security_window.focus_force()
     
@@ -91,7 +115,7 @@ class Security:
 
         warrant_btn = tk.Button(
             self.button_frame,
-            text="Issue Warrant",
+            text="Issue Warrant/Fine",
             font=("Arial", 14),
             width=20,
             command=self.show_issue_warrant,
@@ -124,12 +148,12 @@ class Security:
         render_crew_manifest(self.security_window, self.player_data, self.station_crew)
 
     def show_issue_warrant(self):
-        """Open a warrant terminal listing the player and all station NPCs."""
-        panel, popup = open_modal_panel(self.security_window, title="Issue Warrant")
+        """Open a warrant/fine terminal listing the player and all station NPCs."""
+        panel, popup = open_modal_panel(self.security_window, title="Issue Warrant/Fine")
         popup.configure(bg="black")
 
         title_label = tk.Label(
-            popup, text="Issue Warrant", font=("Arial", 18, "bold"), bg="black", fg="white"
+            popup, text="Issue Warrant/Fine", font=("Arial", 18, "bold"), bg="black", fg="white"
         )
         title_label.pack(pady=10)
 
@@ -144,7 +168,7 @@ class Security:
             bg="black",
             fg="white",
             font=("Arial", 12),
-            width=40,
+            width=48,
             height=12,
             exportselection=False,
             yscrollcommand=scrollbar.set,
@@ -165,8 +189,13 @@ class Security:
             name = member.get("name", "Unknown")
             job = member.get("job", "Unknown")
             wanted = " [WANTED]" if member.get("warrant", False) else ""
+            try:
+                fine_amt = float(member.get("fine_amount", 0) or 0)
+            except (TypeError, ValueError):
+                fine_amt = 0
+            fined = f" [FINE: {fine_amt:.0f}]" if fine_amt > 0 else ""
             you = " (YOU)" if is_player else ""
-            return f"{name} ({job}){you}{wanted}"
+            return f"{name} ({job}){you}{wanted}{fined}"
 
         def refresh_list(preserve_index=None):
             crew_listbox.delete(0, tk.END)
@@ -207,13 +236,220 @@ class Security:
                     parent=popup,
                 )
                 return
+
+            reason = _prompt_warrant_reason(member)
+            if reason is None:
+                return
+
             member["warrant"] = True
+            member["warrant_reason"] = reason
             refresh_list(preserve_index=list_index)
             messagebox.showinfo(
                 "Warrant Issued",
-                f"Warrant issued for {member.get('name', 'Unknown')}.",
+                f"Warrant issued for {member.get('name', 'Unknown')}.\nReason: {reason}",
                 parent=popup,
             )
+
+        def _prompt_warrant_reason(member):
+            """Ask for a warrant reason. Returns stripped text, or None if cancelled."""
+            name = member.get("name", "Unknown")
+            result = {"value": None, "confirmed": False}
+
+            dialog = tk.Toplevel(popup)
+            dialog.title("Warrant Reason")
+            dialog.configure(bg="black")
+            dialog.transient(popup)
+            dialog.grab_set()
+            dialog.resizable(False, False)
+
+            tk.Label(
+                dialog,
+                text=f"Enter the reason for {name}'s warrant:",
+                font=("Arial", 12),
+                bg="black",
+                fg="white",
+                wraplength=360,
+                justify=tk.LEFT,
+            ).pack(padx=20, pady=(16, 8))
+
+            entry = tk.Entry(dialog, font=("Arial", 12), width=40)
+            entry.pack(padx=20, pady=8)
+            entry.focus_set()
+
+            button_row = tk.Frame(dialog, bg="black")
+            button_row.pack(pady=(8, 16))
+
+            def confirm():
+                text = entry.get().strip()
+                if not text:
+                    messagebox.showwarning(
+                        "Reason Required",
+                        "Enter a reason for the warrant.",
+                        parent=dialog,
+                    )
+                    return
+                result["value"] = text
+                result["confirmed"] = True
+                dialog.destroy()
+
+            def cancel():
+                dialog.destroy()
+
+            tk.Button(
+                button_row, text="Confirm", font=("Arial", 12), width=12, command=confirm
+            ).pack(side=tk.LEFT, padx=8)
+            tk.Button(
+                button_row, text="Cancel", font=("Arial", 12), width=12, command=cancel
+            ).pack(side=tk.LEFT, padx=8)
+
+            dialog.bind("<Return>", lambda _event: confirm())
+            dialog.protocol("WM_DELETE_WINDOW", cancel)
+            dialog.update_idletasks()
+            width = dialog.winfo_reqwidth()
+            height = dialog.winfo_reqheight()
+            try:
+                x = popup.winfo_rootx() + (popup.winfo_width() - width) // 2
+                y = popup.winfo_rooty() + (popup.winfo_height() - height) // 2
+                dialog.geometry(f"+{x}+{y}")
+            except tk.TclError:
+                pass
+            popup.wait_window(dialog)
+
+            if result["confirmed"]:
+                return result["value"]
+            return None
+
+        def issue_fine():
+            list_index, member = _selected_member()
+            if member is None:
+                return
+
+            fine_data = _prompt_fine_details(member)
+            if fine_data is None:
+                return
+
+            reason, amount = fine_data
+            # Stack additional fines onto any existing unpaid amount.
+            try:
+                existing = float(member.get("fine_amount", 0) or 0)
+            except (TypeError, ValueError):
+                existing = 0
+            member["fine_amount"] = existing + amount
+            if existing > 0 and (member.get("fine_reason") or "").strip():
+                member["fine_reason"] = (
+                    f"{member.get('fine_reason').strip()}; {reason}"
+                )
+            else:
+                member["fine_reason"] = reason
+
+            refresh_list(preserve_index=list_index)
+            messagebox.showinfo(
+                "Fine Issued",
+                f"Fine issued for {member.get('name', 'Unknown')}.\n"
+                f"Amount: {amount:.0f} credits\nReason: {reason}\n"
+                f"Total owed: {member['fine_amount']:.0f} credits",
+                parent=popup,
+            )
+
+        def _prompt_fine_details(member):
+            """Ask for fine reason and amount. Returns (reason, amount) or None."""
+            name = member.get("name", "Unknown")
+            result = {"reason": None, "amount": None, "confirmed": False}
+
+            dialog = tk.Toplevel(popup)
+            dialog.title("Issue Fine")
+            dialog.configure(bg="black")
+            dialog.transient(popup)
+            dialog.grab_set()
+            dialog.resizable(False, False)
+
+            tk.Label(
+                dialog,
+                text=f"Issue a fine to {name}:",
+                font=("Arial", 12),
+                bg="black",
+                fg="white",
+                wraplength=360,
+                justify=tk.LEFT,
+            ).pack(padx=20, pady=(16, 8))
+
+            tk.Label(
+                dialog, text="Reason:", font=("Arial", 11), bg="black", fg="white"
+            ).pack(anchor="w", padx=20)
+            reason_entry = tk.Entry(dialog, font=("Arial", 12), width=40)
+            reason_entry.pack(padx=20, pady=(2, 8))
+            reason_entry.focus_set()
+
+            tk.Label(
+                dialog,
+                text="Amount (credits):",
+                font=("Arial", 11),
+                bg="black",
+                fg="white",
+            ).pack(anchor="w", padx=20)
+            amount_entry = tk.Entry(dialog, font=("Arial", 12), width=40)
+            amount_entry.pack(padx=20, pady=(2, 8))
+
+            button_row = tk.Frame(dialog, bg="black")
+            button_row.pack(pady=(8, 16))
+
+            def confirm():
+                reason = reason_entry.get().strip()
+                if not reason:
+                    messagebox.showwarning(
+                        "Reason Required",
+                        "Enter a reason for the fine.",
+                        parent=dialog,
+                    )
+                    return
+                raw_amount = amount_entry.get().strip()
+                try:
+                    amount = float(raw_amount)
+                except (TypeError, ValueError):
+                    messagebox.showwarning(
+                        "Invalid Amount",
+                        "Enter a valid credit amount.",
+                        parent=dialog,
+                    )
+                    return
+                if amount <= 0:
+                    messagebox.showwarning(
+                        "Invalid Amount",
+                        "Fine amount must be greater than zero.",
+                        parent=dialog,
+                    )
+                    return
+                result["reason"] = reason
+                result["amount"] = amount
+                result["confirmed"] = True
+                dialog.destroy()
+
+            def cancel():
+                dialog.destroy()
+
+            tk.Button(
+                button_row, text="Confirm", font=("Arial", 12), width=12, command=confirm
+            ).pack(side=tk.LEFT, padx=8)
+            tk.Button(
+                button_row, text="Cancel", font=("Arial", 12), width=12, command=cancel
+            ).pack(side=tk.LEFT, padx=8)
+
+            dialog.bind("<Return>", lambda _event: confirm())
+            dialog.protocol("WM_DELETE_WINDOW", cancel)
+            dialog.update_idletasks()
+            width = dialog.winfo_reqwidth()
+            height = dialog.winfo_reqheight()
+            try:
+                x = popup.winfo_rootx() + (popup.winfo_width() - width) // 2
+                y = popup.winfo_rooty() + (popup.winfo_height() - height) // 2
+                dialog.geometry(f"+{x}+{y}")
+            except tk.TclError:
+                pass
+            popup.wait_window(dialog)
+
+            if result["confirmed"]:
+                return result["reason"], result["amount"]
+            return None
 
         def clear_warrant():
             list_index, member = _selected_member()
@@ -227,6 +463,7 @@ class Security:
                 )
                 return
             member["warrant"] = False
+            member["warrant_reason"] = ""
             refresh_list(preserve_index=list_index)
             messagebox.showinfo(
                 "Warrant Cleared",
@@ -240,12 +477,17 @@ class Security:
         button_frame.pack(pady=10)
 
         issue_btn = tk.Button(
-            button_frame, text="Issue Warrant", font=("Arial", 12), width=16, command=issue_warrant
+            button_frame, text="Issue Warrant", font=("Arial", 12), width=14, command=issue_warrant
         )
         issue_btn.pack(side=tk.LEFT, padx=5)
 
+        fine_btn = tk.Button(
+            button_frame, text="Issue Fine", font=("Arial", 12), width=12, command=issue_fine
+        )
+        fine_btn.pack(side=tk.LEFT, padx=5)
+
         clear_btn = tk.Button(
-            button_frame, text="Clear Warrant", font=("Arial", 12), width=16, command=clear_warrant
+            button_frame, text="Clear Warrant", font=("Arial", 12), width=14, command=clear_warrant
         )
         clear_btn.pack(side=tk.LEFT, padx=5)
 
@@ -291,8 +533,9 @@ class Security:
             name = member.get("name", "Unknown")
             job = member.get("job", "Unknown")
             remaining = format_jail_time(jail_seconds_remaining(member))
+            charge = warrant_reason_text(member)
             you = " (YOU)" if is_player else ""
-            return f"{name} ({job}){you} — {remaining} remaining"
+            return f"{name} ({job}){you} — {remaining} remaining | Charge: {charge}"
 
         def refresh_list(preserve_index=None):
             prisoner_listbox.delete(0, tk.END)

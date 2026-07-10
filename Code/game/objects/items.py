@@ -393,6 +393,82 @@ def get_item_definition(item_id):
     return None
 
 
+def item_quantity(item):
+    """Return quantity for an inventory entry (missing quantity counts as 1)."""
+    if not isinstance(item, dict):
+        return 1
+    qty = item.get("quantity", 1)
+    try:
+        qty = int(qty)
+    except (TypeError, ValueError):
+        qty = 1
+    return max(1, qty)
+
+
+def inventory_item_count(player_data):
+    """Total number of items in inventory, summing stack quantities."""
+    total = 0
+    for item in player_data.get("inventory", []) or []:
+        total += item_quantity(item)
+    return total
+
+
+def format_inventory_label(item):
+    """Display name with optional ' x N' when stacked."""
+    if isinstance(item, dict) and "name" in item:
+        name = item["name"]
+        qty = item_quantity(item)
+        if qty > 1:
+            return f"{name} x {qty}"
+        return name
+    return str(item)
+
+
+def add_to_inventory(player_data, item):
+    """Add an item to inventory, stacking by id when possible.
+
+    Returns the inventory entry that was updated or appended.
+    """
+    inventory = player_data.setdefault("inventory", [])
+    if not isinstance(item, dict):
+        inventory.append(item)
+        return item
+
+    item_copy = dict(item)
+    add_qty = item_quantity(item_copy)
+    item_copy["quantity"] = add_qty
+    item_id = item_copy.get("id")
+
+    if item_id:
+        for existing in inventory:
+            if isinstance(existing, dict) and existing.get("id") == item_id:
+                existing["quantity"] = item_quantity(existing) + add_qty
+                return existing
+
+    inventory.append(item_copy)
+    return item_copy
+
+
+def remove_one_from_inventory(player_data, index):
+    """Remove one unit from inventory at index. Returns the removed unit dict/str or None."""
+    inventory = player_data.get("inventory", [])
+    if not (0 <= index < len(inventory)):
+        return None
+
+    entry = inventory[index]
+    if not isinstance(entry, dict):
+        return inventory.pop(index)
+
+    qty = item_quantity(entry)
+    if qty > 1:
+        entry["quantity"] = qty - 1
+        removed = dict(entry)
+        removed["quantity"] = 1
+        return removed
+
+    return inventory.pop(index)
+
+
 def build_default_locker_inventory(exclude_item_ids=None):
     """Return default locker item dicts, optionally skipping IDs already held."""
     exclude = exclude_item_ids or set()
@@ -446,7 +522,7 @@ class ItemInventoryMixin:
         else:
             for item in player_inventory:
                 if isinstance(item, dict) and 'name' in item:
-                    inventory_list.insert(tk.END, item['name'])
+                    inventory_list.insert(tk.END, format_inventory_label(item))
                 else:
                     inventory_list.insert(tk.END, str(item))
                     inventory_list.itemconfig(tk.END, {'fg': "red"})
@@ -669,14 +745,16 @@ class ItemInventoryMixin:
             return
 
         item_name = item.get('name', 'drink')
-        alcoholic = item.get('attributes', {}).get('alcoholic', False)
+        attributes = item.get('attributes', {})
+        alcoholic = attributes.get('alcoholic', False)
+        alcohol_content = attributes.get('alcohol_content', 2 if alcoholic else 0)
 
         try:
-            del self.player_data['inventory'][item_inventory_index]
+            remove_one_from_inventory(self.player_data, item_inventory_index)
 
             if alcoholic:
                 self.player_data.setdefault("alcohol_percent", 0)
-                self.player_data["alcohol_percent"] += 2
+                self.player_data["alcohol_percent"] += alcohol_content
 
             if hasattr(actions_popup, 'close'):
                 actions_popup.close()
@@ -717,7 +795,7 @@ class ItemInventoryMixin:
         item_name = item.get('name', 'food')
 
         try:
-            del self.player_data['inventory'][item_inventory_index]
+            remove_one_from_inventory(self.player_data, item_inventory_index)
 
             if hasattr(actions_popup, 'close'):
                 actions_popup.close()
@@ -751,7 +829,7 @@ class ItemInventoryMixin:
             return
 
         try:
-            del self.player_data['inventory'][item_inventory_index]
+            remove_one_from_inventory(self.player_data, item_inventory_index)
 
             if hasattr(actions_popup, 'close'):
                 actions_popup.close()

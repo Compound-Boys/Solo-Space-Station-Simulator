@@ -9,7 +9,12 @@ from game.helper_methods.lighting_helper import (
     lighting_style,
 )
 from game.helper_methods.npc_movement import any_npc_for_job, call_npc, on_duty_npc_for_job
-from game.helper_methods.jail import maybe_offer_arrest_after_call
+from game.helper_methods.jail import (
+    format_jail_time,
+    is_jailed,
+    jail_seconds_remaining,
+    maybe_offer_arrest_after_call,
+)
 from game.helper_methods.ui_panels import open_modal_panel
 
 ROOM_GEOMETRY = "1012x759"
@@ -272,7 +277,7 @@ def build_npc_contact_section(
         return False
 
     on_duty_npc = on_duty_npc_for_job(station_crew, job_name)
-    if on_duty_npc is not None:
+    if on_duty_npc is not None and not is_jailed(on_duty_npc):
         tk.Button(
             button_frame,
             text=talk_label,
@@ -286,6 +291,20 @@ def build_npc_contact_section(
     if away_npc is None:
         return False
 
+    # Jailed crew cannot be called back to their post.
+    if is_jailed(away_npc):
+        remaining = format_jail_time(jail_seconds_remaining(away_npc))
+        name = away_npc.get("name", "They")
+        tk.Label(
+            button_frame,
+            text=f"{name} is in jail and will be released in {remaining}.",
+            font=("Arial", 11, "italic"),
+            bg=button_frame.cget("bg"),
+            fg="orange",
+            wraplength=300,
+        ).pack(pady=10)
+        return True
+
     flavor = absent_flavor or f"The {job_name} is away from their post."
     tk.Label(
         button_frame,
@@ -297,6 +316,18 @@ def build_npc_contact_section(
     ).pack(pady=(10, 2))
 
     def _call_and_refresh():
+        if is_jailed(away_npc):
+            remaining = format_jail_time(jail_seconds_remaining(away_npc))
+            messagebox.showinfo(
+                "In Jail",
+                f"{away_npc.get('name', 'They')} is in jail and will be released in {remaining}.",
+                parent=room_window,
+            )
+            refresh_callback()
+            room_window.after(20, room_window.lift)
+            room_window.focus_force()
+            return
+
         success, message = call_npc(away_npc)
         title = "Call Successful" if success else "No Answer"
         messagebox.showinfo(title, message, parent=room_window)
