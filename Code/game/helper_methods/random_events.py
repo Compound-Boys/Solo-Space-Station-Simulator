@@ -3,14 +3,42 @@
 import random
 from tkinter import messagebox
 
+from game.helper_methods.npc_movement import find_hall_passersby
 from game.helper_methods.stock_market import generate_market_tip
 from game.helper_methods.ui_panels import report_message
+from game.objects.drinks import DRINKS_MENU
 from game.objects.items import ALL_ITEMS, add_to_inventory, get_item_definition
 
 HALLWAY_EVENT_CHANCE = 0.20
+EVENT_CATEGORIES = ("good", "neutral", "bad", "job")
 
 # Transient buffer used while an event effect runs; None when idle.
 _event_effect_messages = None
+
+STAFF_ASSISTANT_REQUESTS = [
+    "The Botanist needs water for the planters.",
+    "The Captain needs a hand in Engineering.",
+    "The Bartender needs an ingredient for a drink.",
+    "The Doctor needs someone to restock bandages.",
+    "Security needs help filing paperwork.",
+]
+
+CAPTAIN_REQUESTS = [
+    "Medbay requests authorization for emergency surgery supplies.",
+    "Engineering needs approval to divert power to life support.",
+    "Security requests permission to lock down a sector.",
+    "A department head wants a private briefing.",
+    "Cargo bay reports a missing shipment and needs orders.",
+]
+
+
+def ensure_job_event(player_data):
+    """Set job_event_key from the player's current job (create / load / job change)."""
+    job = player_data.get("job")
+    if job:
+        player_data["job_event_key"] = job
+    else:
+        player_data.pop("job_event_key", None)
 
 
 def maybe_trigger_hallway_event(game):
@@ -19,12 +47,9 @@ def maybe_trigger_hallway_event(game):
         trigger_random_event(game)
 
 
-def trigger_random_event(game):
-    """Pick and run a random hallway event, then show a combined popup."""
-    global _event_effect_messages
-
-    events = [
-        # Good events
+def _static_events(game):
+    """Good / neutral / bad hallway events (job events are built separately)."""
+    return [
         {
             "type": "good",
             "title": "Found Credits",
@@ -43,11 +68,31 @@ def trigger_random_event(game):
             "desc": "You overheard a reliable market tip.",
             "effect": lambda: add_market_knowledge(game),
         },
-        # Neutral events
         {
             "type": "neutral",
-            "title": "Crew Member",
-            "desc": "You passed by a crew member who nodded at you.",
+            "title": "Lost Tourist",
+            "desc": (
+                "A confused visitor asks for directions to the bar, "
+                "then wanders off the wrong way."
+            ),
+            "effect": lambda: None,
+        },
+        {
+            "type": "neutral",
+            "title": "Recycled Air Whiff",
+            "desc": (
+                "The vents kick on with a blast of recycled air that smells "
+                "faintly of coolant and coffee."
+            ),
+            "effect": lambda: None,
+        },
+        {
+            "type": "neutral",
+            "title": "Graffiti Tag",
+            "desc": (
+                "Someone has scratched a crude smiley into the wall paneling. "
+                "Maintenance will be thrilled."
+            ),
             "effect": lambda: None,
         },
         {
@@ -68,7 +113,6 @@ def trigger_random_event(game):
             "desc": "A nearby vending machine sputters and flashes error lights.",
             "effect": lambda: vending_machine_malfunction(game),
         },
-        # Bad events - now all include blunt damage
         {
             "type": "bad",
             "title": "Lost Credits",
@@ -89,8 +133,8 @@ def trigger_random_event(game):
             "desc": "A nearby conduit explodes, showering you with hot sparks and debris!",
             "effect": lambda: combined_effect(
                 [
-                    lambda: damage_random_limb(game, 10, 25),  # Blunt damage from impact
-                    lambda: add_burn_damage(game, 5, 15),  # Burn damage from sparks
+                    lambda: damage_random_limb(game, 10, 25),
+                    lambda: add_burn_damage(game, 5, 15),
                 ]
             ),
         },
@@ -106,8 +150,8 @@ def trigger_random_event(game):
             "desc": "A pipe bursts, releasing scalding steam that burns your arm!",
             "effect": lambda: combined_effect(
                 [
-                    lambda: damage_limb(game, "left_arm", 5, 10),  # Blunt damage from impact
-                    lambda: add_burn_damage(game, 15, 30),  # Burn damage from steam
+                    lambda: damage_limb(game, "left_arm", 5, 10),
+                    lambda: add_burn_damage(game, 15, 30),
                 ]
             ),
         },
@@ -129,15 +173,216 @@ def trigger_random_event(game):
             "desc": "You walk through a chemical spill! Your leg is burned and you feel ill.",
             "effect": lambda: combined_effect(
                 [
-                    lambda: damage_limb(game, "left_leg", 5, 10),  # Blunt damage from slipping
-                    lambda: add_burn_damage(game, 5, 15),  # Burn damage from chemicals
-                    lambda: add_poison_damage(game, 10, 20),  # Poison damage from fumes
+                    lambda: damage_limb(game, "left_leg", 5, 10),
+                    lambda: add_burn_damage(game, 5, 15),
+                    lambda: add_poison_damage(game, 10, 20),
                 ]
             ),
         },
     ]
 
-    event = random.choice(events)
+
+def _juice_fruit_names():
+    """Fruit names derived from juice entries on the bar menu."""
+    fruits = []
+    for name in DRINKS_MENU:
+        if name.endswith(" Juice"):
+            fruits.append(name[: -len(" Juice")])
+    return fruits
+
+
+def _non_admin_jobs():
+    from game.character_methods.character_creation import JOBS
+
+    return [
+        job
+        for job, info in JOBS.items()
+        if info.get("department") != "Administration"
+    ]
+
+
+def build_job_event(game):
+    """Build the single job-category event for the player's current role."""
+    ensure_job_event(game.player_data)
+    job = game.player_data.get("job_event_key") or game.player_data.get("job")
+    if not job:
+        return None
+
+    if job == "Head of Personnel":
+        crew = getattr(game, "station_crew", None) or game.player_data.get("station_crew", [])
+        candidates = [npc for npc in crew if npc.get("name") and not npc.get("in_jail")]
+        if not candidates:
+            return None
+        npc = random.choice(candidates)
+        requested_job = random.choice(_non_admin_jobs())
+        requester = npc.get("name", "A crew member")
+        desc = (
+            f"{requester} ({npc.get('job', 'Crew')}) has submitted an access request "
+            f"to become {requested_job}. Review it at the HoP Access Control console."
+        )
+
+        def effect():
+            game.player_data["access_request"] = {
+                "requested_job": requested_job,
+                "requester_name": requester,
+            }
+            game.add_note(
+                f"Access request: {requester} requested assignment as {requested_job}."
+            )
+
+        return {
+            "type": "job",
+            "title": "Access Request",
+            "desc": desc,
+            "effect": effect,
+        }
+
+    if job == "Staff Assistant":
+        request = random.choice(STAFF_ASSISTANT_REQUESTS)
+        desc = f"Job request: {request}"
+
+        def effect():
+            game.add_note(desc)
+
+        return {
+            "type": "job",
+            "title": "Job Request",
+            "desc": desc,
+            "effect": effect,
+        }
+
+    if job == "Engineer":
+        desc = (
+            "The solar panels have shut down unexpectedly. "
+            "They must be restarted from the Engineering Panel."
+        )
+
+        def effect():
+            power = game.player_data.setdefault("station_power", {})
+            power["solar_charging"] = False
+            game.add_note("Solar arrays went offline and need to be restarted.")
+
+        return {
+            "type": "job",
+            "title": "Solar Panels Offline",
+            "desc": desc,
+            "effect": effect,
+        }
+
+    if job == "Doctor":
+        desc = "Someone needs healing!"
+
+        def effect():
+            game.add_note("Job event: Someone needs healing! (stub)")
+
+        return {
+            "type": "job",
+            "title": "Someone Needs Healing!",
+            "desc": desc,
+            "effect": effect,
+        }
+
+    if job == "Bartender":
+        desc = "Someone requested a drink."
+
+        def effect():
+            game.add_note("Job event: Someone requested a drink. (stub)")
+
+        return {
+            "type": "job",
+            "title": "Drink Request",
+            "desc": desc,
+            "effect": effect,
+        }
+
+    if job == "Botanist":
+        fruits = _juice_fruit_names()
+        if not fruits:
+            return None
+        fruit = random.choice(fruits)
+        article = "an" if fruit[0].lower() in "aeiou" else "a"
+        desc = f"The Bartender needs {article} {fruit.lower()} for juice."
+
+        def effect():
+            game.add_note(f"Bartender requested {fruit.lower()} for juice.")
+
+        return {
+            "type": "job",
+            "title": "Juice Fruit Request",
+            "desc": desc,
+            "effect": effect,
+        }
+
+    if job == "Security Guard":
+        crew = getattr(game, "station_crew", None) or game.player_data.get("station_crew", [])
+        passersby = find_hall_passersby(game.player_data, crew)
+        if passersby:
+            culprit = random.choice(passersby)
+            name = culprit.get("name", "A crew member")
+            desc = f"You witness a crime! {name} is involved."
+            note = f"Witnessed a crime involving {name}."
+        else:
+            desc = "You witness a crime! You do not catch who it is."
+            note = "Witnessed a crime; perpetrator unidentified."
+
+        def effect():
+            game.add_note(note)
+
+        return {
+            "type": "job",
+            "title": "Witness a Crime",
+            "desc": desc,
+            "effect": effect,
+        }
+
+    if job == "Captain":
+        request = random.choice(CAPTAIN_REQUESTS)
+        desc = f"Command request: {request}"
+
+        def effect():
+            game.add_note(desc)
+
+        return {
+            "type": "job",
+            "title": "Command Request",
+            "desc": desc,
+            "effect": effect,
+        }
+
+    return None
+
+
+def _events_by_category(game):
+    """Group static events by type and attach the player's job event."""
+    by_type = {category: [] for category in EVENT_CATEGORIES}
+    for event in _static_events(game):
+        by_type.setdefault(event["type"], []).append(event)
+
+    job_event = build_job_event(game)
+    if job_event is not None:
+        by_type["job"].append(job_event)
+
+    return by_type
+
+
+def trigger_random_event(game):
+    """Pick a category, then an event in that category, and show a combined popup."""
+    global _event_effect_messages
+
+    by_type = _events_by_category(game)
+    available = [cat for cat in EVENT_CATEGORIES if by_type.get(cat)]
+    if not available:
+        return
+
+    category = random.choice(available)
+    # If job was chosen but empty (should be rare), fall back to another category.
+    if category == "job" and not by_type["job"]:
+        fallback = [cat for cat in ("good", "neutral", "bad") if by_type.get(cat)]
+        if not fallback:
+            return
+        category = random.choice(fallback)
+
+    event = random.choice(by_type[category])
 
     _event_effect_messages = []
     try:

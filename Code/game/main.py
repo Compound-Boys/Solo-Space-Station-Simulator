@@ -18,6 +18,7 @@ from game.helper_methods.npc_movement import (
     ensure_npc_movement_fields,
 )
 from game.helper_methods.player_movement import PlayerMovementMixin
+from game.helper_methods.random_events import ensure_job_event
 from game.helper_methods.jail import (
     arrest_member,
     ensure_crew_jail_fields,
@@ -835,6 +836,7 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         # Apply the loaded data so all downstream logic (market, location, etc.)
         # reads the restored save rather than the default player state.
         self.player_data = loaded_data
+        ensure_job_event(self.player_data)
         self._load_crew_from_player_data()
 
         self.market_engine.load_from_player_data(self.player_data)

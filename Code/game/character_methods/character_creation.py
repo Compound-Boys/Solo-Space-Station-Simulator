@@ -6,6 +6,7 @@ from tkinter import messagebox
 from game.objects.items import build_default_locker_inventory
 from game.helper_methods.stock_market import default_stock_market_state, serialize_companies
 from game.helper_methods.npc_movement import location_for_post, pick_random_hallway_location
+from game.helper_methods.random_events import ensure_job_event
 
 # List of potential NPC names
 NPC_NAMES = [
@@ -511,5 +512,6 @@ class CharacterCreation:
         }
 
         self.player_data["station_crew"] = station_crew
+        ensure_job_event(self.player_data)
 
         self.on_complete(self.player_data, station_crew)

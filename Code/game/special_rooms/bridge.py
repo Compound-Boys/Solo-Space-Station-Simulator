@@ -4,6 +4,7 @@ from tkinter import messagebox
 
 from game.character_methods.character_creation import JOBS, permissions_for_job
 from game.helper_methods.npc_movement import reassign_npc_post
+from game.helper_methods.random_events import ensure_job_event
 from game.helper_methods.ui_panels import open_modal_panel, refocus_window
 from game.special_rooms.shared import (
     PLAYER_CREW_INDEX,
@@ -282,16 +283,18 @@ class Bridge(SpecialRoomBase):
         assign_btn.pack(side=tk.LEFT, padx=10)
 
     def _apply_access_request_job(self, job):
-        """Apply a requested job to the player. Returns (ok, solar_activated, error_message)."""
+        """Apply a pending access request to the player or requesting NPC.
+
+        Returns (ok, solar_activated, error_message).
+        """
         job_info = JOBS.get(job)
         if not job_info or job_info.get("department") == "Administration":
             self.player_data.pop("access_request", None)
             return False, False, "Your access request was invalid and has been cleared."
 
-        self.player_data["job"] = job
-        self.player_data["department"] = job_info["department"]
-        self.player_data["subdepartment"] = job_info["subdepartment"]
-        self.player_data["permissions"] = permissions_for_job(job)
+        request = self.player_data.get("access_request") or {}
+        requester_name = request.get("requester_name")
+        player_name = self.player_data.get("name")
 
         solar_activated = False
         if job == "Engineer":
@@ -299,6 +302,30 @@ class Bridge(SpecialRoomBase):
             if not power.get("solar_charging"):
                 power["solar_charging"] = True
                 solar_activated = True
+
+        # NPC-submitted request (HoP job event): update that crew member.
+        if requester_name and requester_name != player_name:
+            npc = next(
+                (n for n in self.station_crew if n.get("name") == requester_name),
+                None,
+            )
+            if npc is None:
+                self.player_data.pop("access_request", None)
+                return False, False, "The requester is no longer on the station. Request cleared."
+
+            npc["job"] = job
+            npc["department"] = job_info["department"]
+            npc["subdepartment"] = job_info["subdepartment"]
+            npc["permissions"] = permissions_for_job(job)
+            reassign_npc_post(npc, job)
+            self.player_data.pop("access_request", None)
+            return True, solar_activated, None
+
+        self.player_data["job"] = job
+        self.player_data["department"] = job_info["department"]
+        self.player_data["subdepartment"] = job_info["subdepartment"]
+        self.player_data["permissions"] = permissions_for_job(job)
+        ensure_job_event(self.player_data)
 
         self.player_data.pop("access_request", None)
         return True, solar_activated, None
@@ -743,6 +770,8 @@ class Bridge(SpecialRoomBase):
             member["department"] = job_info["department"]
             member["subdepartment"] = job_info["subdepartment"]
             member["permissions"] = permissions_for_job(job)
+            if crew_index == PLAYER_CREW_INDEX:
+                ensure_job_event(self.player_data)
 
             # NPCs (not the player) immediately report to their new post
             # rather than lingering at their old one.
