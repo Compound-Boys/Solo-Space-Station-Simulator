@@ -5,6 +5,7 @@ from tkinter import messagebox
 
 from game.helper_methods.ui_panels import open_modal_panel
 from game.maps.donut import render_map_text
+from game.objects.food import FOOD_ITEMS
 
 # Base structure for items
 # { 
@@ -254,26 +255,6 @@ ALL_ITEMS = {
     },
 
     # --- Utility/Misc Items ---
-    "energy_bar": { # From random event
-        "id": "energy_bar",
-        "name": "Energy Bar",
-        "description": "A dense, nutrient-rich bar. Tastes like cardboard.",
-        "category": "Food",
-        "attributes": {
-             "hunger_restore": 30
-        },
-        "actions": ["examine", "eat", "drop"]
-    },
-    "emergency_rations": { # From locker
-        "id": "emergency_rations",
-        "name": "Emergency Rations",
-        "description": "Standard emergency food supply. Use only when necessary.",
-        "category": "Food",
-        "attributes": {
-             "hunger_restore": 50
-        },
-        "actions": ["examine", "eat", "drop"]
-    },
     "circuit_board": { # From random event
         "id": "circuit_board",
         "name": "Circuit Board",
@@ -388,6 +369,8 @@ ALL_ITEMS = {
     },
 }
 
+ALL_ITEMS.update(FOOD_ITEMS)
+
 # --- Helper Functions ---
 DEFAULT_LOCKER_ITEM_IDS = [
     "welcome_guide",
@@ -448,14 +431,12 @@ class ItemInventoryMixin:
         title_label.pack(pady=10)
 
         list_frame = tk.Frame(popup, bg="black")
-        list_frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
-
         scrollbar = tk.Scrollbar(list_frame)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         inventory_list = tk.Listbox(list_frame, bg="black", fg="white", font=("Arial", 12),
-                                  width=30, height=15, yscrollcommand=scrollbar.set, exportselection=False)
-        inventory_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                                  width=40, height=30, yscrollcommand=scrollbar.set, exportselection=False)
+        inventory_list.pack(side=tk.LEFT)
         scrollbar.config(command=inventory_list.yview)
 
         player_inventory = self.player_data.get('inventory', [])
@@ -470,8 +451,8 @@ class ItemInventoryMixin:
                     inventory_list.insert(tk.END, str(item))
                     inventory_list.itemconfig(tk.END, {'fg': "red"})
 
+        # Build buttons before packing so the frame has a real height
         button_frame = tk.Frame(popup, bg="black")
-        button_frame.pack(pady=(5, 10), fill=tk.X, padx=20)
         button_frame.columnconfigure((0, 1, 2), weight=1)
 
         examine_btn = tk.Button(button_frame, text="Examine", font=("Arial", 12), width=10,
@@ -486,6 +467,10 @@ class ItemInventoryMixin:
 
         close_btn = tk.Button(button_frame, text="Close", font=("Arial", 12), width=10, command=panel.close)
         close_btn.grid(row=0, column=2, padx=5, pady=5)
+
+        # Pack buttons at bottom first, then list at its fixed size (no expand)
+        button_frame.pack(side=tk.BOTTOM, pady=(5, 10), fill=tk.X, padx=20)
+        list_frame.pack(padx=20, pady=10)
 
         def check_selection(event=None, ex_btn=examine_btn, act_btn=actions_btn):
             selection = inventory_list.curselection()
@@ -609,6 +594,10 @@ class ItemInventoryMixin:
                 callback = lambda i=item, p=panel: self.read_item_action(i, p)
             elif action == "drop":
                 callback = lambda idx=item_inventory_index, ap=panel, mp=main_inventory_popup: self.drop_item_action(idx, ap, mp)
+            elif action == "drink":
+                callback = lambda idx=item_inventory_index, i=item, ap=panel, mp=main_inventory_popup: self.drink_item_action(i, idx, ap, mp)
+            elif action == "eat":
+                callback = lambda idx=item_inventory_index, i=item, ap=panel, mp=main_inventory_popup: self.eat_item_action(i, idx, ap, mp)
             else:
                 callback = lambda a=action: messagebox.showinfo("WIP", f"Action '{a}' not yet implemented.", parent=actions_popup)
 
@@ -668,6 +657,84 @@ class ItemInventoryMixin:
 
         close_read_btn = tk.Button(read_content_popup, text="Close", font=("Arial", 12), width=10, command=_close_read)
         close_read_btn.pack(pady=10)
+
+    def drink_item_action(self, item, item_inventory_index, actions_popup, main_inventory_popup):
+        """Action handler for drinking an item. Removes it and may raise alcohol_percent."""
+        if not isinstance(item, dict) or 'drink' not in item.get('actions', []):
+            messagebox.showwarning("Cannot Drink", "This item cannot be drunk.", parent=actions_popup)
+            return
+
+        if not (0 <= item_inventory_index < len(self.player_data['inventory'])):
+            messagebox.showerror("Error", "Invalid item index provided for drink action.", parent=actions_popup)
+            return
+
+        item_name = item.get('name', 'drink')
+        alcoholic = item.get('attributes', {}).get('alcoholic', False)
+
+        try:
+            del self.player_data['inventory'][item_inventory_index]
+
+            if alcoholic:
+                self.player_data.setdefault("alcohol_percent", 0)
+                self.player_data["alcohol_percent"] += 2
+
+            if hasattr(actions_popup, 'close'):
+                actions_popup.close()
+            else:
+                actions_popup.destroy()
+            if hasattr(main_inventory_popup, 'close'):
+                main_inventory_popup.close()
+            else:
+                main_inventory_popup.destroy()
+            self.show_inventory_popup()
+
+            if alcoholic:
+                alc = self.player_data["alcohol_percent"]
+                self.add_note(f"Drank the {item_name}. Alcohol is now {alc:.1f}%.")
+                messagebox.showinfo(
+                    "Drink",
+                    f"You finish the {item_name}.\nAlcohol: {alc:.1f}%",
+                    parent=self.root,
+                )
+            else:
+                self.add_note(f"Drank the {item_name}.")
+                messagebox.showinfo("Drink", f"You finish the {item_name}.", parent=self.root)
+
+        except (IndexError, ValueError, TypeError) as e:
+            print(f"Error drinking item via action: {e}")
+            messagebox.showerror("Error", "Could not drink the selected item.", parent=actions_popup)
+
+    def eat_item_action(self, item, item_inventory_index, actions_popup, main_inventory_popup):
+        """Action handler for eating an item. Removes it from inventory."""
+        if not isinstance(item, dict) or 'eat' not in item.get('actions', []):
+            messagebox.showwarning("Cannot Eat", "This item cannot be eaten.", parent=actions_popup)
+            return
+
+        if not (0 <= item_inventory_index < len(self.player_data['inventory'])):
+            messagebox.showerror("Error", "Invalid item index provided for eat action.", parent=actions_popup)
+            return
+
+        item_name = item.get('name', 'food')
+
+        try:
+            del self.player_data['inventory'][item_inventory_index]
+
+            if hasattr(actions_popup, 'close'):
+                actions_popup.close()
+            else:
+                actions_popup.destroy()
+            if hasattr(main_inventory_popup, 'close'):
+                main_inventory_popup.close()
+            else:
+                main_inventory_popup.destroy()
+            self.show_inventory_popup()
+
+            self.add_note(f"Ate the {item_name}.")
+            messagebox.showinfo("Eat", f"You eat the {item_name}.", parent=self.root)
+
+        except (IndexError, ValueError, TypeError) as e:
+            print(f"Error eating item via action: {e}")
+            messagebox.showerror("Error", "Could not eat the selected item.", parent=actions_popup)
 
     def drop_item_action(self, item_inventory_index, actions_popup, main_inventory_popup):
         """Action handler for dropping an item. Refreshes main inventory."""

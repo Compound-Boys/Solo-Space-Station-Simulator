@@ -1,8 +1,14 @@
+import random
 import tkinter as tk
 from tkinter import messagebox
 
+from game.character_methods.character_creation import JOBS, permissions_for_job
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
+from game.helper_methods.npc_movement import reassign_npc_post
+from game.helper_methods.ui_panels import open_modal_panel
 from game.special_rooms.shared import (
+    build_npc_contact_section,
+    build_room_shell,
     open_room_in_main_window,
     show_crew_manifest as render_crew_manifest,
     try_leave_through_door,
@@ -17,21 +23,15 @@ class Bridge:
         self.station_crew = station_crew
         self.return_callback = return_callback
 
-        self.bridge_window = open_room_in_main_window(parent_window, "Bridge", self.on_closing)
-        
-        # Title
-        room_label = tk.Label(self.bridge_window, text="Station Bridge", font=("Arial", 24), bg="black", fg="white")
-        room_label.pack(pady=30)
-        
-        # Description
-        desc_label = tk.Label(self.bridge_window, 
-                              text="The bridge is the command center of the station. Multiple workstations with monitors displaying various station systems are arranged around the room. This is where the Captain and Department Heads coordinate station operations.",
-                              font=("Arial", 12), bg="black", fg="white", wraplength=600)
-        desc_label.pack(pady=10)
-        
-        # Room actions
-        self.button_frame = tk.Frame(self.bridge_window, bg="black")
-        self.button_frame.pack(pady=20)
+        self.bridge_window = open_room_in_main_window(
+            parent_window, "Bridge", player_data, station_crew, return_callback
+        )
+        _, self.button_frame = build_room_shell(
+            self.bridge_window,
+            self.player_data,
+            "Station Bridge",
+            "The bridge is the command center of the station. Multiple workstations with monitors displaying various station systems are arranged around the room. This is where the Captain and Department Heads coordinate station operations.",
+        )
 
         self._build_station_menu()
         
@@ -54,13 +54,290 @@ class Bridge:
                                command=self.show_station_menu)
             back_btn.pack(pady=10)
     
+    def _leadership_present(self):
+        """Return which leadership jobs exist on the station (player + NPCs)."""
+        all_crew = [self.player_data] + self.station_crew
+        jobs = {member.get("job") for member in all_crew}
+        return {
+            "captain": "Captain" in jobs,
+            "hop": "Head of Personnel" in jobs,
+        }
+
     def talk_to_leadership(self):
-        # Show dialog with the room window as parent to keep focus within the room
-        self.bridge_window.after(10, lambda: messagebox.showinfo("Bridge", "Captain and Department Heads are not in.", parent=self.bridge_window))
-        # Make sure the window stays on top after dialog
+        """Show Captain/HoP talk options when leadership is present on the station."""
+        present = self._leadership_present()
+        if not present["captain"] and not present["hop"]:
+            self.bridge_window.after(
+                10,
+                lambda: messagebox.showinfo(
+                    "Bridge",
+                    "Captain and Department Heads are not in.",
+                    parent=self.bridge_window,
+                ),
+            )
+            self.bridge_window.after(20, self.bridge_window.lift)
+            self.bridge_window.focus_force()
+            return
+
+        for widget in self.button_frame.winfo_children():
+            widget.destroy()
+
+        title = tk.Label(
+            self.button_frame,
+            text="Ship Leadership",
+            font=("Arial", 16, "bold"),
+            bg="black",
+            fg="white",
+        )
+        title.pack(pady=10)
+
+        if present["captain"]:
+            build_npc_contact_section(
+                self.button_frame,
+                self.player_data,
+                self.station_crew,
+                "Captain",
+                self.bridge_window,
+                talk_label="Talk to Captain",
+                talk_command=self.talk_to_captain,
+                refresh_callback=self.talk_to_leadership,
+                absent_flavor="The Captain is away from the bridge.",
+            )
+
+        if present["hop"]:
+            build_npc_contact_section(
+                self.button_frame,
+                self.player_data,
+                self.station_crew,
+                "Head of Personnel",
+                self.bridge_window,
+                talk_label="Talk to HoP",
+                talk_command=self.show_hop_talk_menu,
+                refresh_callback=self.talk_to_leadership,
+                absent_flavor="The Head of Personnel is away from the bridge.",
+            )
+
+        return_btn = tk.Button(
+            self.button_frame,
+            text="Return to Bridge",
+            font=("Arial", 14),
+            width=20,
+            command=self.show_room_options,
+        )
+        return_btn.pack(pady=15)
+
+    def talk_to_captain(self):
+        """Captain is always too busy for casual conversation."""
+        messagebox.showinfo(
+            "Captain",
+            "The Captain is too busy for your chats.",
+            parent=self.bridge_window,
+        )
         self.bridge_window.after(20, self.bridge_window.lift)
         self.bridge_window.focus_force()
-    
+
+    def show_hop_talk_menu(self):
+        """HoP interaction menu for non-command crew."""
+        for widget in self.button_frame.winfo_children():
+            widget.destroy()
+
+        title = tk.Label(
+            self.button_frame,
+            text="Head of Personnel",
+            font=("Arial", 16, "bold"),
+            bg="black",
+            fg="white",
+        )
+        title.pack(pady=10)
+
+        access_btn = tk.Button(
+            self.button_frame,
+            text="Access Control",
+            font=("Arial", 14),
+            width=20,
+            command=self.show_access_control,
+        )
+        access_btn.pack(pady=5)
+
+        talk_btn = tk.Button(
+            self.button_frame,
+            text="Talk to HoP",
+            font=("Arial", 14),
+            width=20,
+            command=self.resolve_hop_access_request,
+        )
+        talk_btn.pack(pady=5)
+
+        return_btn = tk.Button(
+            self.button_frame,
+            text="Return to Bridge",
+            font=("Arial", 14),
+            width=20,
+            command=self.show_room_options,
+        )
+        return_btn.pack(pady=15)
+
+    def show_access_control(self):
+        """Job request terminal: submit a non-Admin job request for HoP approval."""
+        panel, popup = open_modal_panel(self.bridge_window, title="Access Control")
+        popup.configure(bg="black")
+
+        title_label = tk.Label(
+            popup, text="Access Control", font=("Arial", 18, "bold"), bg="black", fg="white"
+        )
+        title_label.pack(pady=10)
+
+        job_outer = tk.LabelFrame(
+            popup, text="Requestable Jobs", font=("Arial", 12), bg="black", fg="white"
+        )
+        job_outer.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        job_scrollbar = tk.Scrollbar(job_outer, orient=tk.VERTICAL)
+        job_listbox = tk.Listbox(
+            job_outer,
+            bg="black",
+            fg="white",
+            font=("Arial", 12),
+            width=40,
+            height=12,
+            exportselection=False,
+            yscrollcommand=job_scrollbar.set,
+        )
+        job_scrollbar.config(command=job_listbox.yview)
+        job_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        job_listbox.pack(side=tk.LEFT, pady=5, padx=5, fill=tk.BOTH, expand=True)
+
+        requestable_jobs = [
+            job_name
+            for job_name, info in JOBS.items()
+            if info.get("department") != "Administration"
+        ]
+        for job_name in requestable_jobs:
+            job_listbox.insert(tk.END, job_name)
+
+        selection = {"job": None}
+        player_name = self.player_data.get("name", "Unknown")
+
+        result_frame = tk.LabelFrame(
+            popup, text="Result", font=("Arial", 12), bg="black", fg="white"
+        )
+        result_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        result_label = tk.Label(
+            result_frame,
+            text="Select a job to request.",
+            font=("Arial", 12),
+            bg="black",
+            fg="cyan",
+            wraplength=600,
+        )
+        result_label.pack(pady=10, padx=10)
+
+        feedback_label = tk.Label(popup, text="", font=("Arial", 12), bg="black", fg="cyan")
+        feedback_label.pack(pady=(0, 5))
+
+        def update_result(_event=None):
+            job_indices = job_listbox.curselection()
+            if job_indices:
+                selection["job"] = job_listbox.get(job_indices[0])
+            job = selection["job"]
+            if job:
+                result_label.config(text=f"{player_name} → {job}", fg="white")
+            else:
+                result_label.config(text="Select a job to request.", fg="cyan")
+
+        job_listbox.bind("<<ListboxSelect>>", update_result)
+
+        def submit_request():
+            job = selection["job"]
+            if not job:
+                feedback_label.config(text="Select a job first.", fg="orange")
+                popup.after(3000, lambda: feedback_label.config(text=""))
+                return
+            if job not in JOBS or JOBS[job].get("department") == "Administration":
+                feedback_label.config(text="That job cannot be requested here.", fg="red")
+                popup.after(3000, lambda: feedback_label.config(text=""))
+                return
+
+            self.player_data["access_request"] = {
+                "requested_job": job,
+                "requester_name": player_name,
+            }
+            result_label.config(text=f"{player_name} → {job}", fg="light green")
+            feedback_label.config(
+                text=f"Request for {job} submitted for HoP approval.", fg="cyan"
+            )
+            popup.after(3000, lambda: feedback_label.config(text=""))
+
+        button_frame = tk.Frame(popup, bg="black")
+        button_frame.pack(pady=10)
+
+        exit_btn = tk.Button(
+            button_frame, text="Exit", font=("Arial", 12), width=12, command=panel.close
+        )
+        exit_btn.pack(side=tk.LEFT, padx=10)
+
+        assign_btn = tk.Button(
+            button_frame, text="Assign", font=("Arial", 12), width=12, command=submit_request
+        )
+        assign_btn.pack(side=tk.LEFT, padx=10)
+
+    def resolve_hop_access_request(self):
+        """Talk to HoP: resolve a pending access request with a 50/50 approve/deny."""
+        request = self.player_data.get("access_request")
+        if not request or not request.get("requested_job"):
+            messagebox.showinfo(
+                "Head of Personnel",
+                "The HoP is busy. Use the Access Control terminal to put in a request.",
+                parent=self.bridge_window,
+            )
+            self.bridge_window.after(20, self.bridge_window.lift)
+            self.bridge_window.focus_force()
+            return
+
+        job = request["requested_job"]
+        job_info = JOBS.get(job)
+        if not job_info or job_info.get("department") == "Administration":
+            self.player_data.pop("access_request", None)
+            messagebox.showinfo(
+                "Head of Personnel",
+                "Your access request was invalid and has been cleared.",
+                parent=self.bridge_window,
+            )
+            self.bridge_window.after(20, self.bridge_window.lift)
+            self.bridge_window.focus_force()
+            return
+
+        approved = random.random() < 0.5
+        if approved:
+            self.player_data["job"] = job
+            self.player_data["department"] = job_info["department"]
+            self.player_data["subdepartment"] = job_info["subdepartment"]
+            self.player_data["permissions"] = permissions_for_job(job)
+
+            solar_activated = False
+            if job == "Engineer":
+                power = self.player_data.setdefault("station_power", {})
+                if not power.get("solar_charging"):
+                    power["solar_charging"] = True
+                    solar_activated = True
+
+            self.player_data.pop("access_request", None)
+            message = f"The HoP approved your request. You are now {job}."
+            if solar_activated:
+                message += " Solar arrays are now active."
+            messagebox.showinfo("Head of Personnel", message, parent=self.bridge_window)
+        else:
+            self.player_data.pop("access_request", None)
+            messagebox.showinfo(
+                "Head of Personnel",
+                f"The HoP denied your request for {job}.",
+                parent=self.bridge_window,
+            )
+
+        self.bridge_window.after(20, self.bridge_window.lift)
+        self.bridge_window.focus_force()
+
     def access_captain_station(self):
         """Access the Captain's Station interface"""      
         # Clear existing buttons
@@ -109,17 +386,13 @@ class Bridge:
         manifest_btn = tk.Button(self.button_frame, text="Crew Manifest", font=("Arial", 14), width=20, command=self.show_crew_manifest)
         manifest_btn.pack(pady=5)
         
-        assignments_btn = tk.Button(self.button_frame, text="Job Assignments", font=("Arial", 14), width=20, 
-                                  command=lambda: messagebox.showinfo("Job Assignments", "All current job positions are filled.", parent=self.bridge_window))
+        assignments_btn = tk.Button(self.button_frame, text="Job Assignments", font=("Arial", 14), width=20,
+                                  command=self.show_job_assignments)
         assignments_btn.pack(pady=5)
         
         access_btn = tk.Button(self.button_frame, text="Access Control", font=("Arial", 14), width=20, 
                              command=lambda: messagebox.showinfo("Access Control", "Access control system ready. No pending requests.", parent=self.bridge_window))
         access_btn.pack(pady=5)
-        
-        records_btn = tk.Button(self.button_frame, text="Personnel Records", font=("Arial", 14), width=20, 
-                              command=lambda: messagebox.showinfo("Personnel Records", "Personnel records database online. All records up to date.", parent=self.bridge_window))
-        records_btn.pack(pady=5)
         
         # Back button
         back_btn = tk.Button(self.button_frame, text="Back to Bridge Menu", font=("Arial", 14), width=20, command=self.show_station_menu)
@@ -132,7 +405,265 @@ class Bridge:
     def show_crew_manifest(self):
         """Display the crew manifest with department listings, including NPCs"""
         render_crew_manifest(self.bridge_window, self.player_data, self.station_crew)
-    
+
+    def show_job_assignments(self):
+        """Open the HoP Job Assignment screen to assign jobs to station NPCs."""
+        panel, popup = open_modal_panel(self.bridge_window, title="Job Assignment")
+        popup.configure(bg="black")
+
+        title_label = tk.Label(
+            popup, text="Job Assignment", font=("Arial", 18, "bold"), bg="black", fg="white"
+        )
+        title_label.pack(pady=10)
+
+        main_frame = tk.Frame(popup, bg="black")
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+
+        # Left: NPC list
+        npc_outer = tk.LabelFrame(
+            main_frame, text="Station NPCs", font=("Arial", 12), bg="black", fg="white"
+        )
+        npc_outer.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+
+        npc_scrollbar = tk.Scrollbar(npc_outer, orient=tk.VERTICAL)
+        npc_listbox = tk.Listbox(
+            npc_outer,
+            bg="black",
+            fg="white",
+            font=("Arial", 12),
+            width=28,
+            height=12,
+            exportselection=False,
+            yscrollcommand=npc_scrollbar.set,
+        )
+        npc_scrollbar.config(command=npc_listbox.yview)
+        npc_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        npc_listbox.pack(side=tk.LEFT, pady=5, padx=5, fill=tk.BOTH, expand=True)
+
+        # Right: Job list
+        job_outer = tk.LabelFrame(
+            main_frame, text="Assignable Jobs", font=("Arial", 12), bg="black", fg="white"
+        )
+        job_outer.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        job_scrollbar = tk.Scrollbar(job_outer, orient=tk.VERTICAL)
+        job_listbox = tk.Listbox(
+            job_outer,
+            bg="black",
+            fg="white",
+            font=("Arial", 12),
+            width=28,
+            height=12,
+            exportselection=False,
+            yscrollcommand=job_scrollbar.set,
+        )
+        job_scrollbar.config(command=job_listbox.yview)
+        job_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        job_listbox.pack(side=tk.LEFT, pady=5, padx=5, fill=tk.BOTH, expand=True)
+
+        player_is_captain = (
+            self.player_data.get("job") == "Captain"
+            or self.player_data.get("subdepartment") == "Captain"
+        )
+        for job_name in JOBS:
+            if job_name == "Captain" and not player_is_captain:
+                continue
+            job_listbox.insert(tk.END, job_name)
+
+        # Listbox rows: -1 = player (Captain only); else station_crew index.
+        # Captain NPCs are hidden for non-Captains.
+        PLAYER_INDEX = -1
+        assignable_indices = []
+
+        def _member_for_index(crew_index):
+            if crew_index == PLAYER_INDEX:
+                return self.player_data
+            return self.station_crew[crew_index]
+
+        def _station_has_other_captain(exclude_player=False, exclude_crew_index=None):
+            if not exclude_player and self.player_data.get("job") == "Captain":
+                return True
+            for i, npc in enumerate(self.station_crew):
+                if exclude_crew_index is not None and i == exclude_crew_index:
+                    continue
+                if npc.get("job") == "Captain":
+                    return True
+            return False
+
+        def refresh_npc_list(preserve_crew_index=None):
+            npc_listbox.delete(0, tk.END)
+            assignable_indices.clear()
+
+            if player_is_captain:
+                assignable_indices.append(PLAYER_INDEX)
+                player_name = self.player_data.get("name", "Unknown")
+                player_job = self.player_data.get("job", "Unknown")
+                npc_listbox.insert(tk.END, f"{player_name} ({player_job}) (YOU)")
+
+            for crew_index, npc in enumerate(self.station_crew):
+                if not player_is_captain and npc.get("job") == "Captain":
+                    continue
+                assignable_indices.append(crew_index)
+                name = npc.get("name", "Unknown")
+                job = npc.get("job", "Unknown")
+                npc_listbox.insert(tk.END, f"{name} ({job})")
+
+            if preserve_crew_index is not None and preserve_crew_index in assignable_indices:
+                list_index = assignable_indices.index(preserve_crew_index)
+                npc_listbox.selection_set(list_index)
+                npc_listbox.see(list_index)
+
+        refresh_npc_list()
+
+        selection = {"list_index": None, "job": None}
+
+        result_frame = tk.LabelFrame(
+            popup, text="Result", font=("Arial", 12), bg="black", fg="white"
+        )
+        result_frame.pack(fill=tk.X, padx=20, pady=10)
+
+        result_label = tk.Label(
+            result_frame,
+            text="Select an NPC and a job to confirm.",
+            font=("Arial", 12),
+            bg="black",
+            fg="cyan",
+            wraplength=600,
+        )
+        result_label.pack(pady=10, padx=10)
+
+        feedback_label = tk.Label(popup, text="", font=("Arial", 12), bg="black", fg="cyan")
+        feedback_label.pack(pady=(0, 5))
+
+        def _crew_index_from_selection():
+            list_index = selection["list_index"]
+            if list_index is None or list_index < 0 or list_index >= len(assignable_indices):
+                return None
+            return assignable_indices[list_index]
+
+        def update_result(_event=None):
+            npc_indices = npc_listbox.curselection()
+            job_indices = job_listbox.curselection()
+
+            if npc_indices:
+                selection["list_index"] = npc_indices[0]
+            if job_indices:
+                selection["job"] = job_listbox.get(job_indices[0])
+
+            crew_index = _crew_index_from_selection()
+            job = selection["job"]
+
+            if crew_index is not None and job:
+                member = _member_for_index(crew_index)
+                result_label.config(text=f"{member.get('name', 'Unknown')} → {job}", fg="white")
+            elif crew_index is not None:
+                member = _member_for_index(crew_index)
+                result_label.config(
+                    text=f"{member.get('name', 'Unknown')} — select a job.", fg="cyan"
+                )
+            elif job:
+                result_label.config(text=f"Select an NPC for {job}.", fg="cyan")
+            else:
+                result_label.config(text="Select an NPC and a job to confirm.", fg="cyan")
+
+        npc_listbox.bind("<<ListboxSelect>>", update_result)
+        job_listbox.bind("<<ListboxSelect>>", update_result)
+
+        def assign_role():
+            crew_index = _crew_index_from_selection()
+            job = selection["job"]
+
+            if crew_index is None or not job:
+                feedback_label.config(text="Select both an NPC and a job first.", fg="orange")
+                popup.after(3000, lambda: feedback_label.config(text=""))
+                return
+
+            if crew_index != PLAYER_INDEX and (
+                crew_index < 0 or crew_index >= len(self.station_crew)
+            ):
+                feedback_label.config(text="Invalid NPC selection.", fg="red")
+                popup.after(3000, lambda: feedback_label.config(text=""))
+                return
+
+            job_info = JOBS.get(job)
+            if not job_info:
+                feedback_label.config(text="Invalid job selection.", fg="red")
+                popup.after(3000, lambda: feedback_label.config(text=""))
+                return
+
+            if job == "Captain" and not player_is_captain:
+                feedback_label.config(
+                    text="Only the Captain can assign the Captain role.", fg="orange"
+                )
+                popup.after(3000, lambda: feedback_label.config(text=""))
+                return
+
+            member = _member_for_index(crew_index)
+            if (
+                not player_is_captain
+                and crew_index != PLAYER_INDEX
+                and member.get("job") == "Captain"
+            ):
+                feedback_label.config(
+                    text="Only the Captain can reassign the current Captain.", fg="orange"
+                )
+                popup.after(3000, lambda: feedback_label.config(text=""))
+                return
+
+            # Warn if the player Captain is demoting themselves with no other Captain left
+            if (
+                crew_index == PLAYER_INDEX
+                and member.get("job") == "Captain"
+                and job != "Captain"
+                and not _station_has_other_captain(exclude_player=True)
+            ):
+                confirmed = messagebox.askyesno(
+                    "Confirm Reassignment",
+                    "You are about to give up captain access with no captain. Continue?",
+                    parent=popup,
+                )
+                if not confirmed:
+                    return
+
+            member["job"] = job
+            member["department"] = job_info["department"]
+            member["subdepartment"] = job_info["subdepartment"]
+            member["permissions"] = permissions_for_job(job)
+
+            # NPCs (not the player) immediately report to their new post
+            # rather than lingering at their old one.
+            if crew_index != PLAYER_INDEX:
+                reassign_npc_post(member, job)
+
+            solar_activated = False
+            if job == "Engineer":
+                power = self.player_data.setdefault("station_power", {})
+                if not power.get("solar_charging"):
+                    power["solar_charging"] = True
+                    solar_activated = True
+
+            refresh_npc_list(preserve_crew_index=crew_index)
+
+            result_label.config(text=f"{member.get('name', 'Unknown')} → {job}", fg="light green")
+            feedback = f"Assigned {member.get('name', 'Unknown')} as {job}."
+            if solar_activated:
+                feedback += " Solar arrays are now active."
+            feedback_label.config(text=feedback, fg="cyan")
+            popup.after(3000, lambda: feedback_label.config(text=""))
+
+        button_frame = tk.Frame(popup, bg="black")
+        button_frame.pack(pady=10)
+
+        exit_btn = tk.Button(
+            button_frame, text="Exit", font=("Arial", 12), width=12, command=panel.close
+        )
+        exit_btn.pack(side=tk.LEFT, padx=10)
+
+        assign_btn = tk.Button(
+            button_frame, text="Assign Role", font=("Arial", 12), width=12, command=assign_role
+        )
+        assign_btn.pack(side=tk.LEFT, padx=10)
+
     def toggle_door_lock(self):
         toggle_room_door_lock(self.player_data, DOOR_KEY, self.bridge_window)
     

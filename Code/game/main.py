@@ -12,11 +12,27 @@ from game.maps import donut
 from game.helper_methods.stock_market import (
     StockMarketEngine,
     default_stock_market_state,
-    generate_market_tip,
 )
 from game.helper_methods.game import Game
+from game.helper_methods.random_events import maybe_trigger_hallway_event
+from game.helper_methods.npc_movement import (
+    ensure_npc_movement_fields,
+    find_hall_passersby,
+    roll_departures,
+    step_wanderers,
+)
+from game.helper_methods.jail import (
+    arrest_member,
+    ensure_crew_jail_fields,
+    format_jail_time,
+    is_jailed,
+    jail_seconds_remaining,
+    offer_player_arrest_choice,
+    tick_jail_releases,
+    wanted_in_room,
+)
 from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany, Quarters
-from game.objects.items import get_item_definition, ALL_ITEMS, ItemInventoryMixin
+from game.objects.items import ItemInventoryMixin
 from game.character_methods.character_creation import CharacterCreation
 from game.character_methods.character_sheet import render_character_sheet
 from game.helper_methods.power_constants import (
@@ -25,6 +41,20 @@ from game.helper_methods.power_constants import (
     calculate_discharge,
     calculate_solar_charge,
     default_station_power,
+)
+from game.helper_methods.lighting_helper import (
+    clamp_lighting_for_battery,
+    ensure_station_power_lighting,
+    lighting_style,
+)
+from game.helper_methods.oxygen_helper import (
+    OXYGEN_TICK_SECONDS,
+    OXYGEN_WARNING_MESSAGES,
+    OXYGEN_DEATH_TITLE,
+    OXYGEN_DEATH_MESSAGE,
+    OXYGEN_DEATH_NOTE,
+    apply_oxygen_tick,
+    apply_oxygen_death_state,
 )
 from game.helper_methods.ui_panels import (
     open_modal_panel,
@@ -50,7 +80,11 @@ class SpaceStationGame(ItemInventoryMixin):
         self.root = root
         self.base_path = base_path
         self.root.title("Space Station 13 Text Clone")
-        self.root.geometry("920x690")
+        width, height = 1012, 759
+        self.root.update_idletasks()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
         self.root.configure(bg="black")
         configure_message_buffer(self.root)
 
@@ -60,7 +94,6 @@ class SpaceStationGame(ItemInventoryMixin):
 
         self.battery_timer_running = False
         self.battery_timer_id = None
-        self._event_effect_messages = None
 
         # Stock market background tracking
         self.market_engine = StockMarketEngine()
@@ -89,6 +122,10 @@ class SpaceStationGame(ItemInventoryMixin):
                 "poison": 0,
                 "oxygen": 0
             },
+            "alcohol_percent": 0,
+            "warrant": False,
+            "in_jail": False,
+            "jail_release_at": None,
             "station_power": default_station_power(),
             "notes": []
         }
@@ -108,6 +145,8 @@ class SpaceStationGame(ItemInventoryMixin):
     def _load_crew_from_player_data(self):
         """Restore crew list from loaded player_data."""
         self.station_crew = self.player_data.get("station_crew", [])
+        ensure_npc_movement_fields(self.station_crew)
+        ensure_crew_jail_fields(self.player_data, self.station_crew)
 
     def _save_game(self):
         """Update market state, sync crew, and persist the save file."""
@@ -121,25 +160,6 @@ class SpaceStationGame(ItemInventoryMixin):
             self.start_market_thread()
         if not self.battery_timer_running:
             self.start_battery_timer()
-
-    def _report_effect(self, title, message):
-        """Show an effect popup, or buffer the message during a random event."""
-        if self._event_effect_messages is not None:
-            self._event_effect_messages.append(message)
-        else:
-            report_message(title, message, kind="info", parent=self.root)
-
-    def _add_damage_type(self, damage_key, label, min_damage, max_damage):
-        """Apply incremental damage of a given type to the player."""
-        damage = random.randint(min_damage, max_damage)
-        original_damage = self.player_data["damage"].get(damage_key, 0)
-        self.player_data["damage"][damage_key] = min(100, original_damage + damage)
-        total = self.player_data["damage"][damage_key]
-        self._report_effect(
-            f"{label} Damage",
-            f"You suffered {damage}% {label.lower()} damage! Total {label.lower()} damage: {total}%.",
-        )
-        self.add_note(f"Suffered {label.lower()} damage: Took {damage}% damage (total now {total}%)")
 
     def _enter_special_room(self, room_class):
         """Create a special room UI instance from a room class."""
@@ -237,9 +257,16 @@ class SpaceStationGame(ItemInventoryMixin):
 
             self.player_data["station_power"]["battery_level"] = new_level
             self.player_data["station_power"]["last_update_time"] = now.isoformat()
+            clamp_lighting_for_battery(self.player_data["station_power"])
             
             # Check oxygen levels based on life support setting
             self.check_life_support_status(elapsed_seconds)
+
+            # Release anyone whose jail sentence has expired
+            try:
+                tick_jail_releases(self)
+            except Exception as e:
+                print(f"Error ticking jail releases: {e}")
             
             # If battery level reaches critical point, trigger effects
             if 0 < new_level <= 10:
@@ -252,83 +279,29 @@ class SpaceStationGame(ItemInventoryMixin):
             print(f"Error updating battery: {e}")
             self.player_data["station_power"]["last_update_time"] = datetime.datetime.now().isoformat()
 
-        # Poll every 2 seconds
-        self.battery_timer_id = self.root.after(2000, self.update_battery)
+        # Poll on the same interval as oxygen damage ticks
+        self.battery_timer_id = self.root.after(OXYGEN_TICK_SECONDS * 1000, self.update_battery)
     
     def check_life_support_status(self, elapsed_seconds):
         """Check life support status and apply oxygen damage to player and NPCs if necessary"""
         try:
-            # Get life support level
-            life_support_level = self.player_data["station_power"]["system_levels"].get("life_support", 10)
-            
-            # Combine player and NPCs for processing
-            all_crew = [self.player_data] + self.station_crew
-            
-            # Determine damage or recovery rates based on life support level
-            oxygen_damage_rate = 0
-            recovery_rate_per_second = 0
-            apply_damage = False
-            apply_recovery = False
-            
-            if life_support_level == 0:
-                # Life support OFF: High oxygen damage rate (10% per minute)
-                oxygen_damage_rate = (elapsed_seconds * (10 / 60.0))
-                max_damage_per_update = 10.0  # Limit max damage per update
-                oxygen_damage_rate = min(oxygen_damage_rate, max_damage_per_update)
-                apply_damage = True
-            elif life_support_level < 5:
-                # Life support LOW: Slow oxygen damage rate (5% per minute)
-                oxygen_damage_rate = (elapsed_seconds * (5 / 60.0))
-                max_damage_per_update = 5.0 # Limit max damage per update
-                oxygen_damage_rate = min(oxygen_damage_rate, max_damage_per_update)
-                apply_damage = True
-            else:
-                # Life support FUNCTIONAL: Recover oxygen damage (1% per 30 seconds)
-                recovery_rate_per_second = 1 / 30.0
-                apply_recovery = True
-                
-            # Apply damage or recovery to all crew members
-            for crew_member in all_crew:
-                is_player = (crew_member == self.player_data)
-                current_oxygen_damage = crew_member["damage"].get("oxygen", 0)
-                
-                if apply_damage and oxygen_damage_rate > 0:
-                    new_oxygen_damage = min(100, current_oxygen_damage + oxygen_damage_rate)
-                    crew_member["damage"]["oxygen"] = new_oxygen_damage
-                    
-                    # Show warnings/handle death only for the player for now
-                    if is_player:
-                        print(f"Player Oxygen damage: Current={current_oxygen_damage:.1f}%, Adding={oxygen_damage_rate:.1f}% -> New={new_oxygen_damage:.1f}% (elapsed={elapsed_seconds:.1f}s)")
-                        if current_oxygen_damage < 30 and new_oxygen_damage >= 30:
-                            self.show_oxygen_warning(30)
-                        elif current_oxygen_damage < 60 and new_oxygen_damage >= 60:
-                            self.show_oxygen_warning(60)
-                        elif current_oxygen_damage < 90 and new_oxygen_damage >= 90:
-                            self.show_oxygen_warning(90)
-                        if new_oxygen_damage >= 100:
-                            self.handle_oxygen_death()
-
-                elif apply_recovery and current_oxygen_damage > 0:
-                    recovery_amount = min(current_oxygen_damage, elapsed_seconds * recovery_rate_per_second)
-                    new_oxygen_damage = max(0, current_oxygen_damage - recovery_amount)
-                    crew_member["damage"]["oxygen"] = new_oxygen_damage
-                    
-                    if is_player:
-                         print(f"Player Oxygen recovery: Current={current_oxygen_damage:.1f}%, Recovered={recovery_amount:.1f}% -> New={new_oxygen_damage:.1f}% (elapsed={elapsed_seconds:.1f}s)")
-
+            events = apply_oxygen_tick(self.player_data, self.station_crew, elapsed_seconds)
+            for threshold in events["crossed_warnings"]:
+                self.show_oxygen_warning(threshold)
+            if events["died"]:
+                self.handle_oxygen_death()
         except Exception as e:
             print(f"Error checking life support status for crew: {e}")
     
     def show_oxygen_warning(self, threshold):
         """Show a warning about oxygen levels"""
-        warnings = {
-            30: "You're feeling light-headed and having difficulty breathing. Oxygen levels are dropping.",
-            60: "Your vision is beginning to blur and you're experiencing severe difficulty breathing. Oxygen deprivation is worsening.",
-            90: "You're on the verge of losing consciousness. Severe oxygen deprivation detected. Immediate action required."
-        }
-        
         try:
-            report_message("Oxygen Warning", warnings[threshold], kind="warning", parent=self.root)
+            report_message(
+                "Oxygen Warning",
+                OXYGEN_WARNING_MESSAGES[threshold],
+                kind="warning",
+                parent=self.root,
+            )
             self.add_note(f"Suffered {threshold}% oxygen damage due to life support failure.")
         except Exception as e:
             print(f"Error showing oxygen warning: {e}")
@@ -337,24 +310,13 @@ class SpaceStationGame(ItemInventoryMixin):
         """Handle player death from oxygen deprivation"""
         try:
             report_message(
-                "CRITICAL: Oxygen Depleted",
-                "You have succumbed to oxygen deprivation. Emergency medical protocols have been activated, and you have been revived at minimal health levels.",
+                OXYGEN_DEATH_TITLE,
+                OXYGEN_DEATH_MESSAGE,
                 kind="error",
                 parent=self.root,
             )
-            
-            # Reset oxygen damage
-            self.player_data["damage"]["oxygen"] = 50
-            
-            # Set all limbs to critical levels
-            for limb in self.player_data["limbs"]:
-                self.player_data["limbs"][limb] = 20
-                
-            # Add note about near-death
-            self.add_note("CRITICAL EVENT: Nearly died from oxygen deprivation. Emergency medical systems intervened.")
-            
-            # Return player to quarters
-            self.player_data["location"] = dict(donut.QUARTERS_LOCATION)
+            apply_oxygen_death_state(self.player_data)
+            self.add_note(OXYGEN_DEATH_NOTE)
             self.show_hallway()
         except Exception as e:
             print(f"Error handling oxygen death: {e}")
@@ -405,6 +367,7 @@ class SpaceStationGame(ItemInventoryMixin):
         for widget in self.root.winfo_children():
             widget.destroy()
 
+        self.root.configure(bg="black")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         # Title
@@ -454,9 +417,6 @@ class SpaceStationGame(ItemInventoryMixin):
             widget.destroy()
 
         self._ensure_game_running()
-
-        # Configure window size
-        self.root.geometry("920x805")  # Increased height to accommodate all content
 
         # Store the previous screen to return to
         self.previous_screen = getattr(self, 'previous_screen', 'show_hallway')
@@ -615,6 +575,14 @@ class SpaceStationGame(ItemInventoryMixin):
 
         self._ensure_game_running()
 
+        if is_jailed(self.player_data):
+            self.player_data["location"] = {
+                "x": int(donut.SECURITY_KEY.split(",")[0]),
+                "y": int(donut.SECURITY_KEY.split(",")[1]),
+            }
+            self._instantiate_special_room("Security")
+            return
+
         loc_key = self.get_location_key()
 
         if loc_key not in self.ship_map:
@@ -636,23 +604,13 @@ class SpaceStationGame(ItemInventoryMixin):
                 return
 
         location = self.ship_map[loc_key]
-        battery_level = 100.0  # Default to full power
-        if "station_power" in self.player_data:
-            battery_level = self.player_data["station_power"].get("battery_level", 100.0)
-        
-        # Set background color based on battery level
-        hallway_bg = "black"  # Default
-        desc_fg = "white"     # Default text color
-        
-        if battery_level <= 5:
-            # Critical - emergency red lighting only
-            hallway_bg = "#220000"  # Very dark red
-            desc_fg = "#FF5555"     # Bright red text
-        elif battery_level <= 15:
-            # Low power - dim lighting
-            hallway_bg = "#111111"  # Very dark gray
-            desc_fg = "#BBBBBB"     # Light gray text
-        
+        station_power = ensure_station_power_lighting(self.player_data)
+        lighting_level = station_power["system_levels"].get("hallway_lighting", 5)
+        style = lighting_style(lighting_level, place="hallway")
+        hallway_bg = style["bg"]
+        desc_fg = style["fg"]
+        power_desc = style["power_desc"]
+
         # Set window background
         self.root.configure(bg=hallway_bg)
         
@@ -661,17 +619,7 @@ class SpaceStationGame(ItemInventoryMixin):
         hallway_label.pack(pady=30)
         
         # Description with power status info
-        base_desc = location["desc"]
-        
-        # Add lighting condition to the description
-        if battery_level <= 5:
-            power_desc = "\n\nEmergency lighting casts an eerie red glow. Most systems are offline."
-        elif battery_level <= 15:
-            power_desc = "\n\nThe lights are dimmed to conserve power."
-        else:
-            power_desc = ""
-            
-        full_desc = base_desc + power_desc
+        full_desc = location["desc"] + power_desc
         
         desc_label = tk.Label(self.root, text=full_desc, font=("Arial", 12), 
                            bg=hallway_bg, fg=desc_fg, wraplength=600)
@@ -858,6 +806,14 @@ class SpaceStationGame(ItemInventoryMixin):
     
     def move_direction(self, direction):
         """Move in the specified direction with random event chance"""
+        if is_jailed(self.player_data):
+            remaining = format_jail_time(jail_seconds_remaining(self.player_data))
+            messagebox.showinfo(
+                "In Jail",
+                f"You are in jail. Time remaining: {remaining}.",
+            )
+            return
+
         x = self.player_data["location"]["x"]
         y = self.player_data["location"]["y"]
         
@@ -884,119 +840,121 @@ class SpaceStationGame(ItemInventoryMixin):
             self.player_data["location"]["x"] = x - (1 if direction == "north" else -1 if direction == "south" else 0)
             self.player_data["location"]["y"] = y - (1 if direction == "east" else -1 if direction == "west" else 0)
 
-        # 20% chance of a random hallway event
-        if random.random() < 0.20:
-            self.trigger_random_event()
-        
+        # NPCs move independently of the player's own random hallway events:
+        # posted NPCs may leave/return, and wandering NPCs take a step.
+        roll_departures(self.station_crew)
+        step_wanderers(
+            self.station_crew,
+            self.ship_map,
+            game=self,
+            player_data=self.player_data,
+        )
+
+        # If a room-entry warrant sweep just jailed the player, stop here.
+        if is_jailed(self.player_data):
+            return
+
+        maybe_trigger_hallway_event(self)
+
+        if is_jailed(self.player_data):
+            return
+
+        # Unconditional (not gated by the random-event roll above): if a
+        # wandering NPC happens to be standing on the player's new tile,
+        # they cross paths in the hallway — and security may arrest.
+        for npc in find_hall_passersby(self.player_data, self.station_crew):
+            if self._handle_hallway_security_encounter(npc):
+                if is_jailed(self.player_data):
+                    return
+                continue
+            messagebox.showinfo(
+                "Crew Encounter",
+                f"{npc.get('name', 'A crew member')} ({npc.get('job', 'Crew')}) passes you in the hall.",
+            )
+
         # Refresh hallway view
         self.show_hallway()
-    
-    def trigger_random_event(self):
-        """Trigger a random event"""
-        # List of possible events with good, bad, and neutral outcomes
-        events = [
-            # Good events
-            {"type": "good", "title": "Found Credits", "desc": "You found some credits on the floor!", "effect": lambda: self.add_credits(random.randint(50, 200))},
-            {"type": "good", "title": "Supply Crate", "desc": "You found an unsealed supply crate with useful items.", "effect": lambda: self.add_random_item()},
-            {"type": "good", "title": "Market Tip", "desc": "You overheard a reliable market tip.", "effect": lambda: self.add_market_knowledge()},
-            
-            # Neutral events
-            {"type": "neutral", "title": "Crew Member", "desc": "You passed by a crew member who nodded at you.", "effect": lambda: None},
-            {"type": "neutral", "title": "Announcement", "desc": "The station PA system makes an announcement.", "effect": lambda: self.station_announcement()},
-            {"type": "neutral", "title": "Maintenance", "desc": "A maintenance drone passes by, cleaning the hallway.", "effect": lambda: None},
-            
-            # Bad events - now all include blunt damage
-            {"type": "bad", "title": "Lost Credits", "desc": "You dropped some credits and couldn't find them all. You bumped your head looking for them.", 
-              "effect": lambda: self.combined_effect([
-                  lambda: self.lose_credits(random.randint(10, 50)),
-                  lambda: self.damage_limb("head", 5, 10)
-              ])},
-            {"type": "bad", "title": "Small Explosion", "desc": "A nearby conduit explodes, showering you with hot sparks and debris!", 
-              "effect": lambda: self.combined_effect([
-                  lambda: self.damage_random_limb(10, 25),  # Blunt damage from impact
-                  lambda: self.add_burn_damage(5, 15)       # Burn damage from sparks
-              ])},
-            {"type": "bad", "title": "Slip and Fall", "desc": "You slipped on a wet floor and fell hard.", 
-              "effect": lambda: self.damage_random_limb(10, 20)},
-            {"type": "bad", "title": "Steam Leak", "desc": "A pipe bursts, releasing scalding steam that burns your arm!", 
-              "effect": lambda: self.combined_effect([
-                  lambda: self.damage_limb("left_arm", 5, 10),  # Blunt damage from impact
-                  lambda: self.add_burn_damage(15, 30)          # Burn damage from steam
-              ])},
-            {"type": "bad", "title": "Falling Debris", "desc": "A ceiling panel breaks loose and hits your head!", 
-              "effect": lambda: self.damage_limb("head", 15, 35)},
-            {"type": "bad", "title": "Maintenance Accident", "desc": "Your leg gets caught in an open floor grate!", 
-              "effect": lambda: self.damage_limb("right_leg", 10, 20)},
-            {"type": "bad", "title": "Chemical Spill", "desc": "You walk through a chemical spill! Your leg is burned and you feel ill.", 
-              "effect": lambda: self.combined_effect([
-                  lambda: self.damage_limb("left_leg", 5, 10),    # Blunt damage from slipping
-                  lambda: self.add_burn_damage(5, 15),            # Burn damage from chemicals
-                  lambda: self.add_poison_damage(10, 20)          # Poison damage from fumes
-              ])}
-        ]
-        
-        # Pick a random event
-        event = random.choice(events)
 
-        self._event_effect_messages = []
-        try:
-            event["effect"]()
-            body = event["desc"]
-            if self._event_effect_messages:
-                body = body + "\n\n" + "\n".join(self._event_effect_messages)
-            messagebox.showinfo(event["title"], body)
-        finally:
-            self._event_effect_messages = None
-    
-    def combined_effect(self, effect_functions):
-        """Apply multiple effects in sequence"""
-        for effect_fn in effect_functions:
-            effect_fn()
-    
-    def damage_random_limb(self, min_damage, max_damage):
-        """Damage a random limb by a random amount"""
-        # Get a random limb
-        limb = random.choice(list(self.player_data["limbs"].keys()))
-        self.damage_limb(limb, min_damage, max_damage)
-    
-    def damage_limb(self, limb, min_damage, max_damage):
-        """Damage a specific limb by a random amount within range (blunt damage)"""
-        if limb in self.player_data["limbs"]:
-            # Calculate damage
-            damage = random.randint(min_damage, max_damage)
-            
-            # Apply damage
-            original_health = self.player_data["limbs"][limb]
-            self.player_data["limbs"][limb] = max(0, original_health - damage)
-            
-            # Format the limb name for display
-            limb_name = limb.replace('_', ' ').title()
-            
-            # Show damage message
-            self._report_effect(
-                "Blunt Injury",
-                f"Your {limb_name} took {damage}% blunt damage and is now at {self.player_data['limbs'][limb]}%.",
+    def _handle_hallway_security_encounter(self, npc):
+        """Arrest on hallway pass-by if one party is Security and the other is wanted.
+
+        Returns True if an arrest (or security-specific handling) occurred.
+        """
+        npc_is_guard = npc.get("job") == "Security Guard"
+        player_is_guard = self.player_data.get("job") == "Security Guard"
+
+        if npc_is_guard and self.player_data.get("warrant", False) and not is_jailed(self.player_data):
+            arrest_member(
+                self.player_data,
+                reason=(
+                    f"{npc.get('name', 'A security guard')} stops you in the hall. "
+                    "You are under arrest!"
+                ),
+                game=self,
+                is_player=True,
+                show_message=True,
             )
-            
-            # Add note about the injury
-            self.add_note(f"Suffered blunt damage to {limb_name}: Took {damage}% damage (from {original_health}% to {self.player_data['limbs'][limb]}%)")
-    
-    def add_credits(self, amount):
-        """Add credits to the player"""
-        self.player_data["credits"] += amount
-        self._report_effect("Credits Added", f"You gained {amount} credits.")
-        
-        # Add note about credits gained
-        self.add_note(f"Found {amount} credits. New balance: {self.player_data['credits']} credits.")
-    
-    def lose_credits(self, amount):
-        """Subtract credits from the player (min 0)"""
-        old_credits = self.player_data["credits"]
-        self.player_data["credits"] = max(0, old_credits - amount)
-        self._report_effect("Credits Lost", f"You lost {amount} credits.")
-        
-        # Add note about credits lost
-        self.add_note(f"Lost {amount} credits. New balance: {self.player_data['credits']} credits.")
+            return True
+
+        if (
+            player_is_guard
+            and npc.get("warrant", False)
+            and not is_jailed(npc)
+        ):
+            self._offer_player_arrest_choice(npc, place="hall")
+            return True
+
+        return False
+
+    def _scan_room_for_warrants(self, room_key):
+        """As a Security Guard player, offer Arrest/Let Go for each wanted person in the room."""
+        if self.player_data.get("job") != "Security Guard":
+            return
+        if is_jailed(self.player_data):
+            return
+
+        for npc in list(wanted_in_room(room_key, self.player_data, self.station_crew)):
+            if is_jailed(npc) or not npc.get("warrant", False):
+                continue
+            self._offer_player_arrest_choice(npc, place="room")
+
+    def _offer_player_arrest_choice(self, npc, place="hall"):
+        """Let a Security Guard player Arrest or Let Go a wanted crew member."""
+        offer_player_arrest_choice(
+            self.player_data,
+            npc,
+            parent=self.root,
+            game=self,
+            place=place,
+        )
+
+    def handle_player_arrest(self, message, show_message=True):
+        """Teleport the jailed player into the Security room UI."""
+        from tkinter import messagebox as mb
+
+        if show_message:
+            mb.showinfo("Arrested", message, parent=self.root)
+        self.player_data["location"] = {
+            "x": int(donut.SECURITY_KEY.split(",")[0]),
+            "y": int(donut.SECURITY_KEY.split(",")[1]),
+        }
+        self.player_data["ship_map"] = self.ship_map
+        # Drop any hallway UI and open Security so the player is stuck there.
+        self._instantiate_special_room("Security")
+
+    def handle_player_release(self):
+        """Return the player to the Security hallway after their sentence ends."""
+        from tkinter import messagebox as mb
+        from game.helper_methods.jail import security_hallway_location
+
+        self.player_data["location"] = security_hallway_location()
+        mb.showinfo(
+            "Released",
+            "Your sentence is over. You are free to go.",
+            parent=self.root,
+        )
+        # If they were viewing Security as a prisoner, bounce them to the hallway.
+        self.show_hallway()
     
     def show_load_game(self):
         # Clear the window
@@ -1122,7 +1080,14 @@ class SpaceStationGame(ItemInventoryMixin):
             
             # Check if player is in a special room or hallway
             loc_key = f"{x},{y}"
-            if loc_key in SPECIAL_ROOM_TILES and loc_key != donut.QUARTERS_KEY:
+            if is_jailed(self.player_data):
+                # Keep jailed players locked in the Security room UI
+                self.player_data["location"] = {
+                    "x": int(donut.SECURITY_KEY.split(",")[0]),
+                    "y": int(donut.SECURITY_KEY.split(",")[1]),
+                }
+                self._instantiate_special_room("Security")
+            elif loc_key in SPECIAL_ROOM_TILES and loc_key != donut.QUARTERS_KEY:
                 # Player was in a special room, return to hallway entrance
                 self.update_player_data_from_room(self.player_data)
             elif x == -1 and y == 0:
@@ -1138,14 +1103,6 @@ class SpaceStationGame(ItemInventoryMixin):
         
         return True
 
-    def add_burn_damage(self, min_damage, max_damage):
-        """Apply burn damage to the player"""
-        self._add_damage_type("burn", "Burn", min_damage, max_damage)
-
-    def add_poison_damage(self, min_damage, max_damage):
-        """Apply poison damage to the player"""
-        self._add_damage_type("poison", "Poison", min_damage, max_damage)
-
     def enter_special_room_at(self, room_name, target_key):
         """Enter a special room at a specified target location"""
         room_details = self.ship_map.get(target_key)
@@ -1158,6 +1115,14 @@ class SpaceStationGame(ItemInventoryMixin):
 
         x_str, y_str = target_key.split(",")
         self.player_data["location"] = {"x": int(x_str), "y": int(y_str)}
+
+        # Security Guard players scan the room for warrants on entry.
+        if (
+            self.player_data.get("job") == "Security Guard"
+            and not is_jailed(self.player_data)
+        ):
+            self._scan_room_for_warrants(target_key)
+
         self._instantiate_special_room(room_name)
 
     def update_player_data_from_room(self, updated_player_data, updated_station_crew=None):
@@ -1210,60 +1175,6 @@ class SpaceStationGame(ItemInventoryMixin):
         self._save_game()
         self.stop_battery_timer()
         self.show_main_menu()
-
-    def add_random_item(self):
-        """Add a random item (using item definitions) to the player's inventory"""
-        # Get all available item IDs from the master list
-        available_item_ids = list(ALL_ITEMS.keys())
-        
-        if not available_item_ids:
-            messagebox.showwarning("Error", "No items defined to be found.")
-            return
-            
-        # Choose a random item ID
-        item_id = random.choice(available_item_ids)
-        
-        # Get a copy of the item definition
-        item_def = get_item_definition(item_id)
-        
-        if not item_def:
-            messagebox.showerror("Error", f"Could not find definition for random item ID: {item_id}")
-            return
-
-        # Ensure inventory list exists
-        self.player_data.setdefault("inventory", [])
-            
-        # Add the item dictionary to inventory
-        self.player_data["inventory"].append(item_def)
-        item_name = item_def.get("name", "an item")
-        self._report_effect("Item Found", f"You found {item_name} and added it to your inventory.")
-        
-        # Add note about the item found
-        self.add_note(f"Found {item_name} ({item_id}) and added it to inventory.")
-    
-    def add_market_knowledge(self):
-        """Add market knowledge to the player - reveals a tip about a stock"""
-        message = generate_market_tip(self.player_data["stock_market"].get("companies", []))
-        if message is None:
-            self._report_effect("Market Tip", "You heard a stock tip, but don't understand the market yet.")
-            return
-
-        self._report_effect("Market Tip", message)
-        self.add_note(f"Market Tip: {message}")
-    
-    def station_announcement(self):
-        """Display a random station announcement"""
-        announcements = [
-            "Reminder to all crew: safety protocols must be followed at all times.",
-            "The cafeteria will be serving special meal rations today.",
-            "Maintenance is scheduled in Sector 7 tomorrow.",
-            "All personnel are reminded to report suspicious activity to security.",
-            "Weekly crew meeting is postponed until further notice.",
-            "Environmental controls are being recalibrated. Expect minor temperature fluctuations."
-        ]
-        
-        announcement = random.choice(announcements)
-        self._report_effect("Station Announcement", f"The PA system crackles: '{announcement}'")
 
 if __name__ == "__main__":
     if getattr(sys, "frozen", False):
