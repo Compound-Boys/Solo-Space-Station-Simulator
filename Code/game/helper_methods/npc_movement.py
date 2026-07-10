@@ -121,6 +121,7 @@ def ensure_npc_movement_fields(station_crew):
         npc.setdefault("in_jail", False)
         npc.setdefault("jail_release_at", None)
         npc.setdefault("warrant", False)
+        npc.setdefault("warrant_reason", "")
         if npc.get("in_jail", False):
             npc["location"] = _location_dict_from_key(donut.SECURITY_KEY)
             npc["room_visit_remaining"] = 0

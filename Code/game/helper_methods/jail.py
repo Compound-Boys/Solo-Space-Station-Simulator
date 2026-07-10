@@ -37,6 +37,13 @@ def ensure_jail_fields(member):
     member.setdefault("in_jail", False)
     member.setdefault("jail_release_at", None)
     member.setdefault("warrant", False)
+    member.setdefault("warrant_reason", "")
+
+
+def warrant_reason_text(member, default="No reason on file"):
+    """Return the warrant reason string, or default if missing/blank."""
+    reason = (member.get("warrant_reason") or "").strip()
+    return reason if reason else default
 
 
 def ensure_crew_jail_fields(player_data, station_crew):
@@ -154,6 +161,7 @@ def release_member(member, *, is_player=False, game=None, show_message=True):
     member["in_jail"] = False
     member["jail_release_at"] = None
     member["warrant"] = False
+    member["warrant_reason"] = ""
     member["room_visit_remaining"] = 0
 
     if is_player:
@@ -238,9 +246,13 @@ def arrest_wanted_in_room(room_key, player_data, station_crew, *, game=None, gua
     for npc in members_in_room(station_crew, room_key, exclude=guard):
         if npc.get("warrant", False) and not is_jailed(npc):
             name = npc.get("name", "A crew member")
+            charge = warrant_reason_text(npc)
             if arrest_member(
                 npc,
-                reason=f"{name} was arrested by security and sent to jail.",
+                reason=(
+                    f"{name} was arrested by security and sent to jail.\n"
+                    f"Charge: {charge}"
+                ),
                 game=game,
                 is_player=False,
                 show_message=bool(game),
@@ -252,9 +264,13 @@ def arrest_wanted_in_room(room_key, player_data, station_crew, *, game=None, gua
         and not is_jailed(player_data)
         and _member_location_key(player_data) == room_key
     ):
+        charge = warrant_reason_text(player_data)
         if arrest_member(
             player_data,
-            reason="A security guard found you while you were wanted. You are under arrest!",
+            reason=(
+                "A security guard found you while you were wanted. You are under arrest!\n"
+                f"Charge: {charge}"
+            ),
             game=game,
             is_player=True,
             show_message=True,
@@ -337,6 +353,7 @@ def offer_player_arrest_choice(player_data, npc, *, parent, game=None, place="ha
 
     name = npc.get("name", "A crew member")
     job = npc.get("job", "Crew")
+    charge = warrant_reason_text(npc)
     bribe_amount = None
     if random.random() < BRIBE_CHANCE:
         bribe_amount = random.randint(BRIBE_MIN_CREDITS, BRIBE_MAX_CREDITS)
@@ -344,25 +361,32 @@ def offer_player_arrest_choice(player_data, npc, *, parent, game=None, place="ha
     if place == "room":
         lines = [
             f"You scan the room and spot {name} ({job}).",
-            "They have an active warrant.",
+            f"They have an active warrant.\nCharge: {charge}",
         ]
-        arrest_reason = f"You arrest {name} in the room and send them to jail."
+        arrest_reason = (
+            f"You arrest {name} in the room and send them to jail.\nCharge: {charge}"
+        )
         let_go_note = f"Let wanted crew member {name} go after scanning a room."
         let_go_plain = f"You look the other way. {name} stays in the room."
     elif place == "call":
         lines = [
             f"{name} ({job}) answers your call and arrives.",
-            "Your scan shows they have an active warrant.",
+            f"Your scan shows they have an active warrant.\nCharge: {charge}",
         ]
-        arrest_reason = f"You arrest {name} after calling them back and send them to jail."
+        arrest_reason = (
+            f"You arrest {name} after calling them back and send them to jail.\n"
+            f"Charge: {charge}"
+        )
         let_go_note = f"Let wanted crew member {name} go after calling them back."
         let_go_plain = f"You look the other way. {name} remains at their post."
     else:
         lines = [
             f"You stop {name} ({job}) in the hall.",
-            "They have an active warrant.",
+            f"They have an active warrant.\nCharge: {charge}",
         ]
-        arrest_reason = f"You arrest {name} in the hallway and send them to jail."
+        arrest_reason = (
+            f"You arrest {name} in the hallway and send them to jail.\nCharge: {charge}"
+        )
         let_go_note = f"Let wanted crew member {name} go in the hallway."
         let_go_plain = f"You wave {name} on. They disappear down the hallway."
 
@@ -390,6 +414,7 @@ def offer_player_arrest_choice(player_data, npc, *, parent, game=None, place="ha
     if bribe_amount is not None:
         player_data["credits"] = player_data.get("credits", 0) + bribe_amount
         npc["warrant"] = False
+        npc["warrant_reason"] = ""
         messagebox.showinfo(
             "Let Go",
             f"You look the other way. {name} slips you {bribe_amount} credits and hurries off.\n"

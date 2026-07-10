@@ -30,6 +30,7 @@ from game.helper_methods.jail import (
     offer_player_arrest_choice,
     tick_jail_releases,
     wanted_in_room,
+    warrant_reason_text,
 )
 from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany, Quarters
 from game.objects.items import ItemInventoryMixin
@@ -124,6 +125,7 @@ class SpaceStationGame(ItemInventoryMixin):
             },
             "alcohol_percent": 0,
             "warrant": False,
+            "warrant_reason": "",
             "in_jail": False,
             "jail_release_at": None,
             "station_power": default_station_power(),
@@ -884,11 +886,12 @@ class SpaceStationGame(ItemInventoryMixin):
         player_is_guard = self.player_data.get("job") == "Security Guard"
 
         if npc_is_guard and self.player_data.get("warrant", False) and not is_jailed(self.player_data):
+            charge = warrant_reason_text(self.player_data)
             arrest_member(
                 self.player_data,
                 reason=(
                     f"{npc.get('name', 'A security guard')} stops you in the hall. "
-                    "You are under arrest!"
+                    f"You are under arrest!\nCharge: {charge}"
                 ),
                 game=self,
                 is_player=True,

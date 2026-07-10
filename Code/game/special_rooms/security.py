@@ -9,6 +9,7 @@ from game.helper_methods.jail import (
     jail_seconds_remaining,
     list_prisoners,
     release_member,
+    warrant_reason_text,
 )
 from game.special_rooms.shared import (
     build_npc_contact_section,
@@ -207,13 +208,88 @@ class Security:
                     parent=popup,
                 )
                 return
+
+            reason = _prompt_warrant_reason(member)
+            if reason is None:
+                return
+
             member["warrant"] = True
+            member["warrant_reason"] = reason
             refresh_list(preserve_index=list_index)
             messagebox.showinfo(
                 "Warrant Issued",
-                f"Warrant issued for {member.get('name', 'Unknown')}.",
+                f"Warrant issued for {member.get('name', 'Unknown')}.\nReason: {reason}",
                 parent=popup,
             )
+
+        def _prompt_warrant_reason(member):
+            """Ask for a warrant reason. Returns stripped text, or None if cancelled."""
+            name = member.get("name", "Unknown")
+            result = {"value": None, "confirmed": False}
+
+            dialog = tk.Toplevel(popup)
+            dialog.title("Warrant Reason")
+            dialog.configure(bg="black")
+            dialog.transient(popup)
+            dialog.grab_set()
+            dialog.resizable(False, False)
+
+            tk.Label(
+                dialog,
+                text=f"Enter the reason for {name}'s warrant:",
+                font=("Arial", 12),
+                bg="black",
+                fg="white",
+                wraplength=360,
+                justify=tk.LEFT,
+            ).pack(padx=20, pady=(16, 8))
+
+            entry = tk.Entry(dialog, font=("Arial", 12), width=40)
+            entry.pack(padx=20, pady=8)
+            entry.focus_set()
+
+            button_row = tk.Frame(dialog, bg="black")
+            button_row.pack(pady=(8, 16))
+
+            def confirm():
+                text = entry.get().strip()
+                if not text:
+                    messagebox.showwarning(
+                        "Reason Required",
+                        "Enter a reason for the warrant.",
+                        parent=dialog,
+                    )
+                    return
+                result["value"] = text
+                result["confirmed"] = True
+                dialog.destroy()
+
+            def cancel():
+                dialog.destroy()
+
+            tk.Button(
+                button_row, text="Confirm", font=("Arial", 12), width=12, command=confirm
+            ).pack(side=tk.LEFT, padx=8)
+            tk.Button(
+                button_row, text="Cancel", font=("Arial", 12), width=12, command=cancel
+            ).pack(side=tk.LEFT, padx=8)
+
+            dialog.bind("<Return>", lambda _event: confirm())
+            dialog.protocol("WM_DELETE_WINDOW", cancel)
+            dialog.update_idletasks()
+            width = dialog.winfo_reqwidth()
+            height = dialog.winfo_reqheight()
+            try:
+                x = popup.winfo_rootx() + (popup.winfo_width() - width) // 2
+                y = popup.winfo_rooty() + (popup.winfo_height() - height) // 2
+                dialog.geometry(f"+{x}+{y}")
+            except tk.TclError:
+                pass
+            popup.wait_window(dialog)
+
+            if result["confirmed"]:
+                return result["value"]
+            return None
 
         def clear_warrant():
             list_index, member = _selected_member()
@@ -227,6 +303,7 @@ class Security:
                 )
                 return
             member["warrant"] = False
+            member["warrant_reason"] = ""
             refresh_list(preserve_index=list_index)
             messagebox.showinfo(
                 "Warrant Cleared",
@@ -291,8 +368,9 @@ class Security:
             name = member.get("name", "Unknown")
             job = member.get("job", "Unknown")
             remaining = format_jail_time(jail_seconds_remaining(member))
+            charge = warrant_reason_text(member)
             you = " (YOU)" if is_player else ""
-            return f"{name} ({job}){you} — {remaining} remaining"
+            return f"{name} ({job}){you} — {remaining} remaining | Charge: {charge}"
 
         def refresh_list(preserve_index=None):
             prisoner_listbox.delete(0, tk.END)

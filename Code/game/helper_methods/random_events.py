@@ -390,14 +390,21 @@ def bot_moves_by(game):
                 "A security bot rolls past your cell without stopping.",
             )
         elif game.player_data.get("warrant", False):
+            from game.helper_methods.jail import warrant_reason_text
+
+            charge = warrant_reason_text(game.player_data)
             _report_effect(
                 game,
                 "Security Bot",
-                "A security bot locks onto you. You are wanted — you are under arrest!",
+                "A security bot locks onto you. You are wanted — you are under arrest!\n"
+                f"Charge: {charge}",
             )
             arrest_member(
                 game.player_data,
-                reason="A security bot locks onto you. You are wanted — you are under arrest!",
+                reason=(
+                    "A security bot locks onto you. You are wanted — you are under arrest!\n"
+                    f"Charge: {charge}"
+                ),
                 game=game,
                 is_player=True,
                 show_message=False,
