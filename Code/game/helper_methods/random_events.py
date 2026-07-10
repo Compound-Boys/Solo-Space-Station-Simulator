@@ -204,7 +204,7 @@ def _non_admin_jobs():
 def build_job_event(game):
     """Build the single job-category event for the player's current role."""
     ensure_job_event(game.player_data)
-    job = game.player_data.get("job_event_key") or game.player_data.get("job")
+    job = game.player_data.get("job_event_key")
     if not job:
         return None
 

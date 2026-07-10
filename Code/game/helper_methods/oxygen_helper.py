@@ -154,11 +154,6 @@ def apply_oxygen_tick(player_data, station_crew, elapsed_seconds, master_elapsed
             crew_member["damage"]["oxygen"] = new_oxygen_damage
 
             if is_player:
-                print(
-                    f"Player Oxygen damage: Current={current_oxygen_damage}%, "
-                    f"Adding={oxygen_damage_rate}% -> New={new_oxygen_damage}% "
-                    f"(elapsed={elapsed_seconds:.1f}s, LS={life_support_level})"
-                )
                 for threshold in WARNING_THRESHOLDS:
                     if current_oxygen_damage < threshold <= new_oxygen_damage:
                         events["crossed_warnings"].append(threshold)
@@ -171,12 +166,6 @@ def apply_oxygen_tick(player_data, station_crew, elapsed_seconds, master_elapsed
             if current_oxygen_damage > floor:
                 new_oxygen_damage = max(floor, current_oxygen_damage - recovery_amount)
                 crew_member["damage"]["oxygen"] = new_oxygen_damage
-                if is_player:
-                    print(
-                        f"Player Oxygen recovery: Current={current_oxygen_damage}%, "
-                        f"Recovered={recovery_amount}% -> New={new_oxygen_damage}% "
-                        f"(floor={floor}, elapsed={elapsed_seconds:.1f}s)"
-                    )
 
     return events
 

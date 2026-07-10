@@ -5,7 +5,6 @@ Run script for Space Station Explorer game
 
 import sys
 import os
-import tkinter as tk
 
 # Function to determine the base path for resources and saves
 def get_base_path():
@@ -35,7 +34,6 @@ except ImportError as e:
 
 # Run the game
 if __name__ == "__main__":
-    # Create saves folder if it doesn't exist
     base_path = get_base_path()
     
     # Import and run the game
@@ -47,4 +45,4 @@ if __name__ == "__main__":
         root.mainloop()
     except Exception as e:
         print(f"Error starting game: {e}")
-        sys.exit(1) 
+        sys.exit(1)

@@ -8,7 +8,6 @@ from game.objects.items import (
     add_to_inventory,
     ensure_locker_inventory,
     format_inventory_label,
-    get_item_definition,
     remove_one_from_inventory,
 )
 from game.special_rooms.shared import (

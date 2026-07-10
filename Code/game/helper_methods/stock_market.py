@@ -70,7 +70,6 @@ def serialize_companies(companies):
             "current_value": company.current_value,
             "previous_value": company.previous_value,
             "price_history": company.price_history,
-            "owned_shares": company.owned_shares if hasattr(company, "owned_shares") else 0,
         }
         for company in companies
     ]
@@ -86,7 +85,6 @@ def apply_companies_from_save(companies, company_data_list):
         companies[i].current_value = company_data["current_value"]
         companies[i].previous_value = company_data["previous_value"]
         companies[i].price_history = company_data["price_history"]
-        companies[i].owned_shares = company_data.get("owned_shares", 0)
 
 
 def sync_holdings_to_companies(companies, stock_holdings):
@@ -101,25 +99,6 @@ def refresh_companies_from_player_data(companies, player_data):
     market_data = player_data.get("stock_market", {})
     apply_companies_from_save(companies, market_data.get("companies"))
     sync_holdings_to_companies(companies, player_data.get("stock_holdings"))
-
-
-def migrate_stock_holdings_from_companies(player_data):
-    """Backfill stock_holdings from serialized company owned_shares for old saves."""
-    if player_data.get("stock_holdings"):
-        return
-
-    market_data = player_data.get("stock_market", {})
-    companies = market_data.get("companies")
-    if not companies:
-        return
-
-    holdings = {
-        company["name"]: company["owned_shares"]
-        for company in companies
-        if company.get("owned_shares", 0) > 0
-    }
-    if holdings:
-        player_data["stock_holdings"] = holdings
 
 
 def get_seconds_until_next_cycle(elapsed_seconds, interval=CYCLE_INTERVAL_SECONDS):
@@ -241,8 +220,6 @@ class StockMarketEngine:
 
         market_data = player_data["stock_market"]
         self.cycle_number = market_data.get("cycle_number", 1)
-
-        migrate_stock_holdings_from_companies(player_data)
 
         if "companies" in market_data:
             refresh_companies_from_player_data(self.companies, player_data)

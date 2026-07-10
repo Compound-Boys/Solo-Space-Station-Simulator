@@ -1,11 +1,17 @@
 # game/objects/items.py
 
+import copy
 import tkinter as tk
 from tkinter import messagebox
 
 from game.helper_methods.ui_panels import open_modal_panel
 from game.maps.donut import render_map_text
 from game.objects.food import FOOD_ITEMS
+
+# Tool IDs that fit inside a Basic Tools set (one of each).
+BASIC_TOOLKIT_TOOL_IDS = ("wrench", "screwdriver", "wirecutters")
+NON_STACKABLE_ITEM_IDS = frozenset({"basic_tools"})
+MEDKIT_DAMAGE_TYPES = (("burn", "Burn"), ("poison", "Poison"), ("oxygen", "Oxygen"))
 
 # Base structure for items
 # { 
@@ -40,22 +46,6 @@ We hope you enjoy your stay and contribute to our thriving community!
 # Generated from the map's own coordinate data (see game/maps/donut.py) so it
 # always matches the actual station layout.
 STATION_MAP_CONTENT = render_map_text()
-
-MAINTENANCE_MANUAL_CONTENT = """SPACE STATION MAINTENANCE MANUAL
-
-BASIC TROUBLESHOOTING:
-1. Power cycling is the first solution to try for most electronic issues
-2. Check circuit breakers before reporting electrical failures
-3. Small air leaks can be temporarily patched with emergency sealant
-4. All maintenance tasks must be logged in the station computer
-
-EMERGENCY PROCEDURES:
-- Depressurization: Secure oxygen mask, move to nearest airlock
-- Fire: Use extinguisher, then evacuate section
-- Power failure: Emergency lighting will activate automatically
-
-Contact Engineering for all major repair needs.
-"""
 
 # --- Master Item Dictionary --- 
 # Contains the base definitions for all items in the game.
@@ -97,56 +87,8 @@ ALL_ITEMS = {
      "basic_tools": { # From locker
         "id": "basic_tools",
         "name": "Basic Tools",
-        "description": "A set containing a small wrench, screwdriver, and pliers.",
+        "description": "A set containing a small wrench, screwdriver, and wirecutters.",
         "category": "Tool",
-        "attributes": {},
-        "actions": ["examine", "use", "drop"]
-    },
-    "flashlight": { # From random event & locker
-        "id": "flashlight",
-        "name": "Flashlight",
-        "description": "A standard issue flashlight. Useful in dark areas.",
-        "category": "Tool", # Or maybe Utility?
-        "attributes": {},
-        "actions": ["examine", "use", "drop"] # 'Use' could toggle light?
-    },
-    "welding_tool": { # Mentioned before, adding definition
-        "id": "welding_tool",
-        "name": "Welding Tool",
-        "description": "For joining metal components. Requires a power source.",
-        "category": "Tool",
-        "attributes": {},
-        "actions": ["examine", "use", "drop"]
-    },
-    "multimeter": { # Mentioned before, adding definition
-        "id": "multimeter",
-        "name": "Multimeter",
-        "description": "Device for measuring voltage, current, and resistance.",
-        "category": "Tool",
-        "attributes": {},
-        "actions": ["examine", "use", "drop"]
-    },
-    "maintenance_tool": { # From random event
-        "id": "maintenance_tool",
-        "name": "Maintenance Tool",
-        "description": "A generic tool used for station upkeep.",
-        "category": "Tool",
-        "attributes": {},
-        "actions": ["examine", "use", "drop"]
-    },
-    "diagnostic_tool": { # From random event
-        "id": "diagnostic_tool",
-        "name": "Diagnostic Tool",
-        "description": "A scanner used to identify issues in machinery.",
-        "category": "Tool",
-        "attributes": {},
-        "actions": ["examine", "use", "drop"]
-    },
-    "portable_scanner": { # From locker
-        "id": "portable_scanner",
-        "name": "Portable Scanner",
-        "description": "Handheld scanner for analyzing objects, environments, or life signs.",
-        "category": "Tool", 
         "attributes": {},
         "actions": ["examine", "use", "drop"]
     },
@@ -172,197 +114,13 @@ ALL_ITEMS = {
         },
         "actions": ["examine", "read", "drop"]
     },
-    "maintenance_manual": {
-        "id": "maintenance_manual",
-        "name": "Maintenance Manual",
-        "description": "A technical manual covering basic maintenance and emergency procedures.",
-        "category": "Book",
-        "attributes": {
-            "content": MAINTENANCE_MANUAL_CONTENT
-        },
-        "actions": ["examine", "read", "drop"]
-    },
-    "engineering_manual": { # From random event
-        "id": "engineering_manual",
-        "name": "Engineering Manual",
-        "description": "A technical guide for station engineers.",
-        "category": "Book",
-        "attributes": {
-            "content": "ENGINEERING MANUAL抜粋\nChapter 1: Power Systems - Ensure plasma flow is optimal.\nChapter 2: Atmospherics - Check filters regularly.\nChapter 3: Emergency Repairs - Use welding tool for hull breaches."
-        },
-        "actions": ["examine", "read", "drop"]
-    },
-    "navigation_chart": { # From random event
-        "id": "navigation_chart",
-        "name": "Navigation Chart",
-        "description": "A star chart showing nearby systems.",
-        "category": "Book", # Or maybe Special?
-        "attributes": {
-            "content": "STAR CHART - Sector 7G\nKnown Systems: Sol, Alpha Centauri, Proxima Centauri\nNebulae: Eagle Nebula\nAnomalies: Unidentified signal source near Proxima Centauri b."
-        },
-        "actions": ["examine", "read", "drop"]
-    },
     
     # --- Healing Items ---
-    "medkit": { # From random event
+    "medkit": { # From random event / locker
         "id": "medkit",
         "name": "Medkit",
         "description": "A standard first aid kit.",
         "category": "Healing",
-        "attributes": {
-             "heal_effect": "heal_all_limbs_full" # Placeholder logic
-        },
-        "actions": ["examine", "use", "drop"]
-    },
-    "first_aid_kit": { # From locker (same as medkit? let's alias for now)
-        "id": "first_aid_kit",
-        "name": "First Aid Kit",
-        "description": "Basic medical supplies for minor injuries.",
-        "category": "Healing",
-        "attributes": {
-             "heal_effect": "heal_all_limbs_full" # Placeholder logic
-        },
-        "actions": ["examine", "use", "drop"]
-    },
-    "stabilizing_agent": { # From random event
-        "id": "stabilizing_agent",
-        "name": "Stabilizing Agent",
-        "description": "A chemical agent used to stabilize volatile reactions or patients.",
-        "category": "Healing", # Or chemical?
-        "attributes": {
-            "heal_effect": "reduce_damage_types" # Placeholder
-        },
-        "actions": ["examine", "use", "drop"]
-    },
-    "medical_scanner": { # From random event
-        "id": "medical_scanner",
-        "name": "Medical Scanner",
-        "description": "A handheld device for diagnosing injuries and conditions.",
-        "category": "Tool", # Medical Tool
-        "attributes": {},
-        "actions": ["examine", "use", "drop"]
-    },
-     "medical_supply_kit": { # From random event
-        "id": "medical_supply_kit",
-        "name": "Medical Supply Kit",
-        "description": "A kit containing various medical supplies.",
-        "category": "Healing", 
-        "attributes": {
-            "contains": ["medkit", "stabilizing_agent"] # Example attribute
-        },
-        "actions": ["examine", "use", "drop"] # Use could unpack?
-    },
-
-    # --- Utility/Misc Items ---
-    "circuit_board": { # From random event
-        "id": "circuit_board",
-        "name": "Circuit Board",
-        "description": "A standard electronic circuit board. Might be useful for repairs.",
-        "category": "Component",
-        "attributes": {},
-        "actions": ["examine", "drop"]
-    },
-    "battery_pack": { # From random event
-        "id": "battery_pack",
-        "name": "Battery Pack",
-        "description": "A replaceable power pack for various devices.",
-        "category": "Component", # Or Utility?
-        "attributes": {},
-        "actions": ["examine", "use", "drop"] # Use could recharge something?
-    },
-    "power_cell": { # From random event
-        "id": "power_cell",
-        "name": "Power Cell",
-        "description": "A standard power cell. Looks charged.",
-        "category": "Component",
-        "attributes": {},
-        "actions": ["examine", "use", "drop"]
-    },
-     "id_card": { # From random event
-        "id": "id_card",
-        "name": "ID Card",
-        "description": "A standard crew identification card. The name is smudged.",
-        "category": "Special",
-        "attributes": {},
-        "actions": ["examine", "drop"]
-    },
-    "id_card_reader": { # From locker
-        "id": "id_card_reader",
-        "name": "ID Card Reader",
-        "description": "Device to read and potentially modify crew ID cards.",
-        "category": "Tool", # Security Tool
-        "attributes": {},
-        "actions": ["examine", "use", "drop"]
-    },
-    "data_pad": { # From random event
-        "id": "data_pad",
-        "name": "Data Pad",
-        "description": "A portable electronic data storage device.",
-        "category": "Special",
-        "attributes": {},
-        "actions": ["examine", "use", "drop"] # Use could view data?
-    },
-    "oxygen_canister": { # From random event
-        "id": "oxygen_canister",
-        "name": "Oxygen Canister",
-        "description": "A small canister of breathable oxygen.",
-        "category": "Utility",
-        "attributes": {},
-        "actions": ["examine", "use", "drop"] # Use could refill suit/mask?
-    },
-     "radiation_badge": { # From random event
-        "id": "radiation_badge",
-        "name": "Radiation Badge",
-        "description": "Measures cumulative radiation exposure.",
-        "category": "Utility",
-        "attributes": {},
-        "actions": ["examine", "drop"]
-    },
-    "security_pass": { # From random event
-        "id": "security_pass",
-        "name": "Security Pass",
-        "description": "A temporary security pass. Seems expired.",
-        "category": "Special",
-        "attributes": {},
-        "actions": ["examine", "drop"]
-    },
-    "security_keycard": { # From random event
-        "id": "security_keycard",
-        "name": "Security Keycard",
-        "description": "A keycard for accessing secure areas.",
-        "category": "Special", # Or Key?
-        "attributes": {},
-        "actions": ["examine", "use", "drop"]
-    },
-    "communication_device": { # From random event
-        "id": "communication_device",
-        "name": "Communication Device",
-        "description": "A standard handheld communicator.",
-        "category": "Utility",
-        "attributes": {},
-        "actions": ["examine", "use", "drop"]
-    },
-    "emergency_flare": { # From random event
-        "id": "emergency_flare",
-        "name": "Emergency Flare",
-        "description": "A high-intensity flare for signaling.",
-        "category": "Utility",
-        "attributes": {},
-        "actions": ["examine", "use", "drop"]
-    },
-    "encrypted_data_drive": { # From random event
-        "id": "encrypted_data_drive",
-        "name": "Encrypted Data Drive",
-        "description": "A data drive protected by strong encryption.",
-        "category": "Special",
-        "attributes": {},
-        "actions": ["examine", "use", "drop"]
-    },
-    "emergency_beacon": { # From locker
-        "id": "emergency_beacon",
-        "name": "Emergency Beacon",
-        "description": "Distress signal device for emergencies. Transmits on standard frequencies.",
-        "category": "Utility",
         "attributes": {},
         "actions": ["examine", "use", "drop"]
     },
@@ -373,23 +131,32 @@ ALL_ITEMS.update(FOOD_ITEMS)
 # --- Helper Functions ---
 DEFAULT_LOCKER_ITEM_IDS = [
     "welcome_guide",
-    "flashlight",
     "station_map",
     "emergency_rations",
     "basic_tools",
-    "id_card_reader",
-    "portable_scanner",
-    "maintenance_manual",
-    "emergency_beacon",
-    "first_aid_kit",
+    "medkit",
 ]
 
 
+def _default_basic_tools_contents():
+    """Fresh copies of the tools that ship inside a Basic Tools set."""
+    contents = []
+    for tool_id in BASIC_TOOLKIT_TOOL_IDS:
+        if tool_id in ALL_ITEMS:
+            contents.append(copy.deepcopy(ALL_ITEMS[tool_id]))
+    return contents
+
+
 def get_item_definition(item_id):
-    """Returns a copy of the item definition from the master dictionary."""
-    if item_id in ALL_ITEMS:
-        return ALL_ITEMS[item_id].copy() # Return a copy to prevent modification of the original
-    return None
+    """Returns a deep copy of the item definition from the master dictionary."""
+    if item_id not in ALL_ITEMS:
+        return None
+    item = copy.deepcopy(ALL_ITEMS[item_id])
+    if item_id == "basic_tools":
+        attrs = item.setdefault("attributes", {})
+        if "contents" not in attrs:
+            attrs["contents"] = _default_basic_tools_contents()
+    return item
 
 
 def item_quantity(item):
@@ -423,6 +190,16 @@ def format_inventory_label(item):
     return str(item)
 
 
+def _is_non_stackable(item):
+    """Container items must not stack — each has its own contents."""
+    if not isinstance(item, dict):
+        return False
+    if item.get("id") in NON_STACKABLE_ITEM_IDS:
+        return True
+    attrs = item.get("attributes") or {}
+    return "contents" in attrs
+
+
 def add_to_inventory(player_data, item):
     """Add an item to inventory, stacking by id when possible.
 
@@ -430,17 +207,18 @@ def add_to_inventory(player_data, item):
     """
     inventory = player_data.setdefault("inventory", [])
     if not isinstance(item, dict):
-        inventory.append(item)
-        return item
+        return None
 
     item_copy = dict(item)
+    if "attributes" in item and isinstance(item["attributes"], dict):
+        item_copy["attributes"] = copy.deepcopy(item["attributes"])
     add_qty = item_quantity(item_copy)
     item_copy["quantity"] = add_qty
     item_id = item_copy.get("id")
 
-    if item_id:
+    if item_id and not _is_non_stackable(item_copy):
         for existing in inventory:
-            if isinstance(existing, dict) and existing.get("id") == item_id:
+            if isinstance(existing, dict) and existing.get("id") == item_id and not _is_non_stackable(existing):
                 existing["quantity"] = item_quantity(existing) + add_qty
                 return existing
 
@@ -449,14 +227,14 @@ def add_to_inventory(player_data, item):
 
 
 def remove_one_from_inventory(player_data, index):
-    """Remove one unit from inventory at index. Returns the removed unit dict/str or None."""
+    """Remove one unit from inventory at index. Returns the removed unit dict or None."""
     inventory = player_data.get("inventory", [])
     if not (0 <= index < len(inventory)):
         return None
 
     entry = inventory[index]
     if not isinstance(entry, dict):
-        return inventory.pop(index)
+        return None
 
     qty = item_quantity(entry)
     if qty > 1:
@@ -482,16 +260,7 @@ def build_default_locker_inventory(exclude_item_ids=None):
 
 
 def ensure_locker_inventory(player_data):
-    """Return persistent locker inventory, seeding once for older saves."""
-    if "locker_inventory" in player_data and isinstance(player_data["locker_inventory"], list):
-        return player_data["locker_inventory"]
-
-    player_inventory_ids = {
-        item.get("id")
-        for item in player_data.get("inventory", [])
-        if isinstance(item, dict) and item.get("id")
-    }
-    player_data["locker_inventory"] = build_default_locker_inventory(player_inventory_ids)
+    """Return the player's persistent locker inventory."""
     return player_data["locker_inventory"]
 
 
@@ -528,9 +297,6 @@ class ItemInventoryMixin:
             for item in player_inventory:
                 if isinstance(item, dict) and 'name' in item:
                     inventory_list.insert(tk.END, format_inventory_label(item))
-                else:
-                    inventory_list.insert(tk.END, str(item))
-                    inventory_list.itemconfig(tk.END, {'fg': "red"})
 
         # Build buttons before packing so the frame has a real height
         button_frame = tk.Frame(popup, bg="black")
@@ -608,9 +374,6 @@ class ItemInventoryMixin:
             if isinstance(item, dict) and 'name' in item:
                 inventory_index_map.append(inv_idx)
                 valid_item_count += 1
-            elif isinstance(item, str): # Handle legacy strings
-                inventory_index_map.append(inv_idx)
-                valid_item_count += 1
 
         # Check consistency
         if valid_item_count != listbox_item_count and listbox_item_count > 0 and inventory_list.get(0) != "Your inventory is empty.":
@@ -629,7 +392,7 @@ class ItemInventoryMixin:
 
     def examine_item(self, inventory_list, parent_popup):
         """Show the description of the selected item."""
-        item, item_inventory_index = self._get_selected_item_from_inventory(inventory_list)
+        item, _ = self._get_selected_item_from_inventory(inventory_list)
 
         if not item:
             messagebox.showerror("Error", "Could not identify the selected item.", parent=parent_popup)
@@ -679,6 +442,8 @@ class ItemInventoryMixin:
                 callback = lambda idx=item_inventory_index, i=item, ap=panel, mp=main_inventory_popup: self.drink_item_action(i, idx, ap, mp)
             elif action == "eat":
                 callback = lambda idx=item_inventory_index, i=item, ap=panel, mp=main_inventory_popup: self.eat_item_action(i, idx, ap, mp)
+            elif action == "use":
+                callback = lambda idx=item_inventory_index, i=item, ap=panel, mp=main_inventory_popup: self.use_item_action(i, idx, ap, mp)
             else:
                 callback = lambda a=action: messagebox.showinfo("WIP", f"Action '{a}' not yet implemented.", parent=actions_popup)
 
@@ -688,6 +453,300 @@ class ItemInventoryMixin:
 
         cancel_btn = tk.Button(action_frame, text="Cancel", font=("Arial", 12), width=15, command=panel.close)
         cancel_btn.pack(pady=(10,0))
+
+    def use_item_action(self, item, item_inventory_index, actions_popup, main_inventory_popup):
+        """Dispatch Use by item id (medkit heal, basic_tools container, else WIP)."""
+        if not isinstance(item, dict) or "use" not in item.get("actions", []):
+            messagebox.showwarning("Cannot Use", "This item cannot be used.", parent=actions_popup)
+            return
+
+        item_id = item.get("id")
+        if item_id == "medkit":
+            self._use_medkit(item_inventory_index, actions_popup, main_inventory_popup)
+        elif item_id == "basic_tools":
+            self._use_basic_tools(item, actions_popup, main_inventory_popup)
+        else:
+            messagebox.showinfo(
+                "WIP",
+                f"Action 'use' not yet implemented for {item.get('name', 'this item')}.",
+                parent=actions_popup,
+            )
+
+    def _use_medkit(self, item_inventory_index, actions_popup, main_inventory_popup):
+        """Heal injured limbs (+10%) and positive burn/poison/oxygen (-10%); consume on success."""
+        if not (0 <= item_inventory_index < len(self.player_data.get("inventory", []))):
+            messagebox.showerror("Error", "Invalid item index for medkit use.", parent=actions_popup)
+            return
+
+        limbs = self.player_data.setdefault("limbs", {})
+        damage = self.player_data.setdefault("damage", {})
+
+        injured_limbs = [limb for limb, health in limbs.items() if health < 100]
+        injured_damage = [
+            key for key, _label in MEDKIT_DAMAGE_TYPES if damage.get(key, 0) > 0
+        ]
+
+        if not injured_limbs and not injured_damage:
+            messagebox.showinfo(
+                "Medkit",
+                "You are already at full health. The medkit is not needed.",
+                parent=actions_popup,
+            )
+            return
+
+        summary_lines = []
+        for limb in injured_limbs:
+            original = limbs[limb]
+            limbs[limb] = min(100, original + 10)
+            limb_name = limb.replace("_", " ").title()
+            summary_lines.append(f"{limb_name}: {original}% → {limbs[limb]}%")
+
+        for key, label in MEDKIT_DAMAGE_TYPES:
+            if key not in injured_damage:
+                continue
+            original = damage.get(key, 0)
+            damage[key] = max(0, original - 10)
+            summary_lines.append(f"{label}: {original}% → {damage[key]}%")
+
+        remove_one_from_inventory(self.player_data, item_inventory_index)
+
+        if hasattr(actions_popup, "close"):
+            actions_popup.close()
+        else:
+            actions_popup.destroy()
+        if hasattr(main_inventory_popup, "close"):
+            main_inventory_popup.close()
+        else:
+            main_inventory_popup.destroy()
+        self.show_inventory_popup()
+
+        report = "You use the medkit:\n\n" + "\n".join(summary_lines)
+        self.add_note("Used a medkit.")
+        messagebox.showinfo("Medkit", report, parent=self.root)
+
+    def _ensure_basic_tools_contents(self, item):
+        """Return the mutable contents list on a basic_tools inventory entry."""
+        attrs = item.setdefault("attributes", {})
+        if "contents" not in attrs or not isinstance(attrs["contents"], list):
+            attrs["contents"] = _default_basic_tools_contents()
+        return attrs["contents"]
+
+    def _use_basic_tools(self, item, actions_popup, main_inventory_popup):
+        """Open the Basic Tools contents panel (pull out / put back / close)."""
+        if hasattr(actions_popup, "close"):
+            actions_popup.close()
+        else:
+            actions_popup.destroy()
+
+        self._show_basic_tools_panel(item, main_inventory_popup)
+
+    def _show_basic_tools_panel(self, toolkit_item, main_inventory_popup):
+        """UI for viewing and moving tools in/out of a Basic Tools set."""
+        contents = self._ensure_basic_tools_contents(toolkit_item)
+
+        panel, popup = open_modal_panel(self.root, title="Basic Tools")
+
+        title_label = tk.Label(
+            popup, text="Basic Tools", font=("Arial", 18), bg="black", fg="white"
+        )
+        title_label.pack(pady=10)
+
+        hint = tk.Label(
+            popup,
+            text="Tools inside the set:",
+            font=("Arial", 12),
+            bg="black",
+            fg="white",
+        )
+        hint.pack(pady=(0, 5))
+
+        list_frame = tk.Frame(popup, bg="black")
+        scrollbar = tk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        contents_list = tk.Listbox(
+            list_frame,
+            bg="black",
+            fg="white",
+            font=("Arial", 12),
+            width=36,
+            height=10,
+            yscrollcommand=scrollbar.set,
+            exportselection=False,
+        )
+        contents_list.pack(side=tk.LEFT)
+        scrollbar.config(command=contents_list.yview)
+        list_frame.pack(padx=20, pady=5)
+
+        def refresh_contents_list():
+            contents_list.delete(0, tk.END)
+            if not contents:
+                contents_list.insert(tk.END, "(empty)")
+                contents_list.itemconfig(tk.END, {"fg": "gray"})
+            else:
+                for tool in contents:
+                    name = tool.get("name", tool.get("id", "Tool")) if isinstance(tool, dict) else str(tool)
+                    contents_list.insert(tk.END, name)
+
+        refresh_contents_list()
+
+        button_frame = tk.Frame(popup, bg="black")
+        button_frame.pack(pady=10)
+
+        def pull_out():
+            if not contents:
+                messagebox.showinfo("Basic Tools", "The set is empty.", parent=popup)
+                return
+            selection = contents_list.curselection()
+            if not selection or contents_list.get(0) == "(empty)":
+                messagebox.showinfo("Basic Tools", "Select a tool to pull out.", parent=popup)
+                return
+            idx = selection[0]
+            if not (0 <= idx < len(contents)):
+                return
+            tool = contents.pop(idx)
+            add_to_inventory(self.player_data, tool)
+            tool_name = tool.get("name", "tool") if isinstance(tool, dict) else str(tool)
+            self.add_note(f"Pulled the {tool_name} out of the Basic Tools set.")
+            refresh_contents_list()
+
+        def put_back():
+            self._show_put_back_tools_panel(contents, refresh_contents_list, popup)
+
+        def close_box():
+            panel.close()
+            # Refresh inventory so pulled-out tools appear
+            if hasattr(main_inventory_popup, "close"):
+                main_inventory_popup.close()
+            else:
+                try:
+                    main_inventory_popup.destroy()
+                except tk.TclError:
+                    pass
+            self.show_inventory_popup()
+
+        tk.Button(
+            button_frame, text="Pull Out", font=("Arial", 12), width=12, command=pull_out
+        ).pack(side=tk.LEFT, padx=5)
+        tk.Button(
+            button_frame, text="Put Back", font=("Arial", 12), width=12, command=put_back
+        ).pack(side=tk.LEFT, padx=5)
+        tk.Button(
+            button_frame, text="Close", font=("Arial", 12), width=12, command=close_box
+        ).pack(side=tk.LEFT, padx=5)
+
+    def _show_put_back_tools_panel(self, contents, refresh_contents_list, parent_popup):
+        """List inventory tools that can be returned to the Basic Tools set."""
+        present_ids = {
+            tool.get("id")
+            for tool in contents
+            if isinstance(tool, dict) and tool.get("id")
+        }
+        eligible = []
+        inventory = self.player_data.get("inventory", [])
+        for inv_idx, inv_item in enumerate(inventory):
+            if not isinstance(inv_item, dict):
+                continue
+            item_id = inv_item.get("id")
+            if item_id in BASIC_TOOLKIT_TOOL_IDS and item_id not in present_ids:
+                eligible.append((inv_idx, inv_item))
+
+        if not eligible:
+            messagebox.showinfo(
+                "Put Back",
+                "No matching tools in your inventory to put back\n"
+                "(or those slots are already filled).",
+                parent=parent_popup,
+            )
+            return
+
+        panel, popup = open_modal_panel(self.root, title="Put Back Tool")
+
+        tk.Label(
+            popup,
+            text="Select a tool to put back:",
+            font=("Arial", 14),
+            bg="black",
+            fg="white",
+        ).pack(pady=10)
+
+        list_frame = tk.Frame(popup, bg="black")
+        scrollbar = tk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        tool_list = tk.Listbox(
+            list_frame,
+            bg="black",
+            fg="white",
+            font=("Arial", 12),
+            width=36,
+            height=8,
+            yscrollcommand=scrollbar.set,
+            exportselection=False,
+        )
+        tool_list.pack(side=tk.LEFT)
+        scrollbar.config(command=tool_list.yview)
+        list_frame.pack(padx=20, pady=5)
+
+        for _inv_idx, inv_item in eligible:
+            tool_list.insert(tk.END, format_inventory_label(inv_item))
+
+        def confirm_put_back():
+            selection = tool_list.curselection()
+            if not selection:
+                messagebox.showinfo("Put Back", "Select a tool first.", parent=popup)
+                return
+            chosen_idx = selection[0]
+            if not (0 <= chosen_idx < len(eligible)):
+                return
+            inv_idx, inv_item = eligible[chosen_idx]
+            # Re-validate slot still free and inventory index still valid
+            present_now = {
+                tool.get("id")
+                for tool in contents
+                if isinstance(tool, dict) and tool.get("id")
+            }
+            item_id = inv_item.get("id")
+            if item_id in present_now:
+                messagebox.showinfo(
+                    "Put Back",
+                    "That tool slot is already filled.",
+                    parent=popup,
+                )
+                panel.close()
+                return
+            if not (0 <= inv_idx < len(self.player_data.get("inventory", []))):
+                messagebox.showerror("Error", "Item no longer in inventory.", parent=popup)
+                panel.close()
+                return
+            current = self.player_data["inventory"][inv_idx]
+            if not isinstance(current, dict) or current.get("id") != item_id:
+                messagebox.showerror("Error", "Inventory changed. Try again.", parent=popup)
+                panel.close()
+                return
+
+            removed = remove_one_from_inventory(self.player_data, inv_idx)
+            if removed is None:
+                messagebox.showerror("Error", "Could not remove tool from inventory.", parent=popup)
+                panel.close()
+                return
+            # Store a clean single tool dict in the box (no stack quantity)
+            tool_entry = copy.deepcopy(removed) if isinstance(removed, dict) else removed
+            if isinstance(tool_entry, dict):
+                tool_entry.pop("quantity", None)
+            contents.append(tool_entry)
+            tool_name = tool_entry.get("name", "tool") if isinstance(tool_entry, dict) else str(tool_entry)
+            self.add_note(f"Put the {tool_name} back into the Basic Tools set.")
+            panel.close()
+            refresh_contents_list()
+
+        btn_frame = tk.Frame(popup, bg="black")
+        btn_frame.pack(pady=10)
+        tk.Button(
+            btn_frame, text="Put Back", font=("Arial", 12), width=12, command=confirm_put_back
+        ).pack(side=tk.LEFT, padx=5)
+        tk.Button(
+            btn_frame, text="Cancel", font=("Arial", 12), width=12, command=panel.close
+        ).pack(side=tk.LEFT, padx=5)
 
     def read_item_action(self, item, actions_popup):
         """Action handler for reading an item. Displays content in an overlay."""

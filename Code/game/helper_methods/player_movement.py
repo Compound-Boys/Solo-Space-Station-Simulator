@@ -97,9 +97,11 @@ class PlayerMovementMixin:
             messagebox.showerror("Error", "You can't go that way!")
             self.player_data["location"]["x"] = x - (1 if direction == "north" else -1 if direction == "south" else 0)
             self.player_data["location"]["y"] = y - (1 if direction == "east" else -1 if direction == "west" else 0)
+            return
 
-        # NPCs now roam/leave/return on their own master-timer cadence (see
-        # main.py's tick_master_clock), independently of player movement.
+        # NPCs take a step whenever the player does; idle timer resets.
+        if hasattr(self, "advance_npcs_from_player_move"):
+            self.advance_npcs_from_player_move()
 
         maybe_trigger_hallway_event(self)
 

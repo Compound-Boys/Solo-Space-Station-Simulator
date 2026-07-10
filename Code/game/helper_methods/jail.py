@@ -40,11 +40,9 @@ def security_hallway_location():
 
 
 def _ensure_jail_fields(member):
-    """Back-compat migration for saves made before jail existed."""
+    """Ensure jail / warrant / fine keys exist on a crew member."""
     member.setdefault("in_jail", False)
     member.setdefault("jail_release_at_seconds", None)
-    # Drop the old wall-clock field from pre-refactor saves; it's unused now.
-    member.pop("jail_release_at", None)
     member.setdefault("warrant", False)
     member.setdefault("warrant_reason", "")
     member.setdefault("fine_amount", 0)

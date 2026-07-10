@@ -12,7 +12,6 @@ from game.helper_methods.stock_market import (
 )
 from game.helper_methods.game import Game
 from game.helper_methods.npc_movement import (
-    ensure_npc_movement_fields,
     roll_departures,
     step_wanderers,
 )
@@ -20,7 +19,6 @@ from game.helper_methods.player_movement import PlayerMovementMixin
 from game.helper_methods.random_events import ensure_job_event
 from game.helper_methods.jail import (
     arrest_member,
-    ensure_crew_jail_fields,
     fined_in_room,
     has_fine,
     is_jailed,
@@ -63,7 +61,6 @@ from game.helper_methods.alcohol_helper import (
     apply_alcohol_tick,
 )
 from game.helper_methods.ui_panels import (
-    open_modal_panel,
     configure_message_buffer,
     report_message,
 )
@@ -86,14 +83,14 @@ SPECIAL_ROOM_CLASSES = {
 SPECIAL_ROOM_TILES = donut.SPECIAL_ROOM_TILES
 SPECIAL_ROOM_HALLWAY = donut.SPECIAL_ROOM_HALLWAY
 
-# How often (master-timer seconds) NPCs take a wandering step / roll a
-# departure from their post, independent of player movement.
-NPC_STEP_INTERVAL_SECONDS = 10
+# Real-time idle NPC cadence while the player stands still (not master clock).
+NPC_IDLE_INTERVAL_MIN = 3.0
+NPC_IDLE_INTERVAL_MAX = 5.0
+NPC_IDLE_POLL_SECONDS = 0.5
 
-# Master clock poll interval (real seconds). Kept short so the 10s NPC
-# cadence and 300s stock market cadence are checked with good accuracy;
-# power/oxygen/alcohol formulas are linear in elapsed time so this doesn't
-# change their balance.
+# Master clock poll interval (real seconds). Kept short so the 300s stock
+# market cadence is checked with good accuracy; power/oxygen/alcohol formulas
+# are linear in elapsed time so this doesn't change their balance.
 MASTER_TICK_INTERVAL_SECONDS = 5
 
 class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
@@ -113,6 +110,13 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
 
         self.master_timer_running = False
         self.master_timer_id = None
+
+        self.time_since_player_moved = 0.0
+        self.npc_idle_threshold_seconds = random.uniform(
+            NPC_IDLE_INTERVAL_MIN, NPC_IDLE_INTERVAL_MAX
+        )
+        self.npc_idle_timer_running = False
+        self.npc_idle_timer_id = None
 
         self.market_engine = StockMarketEngine()
         
@@ -149,7 +153,6 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
             "jail_release_at_seconds": None,
             "station_power": default_station_power(),
             "game_clock": default_game_clock(),
-            "npc_step_at_seconds": NPC_STEP_INTERVAL_SECONDS,
             "notes": []
         }
 
@@ -168,8 +171,6 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
     def _load_crew_from_player_data(self):
         """Restore crew list from loaded player_data."""
         self.station_crew = self.player_data.get("station_crew", [])
-        ensure_npc_movement_fields(self.station_crew)
-        ensure_crew_jail_fields(self.player_data, self.station_crew)
 
     def _save_game(self):
         """Update market state, sync crew, and persist the save file."""
@@ -178,14 +179,15 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         Game.save_game(self.player_data)
 
     def _ensure_game_running(self):
-        """Start the master clock timer if it isn't running."""
+        """Start the master clock and NPC idle timers if they aren't running."""
         if not self.master_timer_running:
             self.start_master_timer()
+        self.start_npc_idle_timer()
 
     def _enter_special_room(self, room_class):
         """Create a special room UI instance from a room class."""
         self.player_data["ship_map"] = self.ship_map
-        self.current_room = room_class(
+        room_class(
             self.root, self.player_data, self.station_crew, self.update_player_data_from_room
         )
 
@@ -199,6 +201,7 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
     def on_closing(self):
         """Handle application closing"""
         self.stop_master_timer()
+        self.stop_npc_idle_timer()
 
         if self.player_data and self.player_data.get("name"):
             self._save_game()
@@ -211,23 +214,81 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         if self.master_timer_id:
             self.root.after_cancel(self.master_timer_id)
             self.master_timer_id = None
+        self.stop_npc_idle_timer()
 
     def start_master_timer(self):
         """Start the single timer that drives every timed system in the game."""
         if not self.master_timer_running:
-            print("Starting master clock timer...")
             self.master_timer_running = True
             self.tick_master_clock()
-        else:
-            print("Master clock timer already running")
+        self.start_npc_idle_timer()
+
+    def stop_npc_idle_timer(self):
+        """Stop the dedicated NPC idle poll if it's running."""
+        self.npc_idle_timer_running = False
+        if self.npc_idle_timer_id:
+            try:
+                self.root.after_cancel(self.npc_idle_timer_id)
+            except tk.TclError:
+                pass
+            self.npc_idle_timer_id = None
+
+    def start_npc_idle_timer(self):
+        """Start the real-time idle poll that advances NPCs while the player stands still."""
+        if self.npc_idle_timer_running:
+            return
+        self.npc_idle_timer_running = True
+        self.tick_npc_idle()
+
+    def _roll_npc_idle_threshold(self):
+        self.npc_idle_threshold_seconds = random.uniform(
+            NPC_IDLE_INTERVAL_MIN, NPC_IDLE_INTERVAL_MAX
+        )
+
+    def _reset_player_move_idle_timer(self):
+        """Restart the stand-still countdown after a player hallway move."""
+        self.time_since_player_moved = 0.0
+        self._roll_npc_idle_threshold()
+
+    def _advance_npcs_one_step(self):
+        """One departure roll + one wander/goal step for all eligible NPCs."""
+        roll_departures(self.station_crew)
+        step_wanderers(
+            self.station_crew,
+            self.ship_map,
+            game=self,
+            player_data=self.player_data,
+        )
+
+    def advance_npcs_from_player_move(self):
+        """Advance NPCs when the player takes a hallway step; reset idle timer."""
+        self._advance_npcs_one_step()
+        self._reset_player_move_idle_timer()
+
+    def tick_npc_idle(self):
+        """Accumulate time_since_player_moved; advance NPCs when the idle threshold hits."""
+        if not self.npc_idle_timer_running:
+            return
+
+        self.time_since_player_moved += NPC_IDLE_POLL_SECONDS
+        if self.time_since_player_moved >= self.npc_idle_threshold_seconds:
+            try:
+                self._advance_npcs_one_step()
+            except Exception as e:
+                print(f"Error advancing NPCs on idle: {e}")
+            self.time_since_player_moved = 0.0
+            self._roll_npc_idle_threshold()
+
+        self.npc_idle_timer_id = self.root.after(
+            int(NPC_IDLE_POLL_SECONDS * 1000), self.tick_npc_idle
+        )
 
     def tick_master_clock(self):
         """Advance the universal master game clock and every system tied to it.
 
-        This is the single tick that replaces the old separate battery
-        `root.after` loop and stock-market background thread: power/oxygen/
-        alcohol, jail releases, the stock market, and NPC wandering all read
-        their "now" from the same master timer (see game_clock.py).
+        Power/oxygen/alcohol, jail releases, and the stock market read their
+        "now" from the same master timer (see game_clock.py). NPC wandering
+        uses a separate real-time idle timer.
         """
         if not self.master_timer_running:
             return
@@ -254,7 +315,6 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
                 print(f"Error ticking jail releases: {e}")
 
             self._tick_stock_market()
-            self._tick_npc_wandering(elapsed_seconds)
         except Exception as e:
             print(f"Error in master clock tick: {e}")
 
@@ -311,24 +371,6 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
                 self.market_engine.sync_to_player_data(self.player_data)
         except Exception as e:
             print(f"Error ticking stock market: {e}")
-
-    def _tick_npc_wandering(self, elapsed_seconds):
-        """Roll NPC departures/wandering on a fixed master-timer cadence.
-
-        Catches up (loops) if more than one interval has passed since the
-        last check, e.g. right after loading a save.
-        """
-        next_step_at = self.player_data.get("npc_step_at_seconds", NPC_STEP_INTERVAL_SECONDS)
-        while elapsed_seconds >= next_step_at:
-            roll_departures(self.station_crew)
-            step_wanderers(
-                self.station_crew,
-                self.ship_map,
-                game=self,
-                player_data=self.player_data,
-            )
-            next_step_at += NPC_STEP_INTERVAL_SECONDS
-        self.player_data["npc_step_at_seconds"] = next_step_at
 
     def check_life_support_status(self, delta_seconds, elapsed_seconds):
         """Check life support status and apply oxygen damage to player and NPCs if necessary"""
@@ -401,8 +443,9 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
             self.root.unbind_all("<MouseWheel>")
             self.root.mousewheel_bound = False
         
-        # Stop the master clock when returning to main menu
+        # Stop timers when returning to main menu
         self.stop_master_timer()
+        self.stop_npc_idle_timer()
         
         for widget in self.root.winfo_children():
             widget.destroy()
@@ -791,7 +834,7 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         load_label = tk.Label(self.root, text="Load Game", font=("Arial", 24), bg="black", fg="white")
         load_label.pack(pady=30)
         
-        saves_path = os.path.join(self.base_path, "saves") # Updated path
+        saves_path = os.path.join(self.base_path, "saves")
         os.makedirs(saves_path, exist_ok=True)
         
         save_files = [f for f in os.listdir(saves_path) if f.endswith(".json")]
@@ -898,9 +941,6 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
                 self.enter_special_room_at("Quarters", donut.QUARTERS_KEY)
             else:
                 self.show_hallway()
-        else:
-            self.player_data["location"] = dict(donut.QUARTERS_LOCATION)
-            self.enter_special_room_at("Quarters", donut.QUARTERS_KEY)
         
         return True
 

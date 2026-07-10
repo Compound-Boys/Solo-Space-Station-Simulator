@@ -387,6 +387,8 @@ class CharacterCreation:
                 # wandering the hallway ring rather than parked in quarters.
                 "location": pick_random_hallway_location(),
                 "room_visit_remaining": 0,
+                "npc_goal": None,
+                "npc_goal_room_key": None,
                 "limbs": {
                     "left_arm": 100, "right_arm": 100, "left_leg": 100,
                     "right_leg": 100, "chest": 100, "head": 100,
@@ -417,6 +419,8 @@ class CharacterCreation:
                 "location": location_for_post("Captain"),
                 "on_duty": True,
                 "room_visit_remaining": 0,
+                "npc_goal": None,
+                "npc_goal_room_key": None,
                 "limbs": {
                     "left_arm": 100, "right_arm": 100, "left_leg": 100,
                     "right_leg": 100, "chest": 100, "head": 100,
@@ -431,7 +435,6 @@ class CharacterCreation:
                 "permissions": permissions_for_job("Captain"),
             }
             station_crew.append(captain_data)
-            print(f"Generated NPC: {captain_name} (Captain)")
 
             vacant_roles = [
                 j for j in department_heads if j not in (job, "Captain")
@@ -440,7 +443,6 @@ class CharacterCreation:
             for i in range(assistant_count):
                 npc_name = _pick_npc_name(f"StaffAssistant{i + 1}")
                 station_crew.append(_make_staff_assistant(npc_name))
-                print(f"Generated NPC: {npc_name} (Staff Assistant)")
         else:
             for npc_job, data in department_heads.items():
                 if npc_job != job:  # If the player didn't take this job
@@ -454,6 +456,8 @@ class CharacterCreation:
                         "location": location_for_post(npc_job),
                         "on_duty": True,
                         "room_visit_remaining": 0,
+                        "npc_goal": None,
+                        "npc_goal_room_key": None,
                         "limbs": {
                             "left_arm": 100, "right_arm": 100, "left_leg": 100,
                             "right_leg": 100, "chest": 100, "head": 100,
@@ -480,13 +484,11 @@ class CharacterCreation:
                         npc_data["permissions"]["botany_station"] = True
 
                     station_crew.append(npc_data)
-                    print(f"Generated NPC: {npc_name} ({npc_job})")
 
             # Non-HoP games also get 2 Staff Assistants
             for i in range(2):
                 npc_name = _pick_npc_name(f"StaffAssistant{i + 1}")
                 station_crew.append(_make_staff_assistant(npc_name))
-                print(f"Generated NPC: {npc_name} (Staff Assistant)")
         # --- End NPC Generation ---
 
         if "stock_market" not in self.player_data:

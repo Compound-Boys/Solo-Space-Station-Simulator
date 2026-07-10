@@ -24,15 +24,8 @@ def default_game_clock():
     }
 
 
-def ensure_game_clock(player_data):
-    """Back-compat migration: add a fresh game_clock if one is missing."""
-    if "game_clock" not in player_data or not isinstance(player_data.get("game_clock"), dict):
-        player_data["game_clock"] = default_game_clock()
-    else:
-        player_data["game_clock"].setdefault("elapsed_seconds", 0.0)
-        player_data["game_clock"].setdefault(
-            "last_real_time", datetime.datetime.now().isoformat()
-        )
+def get_game_clock(player_data):
+    """Return the player_data game_clock block (always present on current saves)."""
     return player_data["game_clock"]
 
 
@@ -41,7 +34,7 @@ def advance(player_data):
 
     Returns (elapsed_seconds, delta_seconds).
     """
-    clock = ensure_game_clock(player_data)
+    clock = get_game_clock(player_data)
 
     now = datetime.datetime.now()
     try:
@@ -58,8 +51,7 @@ def advance(player_data):
 
 def get_elapsed_seconds(player_data):
     """Return the current master timer value (seconds since new game)."""
-    clock = ensure_game_clock(player_data)
-    return clock.get("elapsed_seconds", 0.0)
+    return get_game_clock(player_data).get("elapsed_seconds", 0.0)
 
 
 def format_elapsed(seconds):
@@ -73,10 +65,3 @@ def format_elapsed(seconds):
     if minutes > 0:
         return f"{minutes}m {secs}s"
     return f"{secs}s"
-
-
-def seconds_remaining(end_at_seconds, elapsed_seconds):
-    """Return time left until an absolute master-timer deadline (never negative)."""
-    if end_at_seconds is None:
-        return 0
-    return max(0, end_at_seconds - elapsed_seconds)
