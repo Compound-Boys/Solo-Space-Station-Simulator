@@ -28,6 +28,7 @@ from game.helper_methods.jail import (
     is_jailed,
     jail_seconds_remaining,
     tick_jail_releases,
+    wanted_in_room,
 )
 from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany, Quarters
 from game.objects.items import ItemInventoryMixin
@@ -899,23 +900,46 @@ class SpaceStationGame(ItemInventoryMixin):
             and npc.get("warrant", False)
             and not is_jailed(npc)
         ):
-            self._offer_player_arrest_choice(npc)
+            self._offer_player_arrest_choice(npc, place="hall")
             return True
 
         return False
 
-    def _offer_player_arrest_choice(self, npc):
-        """Let a Security Guard player Arrest or Let Go a wanted hallway passerby."""
+    def _scan_room_for_warrants(self, room_key):
+        """As a Security Guard player, offer Arrest/Let Go for each wanted person in the room."""
+        if self.player_data.get("job") != "Security Guard":
+            return
+        if is_jailed(self.player_data):
+            return
+
+        for npc in list(wanted_in_room(room_key, self.player_data, self.station_crew)):
+            if is_jailed(npc) or not npc.get("warrant", False):
+                continue
+            self._offer_player_arrest_choice(npc, place="room")
+
+    def _offer_player_arrest_choice(self, npc, place="hall"):
+        """Let a Security Guard player Arrest or Let Go a wanted crew member."""
         name = npc.get("name", "A crew member")
         job = npc.get("job", "Crew")
         bribe_amount = None
         if random.random() < 0.50:
             bribe_amount = random.randint(5, 50)
 
-        lines = [
-            f"You stop {name} ({job}) in the hall.",
-            "They have an active warrant.",
-        ]
+        if place == "room":
+            lines = [
+                f"You scan the room and spot {name} ({job}).",
+                "They have an active warrant.",
+            ]
+            arrest_reason = f"You arrest {name} in the room and send them to jail."
+            let_go_note = f"Let wanted crew member {name} go after scanning a room."
+        else:
+            lines = [
+                f"You stop {name} ({job}) in the hall.",
+                "They have an active warrant.",
+            ]
+            arrest_reason = f"You arrest {name} in the hallway and send them to jail."
+            let_go_note = f"Let wanted crew member {name} go in the hallway."
+
         if bribe_amount is not None:
             lines.append(
                 f'{name} leans in and whispers, "Look the other way and I\'ll make it '
@@ -927,7 +951,7 @@ class SpaceStationGame(ItemInventoryMixin):
         if choice == "arrest":
             arrest_member(
                 npc,
-                reason=f"You arrest {name} in the hallway and send them to jail.",
+                reason=arrest_reason,
                 game=self,
                 is_player=False,
                 show_message=True,
@@ -937,19 +961,25 @@ class SpaceStationGame(ItemInventoryMixin):
         # Let Go
         if bribe_amount is not None:
             self.player_data["credits"] = self.player_data.get("credits", 0) + bribe_amount
+            npc["warrant"] = False
             messagebox.showinfo(
                 "Let Go",
-                f"You look the other way. {name} slips you {bribe_amount} credits and hurries off.",
+                f"You look the other way. {name} slips you {bribe_amount} credits and hurries off.\n"
+                "Their warrant has been quietly cleared.",
                 parent=self.root,
             )
-            self.add_note(f"Accepted a {bribe_amount}-credit bribe from {name} and let them go.")
+            self.add_note(
+                f"Accepted a {bribe_amount}-credit bribe from {name}, cleared their warrant, and let them go."
+            )
         else:
             messagebox.showinfo(
                 "Let Go",
-                f"You wave {name} on. They disappear down the hallway.",
+                f"You wave {name} on. They disappear down the hallway."
+                if place == "hall"
+                else f"You look the other way. {name} stays in the room.",
                 parent=self.root,
             )
-            self.add_note(f"Let wanted crew member {name} go in the hallway.")
+            self.add_note(let_go_note)
 
     def _ask_arrest_or_let_go(self, message):
         """Modal with Arrest / Let Go. Returns 'arrest' or 'let_go'."""
@@ -1196,6 +1226,14 @@ class SpaceStationGame(ItemInventoryMixin):
 
         x_str, y_str = target_key.split(",")
         self.player_data["location"] = {"x": int(x_str), "y": int(y_str)}
+
+        # Security Guard players scan the room for warrants on entry.
+        if (
+            self.player_data.get("job") == "Security Guard"
+            and not is_jailed(self.player_data)
+        ):
+            self._scan_room_for_warrants(target_key)
+
         self._instantiate_special_room(room_name)
 
     def update_player_data_from_room(self, updated_player_data, updated_station_crew=None):

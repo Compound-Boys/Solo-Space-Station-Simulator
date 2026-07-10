@@ -87,6 +87,15 @@ def members_in_room(station_crew, room_key, *, exclude=None):
     return found
 
 
+def wanted_in_room(room_key, player_data, station_crew, *, exclude=None):
+    """Return wanted, non-jailed NPCs currently in room_key (excludes player)."""
+    wanted = []
+    for npc in members_in_room(station_crew, room_key, exclude=exclude):
+        if npc.get("warrant", False):
+            wanted.append(npc)
+    return wanted
+
+
 def arrest_member(member, *, reason="", game=None, is_player=False, show_message=True):
     """Send a crew member to jail for the default sentence.
 
