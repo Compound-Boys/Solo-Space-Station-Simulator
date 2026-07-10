@@ -7,12 +7,13 @@ from tkinter import messagebox
 class ModalPanel:
     """Full-size overlay Frame that replaces a Toplevel popup."""
 
-    def __init__(self, parent, title=None):
+    def __init__(self, parent, title=None, on_close=None):
         self.parent = parent
         self.frame = tk.Frame(parent, bg="black")
         self.frame.place(relx=0, rely=0, relwidth=1, relheight=1)
         self.frame.lift()
         self._closed = False
+        self._on_close = on_close
         self._tk_destroy = self.frame.destroy
         if title:
             try:
@@ -36,6 +37,8 @@ class ModalPanel:
             self._tk_destroy()
         except tk.TclError:
             pass
+        if self._on_close is not None:
+            self._on_close()
 
     # Compatibility with code that called popup.destroy()
     def destroy(self):
@@ -90,32 +93,98 @@ class ModalPanel:
         return self.frame.cget(key)
 
 
-def open_modal_panel(parent, title=None, geometry=None):
+def open_modal_panel(parent, title=None, geometry=None, on_close=None):
     """
     Place a full-size black Frame over parent.
     Returns (panel, content_frame) where content_frame is where widgets should be packed.
     panel.destroy() / panel.close() removes only the overlay.
     content_frame.destroy() is redirected to panel.close() for drop-in Toplevel replacement.
     geometry is accepted for API compatibility but ignored (overlay fills parent).
+    on_close is called after the overlay is destroyed.
     """
     del geometry  # overlays fill the parent; size is not applied to a separate window
-    panel = ModalPanel(parent, title=title)
+    panel = ModalPanel(parent, title=title, on_close=on_close)
     # Allow existing popup.destroy() call sites to close the overlay cleanly
     panel.frame.destroy = panel.close
     return panel, panel.frame
 
 
-def open_sub_screen(parent, title, on_close):
+def refocus_window(window, delay_ms=20):
+    """Lift and focus a window after dialogs (safe if already destroyed)."""
+    try:
+        window.after(delay_ms, window.lift)
+        window.focus_force()
+    except tk.TclError:
+        pass
+
+
+def patch_destroy_cleanup(widget, cleanup_fn):
+    """Wrap widget.destroy so cleanup_fn runs first."""
+    orig_destroy = widget.destroy
+
+    def _destroy_and_cleanup():
+        try:
+            cleanup_fn()
+        except tk.TclError:
+            pass
+        orig_destroy()
+
+    widget.destroy = _destroy_and_cleanup
+    return widget
+
+
+def bind_mousewheel(widget, handler):
+    """Bind MouseWheel on widget and unbind automatically on destroy."""
+    widget.bind("<MouseWheel>", handler)
+
+    def cleanup():
+        try:
+            widget.unbind("<MouseWheel>")
+        except tk.TclError:
+            pass
+
+    patch_destroy_cleanup(widget, cleanup)
+    return cleanup
+
+
+def make_scrollable_frame(parent, *, bg="black"):
     """
-    Clear parent and prepare it for a full-screen in-window UI.
-    Same pattern as open_room_in_main_window; caller restores previous UI in on_close.
+    Build a Canvas + Scrollbar + inner Frame.
+    Returns (outer_frame, canvas, inner_frame, cleanup).
+    Pack/grid outer_frame yourself; call cleanup() when tearing down if needed
+    (also runs automatically if you patch_destroy_cleanup on a parent overlay).
     """
-    for widget in parent.winfo_children():
-        widget.destroy()
-    parent.title(title)
-    parent.configure(bg="black")
-    parent.protocol("WM_DELETE_WINDOW", on_close)
-    return parent
+    outer = tk.Frame(parent, bg=bg)
+    canvas = tk.Canvas(outer, bg=bg, highlightthickness=0)
+    scrollbar = tk.Scrollbar(outer, orient=tk.VERTICAL, command=canvas.yview)
+    inner = tk.Frame(canvas, bg=bg)
+    canvas_window = canvas.create_window((0, 0), window=inner, anchor="nw")
+    canvas.configure(yscrollcommand=scrollbar.set)
+
+    def _on_inner_configure(_event=None):
+        canvas.configure(scrollregion=canvas.bbox("all"))
+
+    def _on_canvas_configure(event):
+        canvas.itemconfig(canvas_window, width=event.width)
+
+    inner.bind("<Configure>", _on_inner_configure)
+    canvas.bind("<Configure>", _on_canvas_configure)
+
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    def _on_mousewheel(event):
+        canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    canvas.bind("<MouseWheel>", _on_mousewheel)
+
+    def cleanup():
+        try:
+            canvas.unbind("<MouseWheel>")
+        except tk.TclError:
+            pass
+
+    return outer, canvas, inner, cleanup
 
 
 _KIND_RANK = {"info": 0, "warning": 1, "error": 2}

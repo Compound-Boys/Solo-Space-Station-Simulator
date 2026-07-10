@@ -1,8 +1,7 @@
 import tkinter as tk
 from tkinter import messagebox
 
-from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
-from game.helper_methods.ui_panels import open_modal_panel
+from game.helper_methods.ui_panels import open_modal_panel, refocus_window
 from game.helper_methods.jail import (
     add_jail_time,
     format_jail_time,
@@ -11,56 +10,40 @@ from game.helper_methods.jail import (
     release_member,
     warrant_reason_text,
 )
-from game.objects.items import ItemInventoryMixin
 from game.special_rooms.shared import (
-    add_note,
+    PLAYER_CREW_INDEX,
+    SpecialRoomBase,
+    build_labeled_listbox,
     build_npc_contact_section,
-    build_room_shell,
+    clear_button_frame,
     leave_room,
-    open_room_in_main_window,
-    pack_character_sheet_button,
+    member_for_crew_index,
+    refresh_indexed_listbox,
     show_crew_manifest as render_crew_manifest,
-    try_leave_through_door,
-    show_station_menu as render_station_menu,
 )
-from game.maps.donut import SECURITY_KEY as DOOR_KEY
+from game.maps.donut import SECURITY_KEY
 
-class Security(ItemInventoryMixin):
-    def __init__(self, parent_window, player_data, station_crew, return_callback):
-        self.parent_window = parent_window
-        self.player_data = player_data
-        self.station_crew = station_crew
-        self.return_callback = return_callback
 
-        self.security_window = open_room_in_main_window(
-            parent_window, "Security", player_data, station_crew, return_callback
-        )
-        self.root = self.security_window
-        _, self.button_frame = build_room_shell(
-            self.security_window,
-            self.player_data,
-            "Station Security Office",
-            "The security office is filled with monitoring equipment. Screens showing various parts of the station line the walls. A few security officers monitor the feeds, while weapon lockers are secured along one wall.",
-        )
+class Security(SpecialRoomBase):
+    ROOM_TITLE = "Security"
+    ROOM_HEADING = "Station Security Office"
+    ROOM_DESCRIPTION = (
+        "The security office is filled with monitoring equipment. Screens showing various parts of "
+        "the station line the walls. A few security officers monitor the feeds, while weapon lockers "
+        "are secured along one wall."
+    )
+    DOOR_KEY = SECURITY_KEY
+    WINDOW_ATTR = "security_window"
 
-        self._build_station_menu()
+    def station_entries(self):
+        return [{
+            "label": "Enter Security Station",
+            "command": self.access_security_station,
+        }]
 
-        pack_character_sheet_button(self.security_window, self.player_data, self)
-
-        # Exit button
-        exit_btn = tk.Button(self.security_window, text="Exit Room", font=("Arial", 14), width=15, command=self.on_closing)
-        exit_btn.pack(pady=20)
-
-    def add_note(self, text):
-        add_note(self.player_data, text)
-    
     def show_room_options(self):
-        """Show regular room options that all players can access"""
-        # Clear existing buttons
-        for widget in self.button_frame.winfo_children():
-            widget.destroy()
-            
-        # Talk to guard option (or "Call" them if they've stepped away)
+        clear_button_frame(self.button_frame)
+
         build_npc_contact_section(
             self.button_frame,
             self.player_data,
@@ -73,15 +56,11 @@ class Security(ItemInventoryMixin):
             absent_flavor="The security guard has stepped away from the office.",
         )
 
-        if can_control_door(self.player_data, DOOR_KEY):
-            back_btn = tk.Button(self.button_frame, text="Back to Station Menu", font=("Arial", 14), width=20, 
-                               command=self.show_station_menu)
-            back_btn.pack(pady=10)
-    
+        self.pack_back_to_station_menu()
+
     def talk_to_guard(self):
         from game.helper_methods.jail import has_fine, is_jailed, resolve_fine_with_guard
 
-        # Paying an unpaid fine takes priority when talking to the on-duty guard.
         if has_fine(self.player_data) and not is_jailed(self.player_data):
             result = resolve_fine_with_guard(
                 self.player_data,
@@ -91,10 +70,8 @@ class Security(ItemInventoryMixin):
                 guard_name="The security guard",
             )
             if result == "jailed":
-                # Player can't leave Security while jailed; refresh room options.
                 self.show_room_options()
-            self.security_window.after(20, self.security_window.lift)
-            self.security_window.focus_force()
+            refocus_window(self.security_window)
             return
 
         self.security_window.after(
@@ -105,13 +82,11 @@ class Security(ItemInventoryMixin):
                 parent=self.security_window,
             ),
         )
-        self.security_window.after(20, self.security_window.lift)
-        self.security_window.focus_force()
-    
+        refocus_window(self.security_window)
+
     def access_security_station(self):
         """Show security station options for authorized personnel"""
-        for widget in self.button_frame.winfo_children():
-            widget.destroy()
+        clear_button_frame(self.button_frame)
 
         manifest_btn = tk.Button(
             self.button_frame,
@@ -149,11 +124,9 @@ class Security(ItemInventoryMixin):
         )
         back_btn.pack(pady=10)
 
-        self.security_window.after(20, self.security_window.lift)
-        self.security_window.focus_force()
+        refocus_window(self.security_window)
 
     def view_crew_manifest(self):
-        """Display the crew manifest (same logic as Bridge)"""
         render_crew_manifest(self.security_window, self.player_data, self.station_crew)
 
     def show_issue_warrant(self):
@@ -166,33 +139,9 @@ class Security(ItemInventoryMixin):
         )
         title_label.pack(pady=10)
 
-        list_outer = tk.LabelFrame(
-            popup, text="Crew", font=("Arial", 12), bg="black", fg="white"
-        )
-        list_outer.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        _, crew_listbox = build_labeled_listbox(popup, label="Crew")
 
-        scrollbar = tk.Scrollbar(list_outer, orient=tk.VERTICAL)
-        crew_listbox = tk.Listbox(
-            list_outer,
-            bg="black",
-            fg="white",
-            font=("Arial", 12),
-            width=48,
-            height=12,
-            exportselection=False,
-            yscrollcommand=scrollbar.set,
-        )
-        scrollbar.config(command=crew_listbox.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        crew_listbox.pack(side=tk.LEFT, pady=5, padx=5, fill=tk.BOTH, expand=True)
-
-        PLAYER_INDEX = -1
         member_indices = []
-
-        def _member_for_index(crew_index):
-            if crew_index == PLAYER_INDEX:
-                return self.player_data
-            return self.station_crew[crew_index]
 
         def _format_row(member, is_player=False):
             name = member.get("name", "Unknown")
@@ -207,19 +156,14 @@ class Security(ItemInventoryMixin):
             return f"{name} ({job}){you}{wanted}{fined}"
 
         def refresh_list(preserve_index=None):
-            crew_listbox.delete(0, tk.END)
-            member_indices.clear()
-
-            member_indices.append(PLAYER_INDEX)
-            crew_listbox.insert(tk.END, _format_row(self.player_data, is_player=True))
-
+            rows = [
+                (PLAYER_CREW_INDEX, _format_row(self.player_data, is_player=True)),
+            ]
             for crew_index, npc in enumerate(self.station_crew):
-                member_indices.append(crew_index)
-                crew_listbox.insert(tk.END, _format_row(npc))
-
-            if preserve_index is not None and 0 <= preserve_index < len(member_indices):
-                crew_listbox.selection_set(preserve_index)
-                crew_listbox.activate(preserve_index)
+                rows.append((crew_index, _format_row(npc)))
+            refresh_indexed_listbox(
+                crew_listbox, member_indices, rows, preserve_index=preserve_index
+            )
 
         def _selected_member():
             selection = crew_listbox.curselection()
@@ -232,7 +176,9 @@ class Security(ItemInventoryMixin):
                 return None, None
             list_index = selection[0]
             crew_index = member_indices[list_index]
-            return list_index, _member_for_index(crew_index)
+            return list_index, member_for_crew_index(
+                crew_index, self.player_data, self.station_crew
+            )
 
         def issue_warrant():
             list_index, member = _selected_member()
@@ -515,28 +461,10 @@ class Security(ItemInventoryMixin):
         )
         title_label.pack(pady=10)
 
-        list_outer = tk.LabelFrame(
-            popup, text="Prisoners", font=("Arial", 12), bg="black", fg="white"
-        )
-        list_outer.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        _, prisoner_listbox = build_labeled_listbox(popup, label="Prisoners")
 
-        scrollbar = tk.Scrollbar(list_outer, orient=tk.VERTICAL)
-        prisoner_listbox = tk.Listbox(
-            list_outer,
-            bg="black",
-            fg="white",
-            font=("Arial", 12),
-            width=48,
-            height=12,
-            exportselection=False,
-            yscrollcommand=scrollbar.set,
-        )
-        scrollbar.config(command=prisoner_listbox.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        prisoner_listbox.pack(side=tk.LEFT, pady=5, padx=5, fill=tk.BOTH, expand=True)
-
-        # Parallel to listbox rows: (member_dict, is_player)
-        prisoner_rows = []
+        # Parallel to listbox rows: crew index (PLAYER_CREW_INDEX for the player)
+        member_indices = []
 
         def _format_row(member, is_player=False):
             name = member.get("name", "Unknown")
@@ -547,25 +475,27 @@ class Security(ItemInventoryMixin):
             return f"{name} ({job}){you} — {remaining} remaining | Charge: {charge}"
 
         def refresh_list(preserve_index=None):
-            prisoner_listbox.delete(0, tk.END)
-            prisoner_rows.clear()
-
             prisoners = list_prisoners(self.player_data, self.station_crew)
             if not prisoners:
+                prisoner_listbox.delete(0, tk.END)
+                member_indices.clear()
                 prisoner_listbox.insert(tk.END, "No prisoners in jail.")
                 return
 
+            rows = []
             for member, is_player in prisoners:
-                prisoner_rows.append((member, is_player))
-                prisoner_listbox.insert(tk.END, _format_row(member, is_player=is_player))
-
-            if preserve_index is not None and 0 <= preserve_index < len(prisoner_rows):
-                prisoner_listbox.selection_set(preserve_index)
-                prisoner_listbox.activate(preserve_index)
+                if is_player:
+                    crew_index = PLAYER_CREW_INDEX
+                else:
+                    crew_index = self.station_crew.index(member)
+                rows.append((crew_index, _format_row(member, is_player=is_player)))
+            refresh_indexed_listbox(
+                prisoner_listbox, member_indices, rows, preserve_index=preserve_index
+            )
 
         def _selected_prisoner():
             selection = prisoner_listbox.curselection()
-            if not selection or not prisoner_rows:
+            if not selection or not member_indices:
                 messagebox.showwarning(
                     "No Selection",
                     "Select a prisoner first.",
@@ -573,14 +503,18 @@ class Security(ItemInventoryMixin):
                 )
                 return None, None, None
             list_index = selection[0]
-            if list_index >= len(prisoner_rows):
+            if list_index >= len(member_indices):
                 messagebox.showwarning(
                     "No Selection",
                     "Select a prisoner first.",
                     parent=popup,
                 )
                 return None, None, None
-            member, is_player = prisoner_rows[list_index]
+            crew_index = member_indices[list_index]
+            member = member_for_crew_index(
+                crew_index, self.player_data, self.station_crew
+            )
+            is_player = crew_index == PLAYER_CREW_INDEX
             return list_index, member, is_player
 
         def pardon_prisoner():
@@ -651,33 +585,3 @@ class Security(ItemInventoryMixin):
             command=panel.close,
         )
         return_btn.pack(side=tk.LEFT, padx=5)
-
-    def toggle_door_lock(self):
-        toggle_room_door_lock(self.player_data, DOOR_KEY, self.security_window)
-    
-    def on_closing(self):
-        try_leave_through_door(
-            self.security_window,
-            self.player_data,
-            DOOR_KEY,
-            self.return_callback,
-            self.station_crew,
-        )
-
-    def _build_station_menu(self, before_show=None):
-        render_station_menu(
-            self.button_frame,
-            self.player_data,
-            door_key=DOOR_KEY,
-            stations=[{
-                "label": "Enter Security Station",
-                "command": self.access_security_station,
-            }],
-            show_room_options=self.show_room_options,
-            toggle_door_lock=self.toggle_door_lock,
-            before_show=before_show,
-        )
-
-    def show_station_menu(self):
-        """Return to main station menu options"""
-        self._build_station_menu()

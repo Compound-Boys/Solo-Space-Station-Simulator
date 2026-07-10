@@ -1,7 +1,5 @@
 import json
 import os
-import tkinter as tk
-from tkinter import messagebox
 
 class Game:
     """Static utility class with game-wide functions"""

@@ -63,6 +63,11 @@ from game.helper_methods.ui_panels import (
     configure_message_buffer,
     report_message,
 )
+from game.special_rooms.shared import (
+    add_note as shared_add_note,
+    show_holdings_popup as shared_show_holdings_popup,
+    show_notes_popup as shared_show_notes_popup,
+)
 
 SPECIAL_ROOM_CLASSES = {
     "Bridge": Bridge,
@@ -97,7 +102,6 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         self.battery_timer_running = False
         self.battery_timer_id = None
 
-        # Stock market background tracking
         self.market_engine = StockMarketEngine()
         
         self.player_data = {
@@ -226,12 +230,10 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
             self.player_data["station_power"] = default_station_power()
 
         try:
-            # Get the last update time
             last_update = datetime.datetime.fromisoformat(self.player_data["station_power"]["last_update_time"])
             now = datetime.datetime.now()
             elapsed_seconds = (now - last_update).total_seconds()
             
-            # Get system power levels from player data
             system_levels = self.player_data["station_power"]["system_levels"]
             total_discharge_rate = calculate_discharge(system_levels, elapsed_seconds)
 
@@ -256,7 +258,6 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
             else:
                 net_change = charge_rate - total_discharge_rate
             
-            # Update battery level
             current_level = self.player_data["station_power"]["battery_level"]
             new_level = max(0, min(100, current_level + net_change))
 
@@ -264,7 +265,6 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
             self.player_data["station_power"]["last_update_time"] = now.isoformat()
             clamp_lighting_for_battery(self.player_data["station_power"])
             
-            # Check oxygen levels based on life support setting
             self.check_life_support_status(elapsed_seconds)
 
             # Metabolize alcohol over time while intoxicated
@@ -281,7 +281,6 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
             
             # If battery level reaches critical point, trigger effects
             if 0 < new_level <= 10:
-                # Flash warning messages occasionally when battery is low
                 if random.random() < 0.2:  # 20% chance on each check
                     self.show_low_power_warning()
             elif new_level <= 0:
@@ -366,7 +365,6 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
             time.sleep(1)
     
     def show_main_menu(self):
-        # Unbind mousewheel if it was bound
         if hasattr(self.root, 'mousewheel_bound') and self.root.mousewheel_bound:
             self.root.unbind_all("<MouseWheel>")
             self.root.mousewheel_bound = False
@@ -374,18 +372,15 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         # Stop the market thread when returning to main menu
         self.stop_market_thread()
         
-        # Clear the window
         for widget in self.root.winfo_children():
             widget.destroy()
 
         self.root.configure(bg="black")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
-        # Title
         title_label = tk.Label(self.root, text="Space Station Explorer", font=("Arial", 24), bg="black", fg="white")
         title_label.pack(pady=50)
         
-        # Buttons
         button_frame = tk.Frame(self.root, bg="black")
         button_frame.pack(pady=20)
         
@@ -429,7 +424,6 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
 
         self._ensure_game_running()
 
-        # Store the previous screen to return to
         self.previous_screen = getattr(self, 'previous_screen', 'show_hallway')
 
         # Pack Return at the bottom first so it stays visible above tall sheet content
@@ -446,123 +440,15 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         )
     
     def show_notes_popup(self):
-        """Show character notes as an in-main-window overlay."""
-        panel, popup = open_modal_panel(self.root, title="Character Notes")
-
-        title_label = tk.Label(popup, text="Character Notes", font=("Arial", 18), bg="black", fg="white")
-        title_label.pack(pady=10)
-
-        frame = tk.Frame(popup, bg="black")
-        frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
-
-        scrollbar = tk.Scrollbar(frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        notes_text = tk.Text(frame, bg="black", fg="white", font=("Arial", 12),
-                           width=60, height=20, yscrollcommand=scrollbar.set, wrap=tk.WORD)
-        notes_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=notes_text.yview)
-
-        notes_text.config(state=tk.DISABLED)
-
-        if "notes" in self.player_data and self.player_data["notes"]:
-            notes_text.config(state=tk.NORMAL)
-
-            for note in reversed(self.player_data["notes"]):
-                if "timestamp" in note and "text" in note:
-                    timestamp = note["timestamp"]
-                    text = note["text"]
-
-                    try:
-                        dt = datetime.datetime.fromisoformat(timestamp)
-                        formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
-                    except (ValueError, TypeError):
-                        formatted_time = timestamp
-
-                    notes_text.insert(tk.END, f"{formatted_time}:\n{text}\n\n")
-                else:
-                    notes_text.insert(tk.END, f"{str(note)}\n\n")
-
-            notes_text.config(state=tk.DISABLED)
-        else:
-            notes_text.config(state=tk.NORMAL)
-            notes_text.insert(tk.END, "No notes recorded yet.")
-            notes_text.config(state=tk.DISABLED)
-
-        def _on_notes_mousewheel(event):
-            try:
-                notes_text.yview_scroll(int(-1*(event.delta/120)), "units")
-            except tk.TclError:
-                pass
-
-        popup.bind("<MouseWheel>", _on_notes_mousewheel)
-
-        def _close():
-            try:
-                popup.unbind("<MouseWheel>")
-            except tk.TclError:
-                pass
-            panel.close()
-
-        close_btn = tk.Button(popup, text="Close", font=("Arial", 12), width=10, command=_close)
-        close_btn.pack(pady=10)
+        shared_show_notes_popup(self.root, self.player_data)
 
     def add_note(self, text):
-        """Add a note to the player's notes"""
-        if "notes" not in self.player_data:
-            self.player_data["notes"] = []
-
-        note = {
-            "timestamp": datetime.datetime.now().isoformat(),
-            "text": text
-        }
-
-        self.player_data["notes"].append(note)
+        shared_add_note(self.player_data, text)
 
     def show_holdings_popup(self):
-        """Show stock holdings as an in-main-window overlay."""
-        panel, popup = open_modal_panel(self.root, title="Stock Holdings")
+        shared_show_holdings_popup(self.root, self.player_data)
 
-        title_label = tk.Label(popup, text="Stock Holdings", font=("Arial", 18), bg="black", fg="white")
-        title_label.pack(pady=10)
-
-        frame = tk.Frame(popup, bg="black")
-        frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
-
-        scrollbar = tk.Scrollbar(frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        holdings_list = tk.Listbox(frame, bg="black", fg="white", font=("Arial", 12),
-                                 width=30, height=15, yscrollcommand=scrollbar.set)
-        holdings_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=holdings_list.yview)
-
-        if not self.player_data.get('stock_holdings', {}):
-            holdings_list.insert(tk.END, "You don't own any company stocks.")
-        else:
-            for company, shares in self.player_data['stock_holdings'].items():
-                holdings_list.insert(tk.END, f"{company}: {shares} shares")
-
-        def _on_holdings_mousewheel(event):
-            try:
-                holdings_list.yview_scroll(int(-1*(event.delta/120)), "units")
-            except tk.TclError:
-                pass
-
-        popup.bind("<MouseWheel>", _on_holdings_mousewheel)
-
-        def _close():
-            try:
-                popup.unbind("<MouseWheel>")
-            except tk.TclError:
-                pass
-            panel.close()
-
-        close_btn = tk.Button(popup, text="Close", font=("Arial", 12), width=10, command=_close)
-        close_btn.pack(pady=10)
-    
     def use_door(self):
-        # Get current location
         x = self.player_data["location"]["x"]
         y = self.player_data["location"]["y"]
         
@@ -622,197 +508,119 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         desc_fg = style["fg"]
         power_desc = style["power_desc"]
 
-        # Set window background
         self.root.configure(bg=hallway_bg)
         
-        # Title
         hallway_label = tk.Label(self.root, text=location["name"], font=("Arial", 24), bg=hallway_bg, fg="white")
         hallway_label.pack(pady=30)
         
-        # Description with power status info
         full_desc = location["desc"] + power_desc
         
         desc_label = tk.Label(self.root, text=full_desc, font=("Arial", 12), 
                            bg=hallway_bg, fg=desc_fg, wraplength=600)
         desc_label.pack(pady=10)
         
-        # Location info
         coords_label = tk.Label(self.root, text=f"Location: {self.player_data['location']['x']} North, {self.player_data['location']['y']} East", 
                                font=("Arial", 10), bg=hallway_bg, fg=desc_fg)
         coords_label.pack(pady=5)
         
-        # Navigation controls
         nav_frame = tk.Frame(self.root, bg=hallway_bg)
         nav_frame.pack(pady=20)
-        
+
         x = self.player_data["location"]["x"]
         y = self.player_data["location"]["y"]
-
         directions = donut.get_available_directions(x, y)
-        north_available = directions["north"]
-        south_available = directions["south"]
-        east_available = directions["east"]
-        west_available = directions["west"]
 
-        # Special cases for room access points
-        is_special_location = False
-        
-        # Bridge access from north end
-        if (x, y) == SPECIAL_ROOM_HALLWAY[donut.BRIDGE_KEY]:
-            is_special_location = True
-            # Add the Bridge access button
-            bridge_btn = tk.Button(nav_frame, text="Bridge", font=("Arial", 14), width=15,
-                                command=lambda: self.enter_special_room_at("Bridge", donut.BRIDGE_KEY))
-            bridge_btn.grid(row=0, column=1, padx=10, pady=10)
-            
-            # Also add regular east button for the corridor
-            if east_available:
-                east_btn = tk.Button(nav_frame, text="Go East", font=("Arial", 14), width=15,
-                                   command=lambda: self.move_direction("east"))
-                east_btn.grid(row=1, column=2, padx=10, pady=10)
-                
-            # Add south button for returning to the corridor
-            if south_available:
-                south_btn = tk.Button(nav_frame, text="Go South", font=("Arial", 14), width=15,
-                                    command=lambda: self.move_direction("south"))
-                south_btn.grid(row=2, column=1, padx=10, pady=10)
-            
-        # MedBay access from east end
-        elif (x, y) == SPECIAL_ROOM_HALLWAY[donut.MEDBAY_KEY]:
-            is_special_location = True
-            # Add MedBay access button
-            medbay_btn = tk.Button(nav_frame, text="MedBay", font=("Arial", 14), width=15,
-                              command=lambda: self.enter_special_room_at("MedBay", donut.MEDBAY_KEY))
-            medbay_btn.grid(row=1, column=2, padx=10, pady=10)
-            
-            # Add north button for the corridor
-            if north_available:
-                north_btn = tk.Button(nav_frame, text="Go North", font=("Arial", 14), width=15,
-                                    command=lambda: self.move_direction("north"))
-                north_btn.grid(row=0, column=1, padx=10, pady=10)
-                
-            # Add west button for returning to the corridor
-            if west_available:
-                west_btn = tk.Button(nav_frame, text="Go West", font=("Arial", 14), width=15,
-                                   command=lambda: self.move_direction("west"))
-                west_btn.grid(row=1, column=0, padx=10, pady=10)
-            
-        # Security access from northeast corner
-        elif (x, y) == SPECIAL_ROOM_HALLWAY[donut.SECURITY_KEY]:
-            is_special_location = True
-            # Just one button for Security access
-            security_btn = tk.Button(nav_frame, text="Security", font=("Arial", 14), width=15,
-                                 command=lambda: self.enter_special_room_at("Security", donut.SECURITY_KEY))
-            security_btn.grid(row=0, column=1, padx=10, pady=10)
-            
-            # Add west and south buttons for the corridors
-            west_btn = tk.Button(nav_frame, text="Go West", font=("Arial", 14), width=15,
-                               command=lambda: self.move_direction("west"))
-            west_btn.grid(row=1, column=0, padx=10, pady=10)
-            
-            south_btn = tk.Button(nav_frame, text="Go South", font=("Arial", 14), width=15,
-                                command=lambda: self.move_direction("south"))
-            south_btn.grid(row=2, column=1, padx=10, pady=10)
+        is_special_location = self._pack_special_hallway_nav(nav_frame, x, y, directions)
 
-        # Engineering Bay access from engineering hallway
-        elif (x, y) == SPECIAL_ROOM_HALLWAY[donut.ENGINEERING_KEY]:
-            is_special_location = True
-            # Add Engineering Bay access button
-            eng_bay_btn = tk.Button(nav_frame, text="Engineering Bay", font=("Arial", 14), width=15,
-                                command=lambda: self.enter_special_room_at("Engineering", donut.ENGINEERING_KEY))
-            eng_bay_btn.grid(row=0, column=1, padx=10, pady=10)
-            
-            # Add west and east buttons for the corridors
-            west_btn = tk.Button(nav_frame, text="Go West", font=("Arial", 14), width=15,
-                               command=lambda: self.move_direction("west"))
-            west_btn.grid(row=1, column=0, padx=10, pady=10)
-            
-            east_btn = tk.Button(nav_frame, text="Go East", font=("Arial", 14), width=15,
-                               command=lambda: self.move_direction("east"))
-            east_btn.grid(row=1, column=2, padx=10, pady=10)
-        
-        # Bar access from bar entrance
-        elif (x, y) == SPECIAL_ROOM_HALLWAY[donut.BAR_KEY]:
-            is_special_location = True
-            # Add Bar access button
-            bar_btn = tk.Button(nav_frame, text="Bar", font=("Arial", 14), width=15,
-                             command=lambda: self.enter_special_room_at("Bar", donut.BAR_KEY))
-            bar_btn.grid(row=2, column=1, padx=10, pady=10)
-            
-            # Add west and east buttons for the corridors
-            west_btn = tk.Button(nav_frame, text="Go West", font=("Arial", 14), width=15,
-                               command=lambda: self.move_direction("west"))
-            west_btn.grid(row=1, column=0, padx=10, pady=10)
-            
-            east_btn = tk.Button(nav_frame, text="Go East", font=("Arial", 14), width=15,
-                               command=lambda: self.move_direction("east"))
-            east_btn.grid(row=1, column=2, padx=10, pady=10)
-        
-        # Regular directional buttons for other hallway positions
         if not is_special_location:
-            if north_available:
-                north_btn = tk.Button(nav_frame, text="Go North", font=("Arial", 14), width=15,
-                                    command=lambda: self.move_direction("north"))
-                north_btn.grid(row=0, column=1, padx=10, pady=10)
-                
-            if south_available:
-                south_btn = tk.Button(nav_frame, text="Go South", font=("Arial", 14), width=15,
-                                    command=lambda: self.move_direction("south"))
-                south_btn.grid(row=2, column=1, padx=10, pady=10)
-                
-            if east_available:
-                east_btn = tk.Button(nav_frame, text="Go East", font=("Arial", 14), width=15,
-                                   command=lambda: self.move_direction("east"))
-                east_btn.grid(row=1, column=2, padx=10, pady=10)
-                
-            if west_available:
-                west_btn = tk.Button(nav_frame, text="Go West", font=("Arial", 14), width=15,
-                                   command=lambda: self.move_direction("west"))
-                west_btn.grid(row=1, column=0, padx=10, pady=10)
-            
-            # Special case for the Botany Lab entrance
+            dir_grid = {
+                "north": (0, 1),
+                "south": (2, 1),
+                "east": (1, 2),
+                "west": (1, 0),
+            }
+            for direction, (row, col) in dir_grid.items():
+                if directions.get(direction):
+                    tk.Button(
+                        nav_frame,
+                        text=f"Go {direction.title()}",
+                        font=("Arial", 14),
+                        width=15,
+                        command=lambda d=direction: self.move_direction(d),
+                    ).grid(row=row, column=col, padx=10, pady=10)
+
             if (x, y) == SPECIAL_ROOM_HALLWAY[donut.BOTANY_KEY]:
-                botany_btn = tk.Button(nav_frame, text="Botany Lab", font=("Arial", 14), width=15,
-                                     command=lambda: self.enter_special_room_at("Botany", donut.BOTANY_KEY))
-                botany_btn.grid(row=1, column=0, padx=10, pady=10)
-        
+                tk.Button(
+                    nav_frame,
+                    text="Botany Lab",
+                    font=("Arial", 14),
+                    width=15,
+                    command=lambda: self.enter_special_room_at("Botany", donut.BOTANY_KEY),
+                ).grid(row=1, column=0, padx=10, pady=10)
+
         # Only show return to quarters at the starting junction
         if (x, y) == SPECIAL_ROOM_HALLWAY[donut.QUARTERS_KEY]:
-            quarters_btn = tk.Button(nav_frame, text="Quarters", font=("Arial", 14), width=15,
-                                   command=self.use_door)
-            quarters_btn.grid(row=3, column=1, columnspan=1, padx=10, pady=20)
-        
-        # Character sheet button
+            tk.Button(
+                nav_frame,
+                text="Quarters",
+                font=("Arial", 14),
+                width=15,
+                command=self.use_door,
+            ).grid(row=3, column=1, columnspan=1, padx=10, pady=20)
+
         character_btn = tk.Button(self.root, text="Character Sheet", font=("Arial", 14), width=15, 
                                 command=self.show_character_sheet_hallway)
         character_btn.pack(pady=10)
         
-        # Save button
         save_btn = tk.Button(self.root, text="Save and Exit", font=("Arial", 14), width=15,
                           command=self.save_and_exit)
         save_btn.pack(pady=10)
+
+    def _pack_special_hallway_nav(self, nav_frame, x, y, directions):
+        """Pack room + corridor buttons for special hallway tiles. Returns True if matched."""
+        for entry in donut.HALLWAY_SPECIAL_NAV:
+            if (x, y) != entry["hallway"]:
+                continue
+            room_row, room_col = entry["room_grid"]
+            room_key = entry["room_key"]
+            room_name = entry["room"]
+            tk.Button(
+                nav_frame,
+                text=entry["label"],
+                font=("Arial", 14),
+                width=15,
+                command=lambda rk=room_key, rn=room_name: self.enter_special_room_at(rn, rk),
+            ).grid(row=room_row, column=room_col, padx=10, pady=10)
+
+            for direction, row, col in entry["dirs"]:
+                if entry["check_available"] and not directions.get(direction):
+                    continue
+                tk.Button(
+                    nav_frame,
+                    text=f"Go {direction.title()}",
+                    font=("Arial", 14),
+                    width=15,
+                    command=lambda d=direction: self.move_direction(d),
+                ).grid(row=row, column=col, padx=10, pady=10)
+            return True
+        return False
     
     def show_character_sheet_hallway(self):
-        # Save the current location so we can return to it later
         self.before_character_sheet_location = {
             "x": self.player_data["location"]["x"],
             "y": self.player_data["location"]["y"]
         }
         
-        # Set the previous screen to hallway before showing character sheet
         self.previous_screen = "return_to_hallway"
         
-        # Show character sheet
         self.show_character_sheet()
         
     def return_to_hallway(self):
         """Return to the hallway from character sheet at the original location"""
-        # Restore the original location before showing hallway
         if hasattr(self, 'before_character_sheet_location'):
             self.player_data["location"]["x"] = self.before_character_sheet_location["x"]
             self.player_data["location"]["y"] = self.before_character_sheet_location["y"]
         
-        # Show the hallway
         self.show_hallway()
     
     def _handle_hallway_security_encounter(self, npc):
@@ -938,48 +746,37 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         self.show_hallway()
     
     def show_load_game(self):
-        # Clear the window
         for widget in self.root.winfo_children():
             widget.destroy()
         
-        # Title
         load_label = tk.Label(self.root, text="Load Game", font=("Arial", 24), bg="black", fg="white")
         load_label.pack(pady=30)
         
-        # Check if saves directory exists
         saves_path = os.path.join(self.base_path, "saves") # Updated path
         os.makedirs(saves_path, exist_ok=True)
         
-        # Get save files
         save_files = [f for f in os.listdir(saves_path) if f.endswith(".json")]
         
         if not save_files:
             no_saves_label = tk.Label(self.root, text="No saved games found.", font=("Arial", 14), bg="black", fg="white")
             no_saves_label.pack(pady=20)
         else:
-            # Create a frame to hold the canvas and scrollbar
             container_frame = tk.Frame(self.root, bg="black")
             container_frame.pack(pady=20, fill=tk.BOTH, expand=True)
             
-            # Create a canvas to make the content scrollable
             canvas = tk.Canvas(container_frame, bg="black", highlightthickness=0)
             canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             
-            # Add a scrollbar to the container
             scrollbar = tk.Scrollbar(container_frame, orient=tk.VERTICAL, command=canvas.yview)
             # Scrollbar initially packed, will be unpacked if not needed
             scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
             
-            # Configure the canvas to use the scrollbar
             canvas.configure(yscrollcommand=scrollbar.set)
             
-            # Create a frame inside the canvas to hold the save buttons
             saves_frame = tk.Frame(canvas, bg="black")
             
-            # Add the saves_frame to the canvas
             canvas_frame = canvas.create_window((0, 0), window=saves_frame, anchor="nw")
             
-            # Add save buttons to the saves_frame
             for save_file in save_files:
                 # Strip .json extension for display and passing to load function
                 player_name = save_file[:-5]
@@ -988,52 +785,41 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
                                      command=lambda name=player_name: self.load_game_file(name))
                 save_btn.pack(pady=5)
             
-            # Update the scrollregion when the size of saves_frame changes
             def configure_scroll_region(event):
                 canvas.configure(scrollregion=canvas.bbox("all"))
                 
-                # Check if scrolling is needed and enable/disable the scrollbar
                 if saves_frame.winfo_height() > canvas.winfo_height():
                     scrollbar.pack(side=tk.RIGHT, fill=tk.Y)  # Ensure scrollbar is visible
-                    # Enable scrolling if not already bound
                     if not hasattr(self.root, 'mousewheel_bound') or not self.root.mousewheel_bound:
                         canvas.bind_all("<MouseWheel>", on_mousewheel)
                         self.root.mousewheel_bound = True
                 else:
                     scrollbar.pack_forget()  # Hide scrollbar
-                    # Disable scrolling if bound
                     if hasattr(self.root, 'mousewheel_bound') and self.root.mousewheel_bound:
                         self.root.unbind_all("<MouseWheel>")
                         self.root.mousewheel_bound = False
             
             saves_frame.bind("<Configure>", configure_scroll_region)
             
-            # Make sure canvas width matches container width
             def set_canvas_width(event):
                 canvas_width = event.width
                 canvas.itemconfig(canvas_frame, width=canvas_width)
             
             canvas.bind("<Configure>", set_canvas_width)
             
-            # Bind mousewheel to scroll
             def on_mousewheel(event):
-                # Only scroll if there's content that requires scrolling
                 if saves_frame.winfo_height() > canvas.winfo_height():
                     canvas.yview_scroll(int(-1*(event.delta/120)), "units")
             
-            # Initialize mousewheel state
             self.root.mousewheel_bound = False
-            # Configure scroll region initially to determine if scrollbar/binding is needed
             saves_frame.update_idletasks() 
             configure_scroll_region(None) # Manually call once to set initial state
         
-        # Back button
         back_btn = tk.Button(self.root, text="Back", font=("Arial", 14), width=15, command=self.show_main_menu)
         back_btn.pack(pady=20)
     
     def load_game_file(self, filename):
         """Load a saved game from file"""
-        # Remove .json extension if present (though it should be passed without it now)
         if filename.endswith(".json"):
             filename = filename[:-5]
 
@@ -1054,12 +840,10 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         self.market_engine.load_from_player_data(self.player_data)
         self._ensure_game_running()
         
-        # Determine where to show the player based on saved location
         if "location" in self.player_data:
             x = self.player_data["location"].get("x", 0)
             y = self.player_data["location"].get("y", 0)
             
-            # Check if player is in a special room or hallway
             loc_key = f"{x},{y}"
             if is_jailed(self.player_data):
                 # Keep jailed players locked in the Security room UI
@@ -1069,16 +853,12 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
                 }
                 self._instantiate_special_room("Security")
             elif loc_key in SPECIAL_ROOM_TILES and loc_key != donut.QUARTERS_KEY:
-                # Player was in a special room, return to hallway entrance
                 self.update_player_data_from_room(self.player_data)
             elif x == -1 and y == 0:
-                # Player was in quarters — open the quarters room UI
                 self.enter_special_room_at("Quarters", donut.QUARTERS_KEY)
             else:
-                # Player was in a hallway
                 self.show_hallway()
         else:
-            # Default to quarters if location is missing
             self.player_data["location"] = dict(donut.QUARTERS_LOCATION)
             self.enter_special_room_at("Quarters", donut.QUARTERS_KEY)
         
@@ -1113,7 +893,6 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         exit_to_menu = updated_player_data.pop("_exit_to_menu", False)
         quit_without_save = updated_player_data.pop("_quit_without_save", False)
 
-        # Update player data
         self.player_data = updated_player_data
 
         # Update station_crew ONLY if it was passed back

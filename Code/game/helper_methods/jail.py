@@ -33,7 +33,7 @@ def security_hallway_location():
     return {"x": tile[0], "y": tile[1]}
 
 
-def ensure_jail_fields(member):
+def _ensure_jail_fields(member):
     """Back-compat migration for saves made before jail existed."""
     member.setdefault("in_jail", False)
     member.setdefault("jail_release_at", None)
@@ -57,19 +57,19 @@ def has_fine(member):
         return False
 
 
-def fine_amount_value(member):
+def _fine_amount_value(member):
     try:
         return max(0, float(member.get("fine_amount", 0) or 0))
     except (TypeError, ValueError):
         return 0.0
 
 
-def fine_reason_text(member, default="No reason on file"):
+def _fine_reason_text(member, default="No reason on file"):
     reason = (member.get("fine_reason") or "").strip()
     return reason if reason else default
 
 
-def clear_fine(member):
+def _clear_fine(member):
     member["fine_amount"] = 0
     member["fine_reason"] = ""
 
@@ -146,12 +146,12 @@ def resolve_fine_with_guard(
     go to jail even with enough credits. Cannot afford -> jail.
     Returns 'paid', 'jailed', or None if there was no fine.
     """
-    ensure_jail_fields(member)
+    _ensure_jail_fields(member)
     if not has_fine(member) or is_jailed(member):
         return None
 
-    amount = fine_amount_value(member)
-    reason = fine_reason_text(member)
+    amount = _fine_amount_value(member)
+    reason = _fine_reason_text(member)
     name = member.get("name", "Someone")
     credits = float(member.get("credits", 0) or 0)
 
@@ -171,7 +171,7 @@ def resolve_fine_with_guard(
             )
 
         member["credits"] = credits - amount
-        clear_fine(member)
+        _clear_fine(member)
         message = (
             f"{guard_name} collects your unpaid fine of {amount:.0f} credits.\n"
             f"Reason: {reason}"
@@ -207,9 +207,9 @@ def resolve_fine_with_guard(
 
 
 def ensure_crew_jail_fields(player_data, station_crew):
-    ensure_jail_fields(player_data)
+    _ensure_jail_fields(player_data)
     for npc in station_crew:
-        ensure_jail_fields(npc)
+        _ensure_jail_fields(npc)
 
 
 def is_jailed(member):
@@ -289,7 +289,7 @@ def arrest_member(member, *, reason="", game=None, is_player=False, show_message
     Returns True if the arrest was applied, False if they were already jailed.
     Warrant stays active until release.
     """
-    ensure_jail_fields(member)
+    _ensure_jail_fields(member)
     if is_jailed(member):
         return False
 
@@ -327,7 +327,7 @@ def arrest_member(member, *, reason="", game=None, is_player=False, show_message
 
 def release_member(member, *, is_player=False, game=None, show_message=True):
     """Release a prisoner: clear jail state and warrant, place them outside Security."""
-    ensure_jail_fields(member)
+    _ensure_jail_fields(member)
     if not is_jailed(member):
         return False
 
@@ -371,7 +371,7 @@ def release_member(member, *, is_player=False, game=None, show_message=True):
 
 def add_jail_time(member, seconds=ADD_TIME_SECONDS):
     """Extend an active sentence. Returns True if time was added."""
-    ensure_jail_fields(member)
+    _ensure_jail_fields(member)
     if not is_jailed(member):
         return False
 
@@ -454,7 +454,7 @@ def arrest_wanted_in_room(room_key, player_data, station_crew, *, game=None, gua
     return arrested
 
 
-def ask_arrest_or_let_go(parent, message):
+def _ask_arrest_or_let_go(parent, message):
     """Modal with Arrest / Let Go. Returns 'arrest' or 'let_go'."""
     result = {"choice": "let_go"}
 
@@ -571,7 +571,7 @@ def offer_player_arrest_choice(player_data, npc, *, parent, game=None, place="ha
         )
     lines.append("\nWhat do you do?")
 
-    choice = ask_arrest_or_let_go(parent, "\n".join(lines))
+    choice = _ask_arrest_or_let_go(parent, "\n".join(lines))
     if choice == "arrest":
         arrest_member(
             npc,

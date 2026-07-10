@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter import messagebox, ttk
 
+from game.helper_methods.ui_panels import patch_destroy_cleanup
+
 DEFAULT_COMPANY_NAMES = [
     "TechCorp",
     "GlobalBank",
@@ -37,16 +39,13 @@ class Company:
         
     def update_value(self):
         """Update the company's stock value"""
-        # Store the previous value for reference
         self.previous_value = self.current_value
         
         # Random change between -10% and +10%
         change = random.uniform(-0.10, 0.10)
         
-        # Apply change
         self.current_value = max(1.0, self.current_value * (1 + change))
         
-        # Add to price history
         self.price_history.append(self.current_value)
         
         # Limit price history to most recent 50 cycles
@@ -279,7 +278,6 @@ def hydrate_companies(companies):
 
 class StockMarket:
     def __init__(self, parent_window, player_data, companies, cycle_number, day_number, return_callback):
-        # Store references
         self.parent_window = parent_window
         self.player_data = player_data
         self.companies = hydrate_companies(companies)
@@ -288,10 +286,8 @@ class StockMarket:
         self.return_callback = return_callback
         self.current_company = None
 
-        # Track transactions for notes
         self.stock_transactions = []
 
-        # Filter state
         self.current_filter = "All" # Default filter shows all stocks
 
         # Sort order: "price_asc" (low to high) or "price_desc" (high to low)
@@ -313,10 +309,8 @@ class StockMarket:
         self.stock_window.transient(parent_window)
         self.stock_window.grab_set()
 
-        # Load company owned shares from player data
         sync_holdings_to_companies(self.companies, player_data.get("stock_holdings"))
 
-        # Create main frames
         self.left_frame = tk.Frame(self.stock_window, bg="black", width=300)
         self.left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=10, pady=5)
 
@@ -327,7 +321,6 @@ class StockMarket:
         self.right_frame = tk.Frame(self.stock_window, bg="black")
         self.right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        # Right header: status (left) + company info (further right)
         self.header_frame = tk.Frame(self.right_frame, bg="black")
         self.header_frame.pack(side=tk.TOP, fill=tk.X, pady=(0, 0))
 
@@ -353,7 +346,6 @@ class StockMarket:
         self.company_info_frame = tk.Frame(self.header_frame, bg="black")
         self.company_info_frame.pack(side=tk.RIGHT, anchor="ne", fill=tk.X, expand=True)
 
-        # Sort and filter options (left column starts here so content sits higher)
         self.filter_frame = tk.Frame(self.left_content, bg="black")
         self.filter_frame.pack(fill=tk.X, pady=(0, 2))
 
@@ -440,14 +432,12 @@ class StockMarket:
                                      command=lambda: self.filter_by_trend("falling"))
         self.falling_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
 
-        # Companies list
         self.companies_listbox = tk.Listbox(self.left_content,
                                          font=("Arial", 12), bg="black", fg="white",
                                          selectbackground="#333333", selectforeground="white",
                                          width=30, height=8)
         self.companies_listbox.pack(pady=(4, 2), fill=tk.X)
 
-        # Trade controls directly under the listbox
         self.trade_frame = tk.Frame(self.left_content, bg="black")
         self.trade_frame.pack(fill=tk.X, pady=(4, 2))
 
@@ -465,7 +455,6 @@ class StockMarket:
                                 command=self.on_closing)
         self.back_btn.pack(pady=(1, 2), fill=tk.X)
 
-        # Right pane: header + graph only
         self.fig = plt.Figure(figsize=(5, 3), dpi=100)
         self.fig.patch.set_facecolor('black')
         self.ax = self.fig.add_subplot(111)
@@ -486,22 +475,17 @@ class StockMarket:
         self._timer_after_id = None
         self._closed = False
         
-        # Bind selection event for the listbox AFTER all frames are created
         self.companies_listbox.bind('<<ListboxSelect>>', self.on_company_select)
         
-        # Add polling for player_data updates
         self.last_seen_cycle = cycle_number
         self.last_seen_day = day_number
         
-        # Fill the companies listbox with all companies initially
         self.populate_companies_listbox()
         
-        # Select first company by default AFTER everything is set up
         if self.companies_listbox.size() > 0:
             self.companies_listbox.selection_set(0)
             self.on_company_select(None)  # Trigger the selection handler
             
-        # Start the timer
         self.update_timer()
 
     def _refresh_companies_from_player_data(self):
@@ -610,28 +594,22 @@ class StockMarket:
         if not self.companies_listbox.curselection():
             return
         
-        # Get the name of the selected company from the listbox
         selection_idx = self.companies_listbox.curselection()[0]
         selected_company_name = self.companies_listbox.get(selection_idx)
         
-        # Find the actual company object by name
         for company in self.companies:
             if company.name == selected_company_name:
                 self.current_company = company
                 break
         else:
-            # If company not found (should never happen), return
             return
         
-        # Clear company info frame
         for widget in self.company_info_frame.winfo_children():
             widget.destroy()
         
-        # Clear trade frame
         for widget in self.trade_frame.winfo_children():
             widget.destroy()
         
-        # Add company information
         company_name = tk.Label(self.company_info_frame, text=self.current_company.name, 
                               font=("Arial", 18, "bold"), bg="black", fg="white")
         company_name.grid(row=0, column=0, columnspan=2, sticky="w", pady=5)
@@ -640,11 +618,9 @@ class StockMarket:
                                font=("Arial", 12), bg="black", fg="white")
         current_price.grid(row=1, column=0, sticky="w", pady=2)
         
-        # Calculate price change
         price_change = self.current_company.current_value - self.current_company.previous_value
         price_change_pct = (price_change / self.current_company.previous_value) * 100
         
-        # Choose color based on price change
         change_color = "green" if price_change >= 0 else "red"
         
         price_change_label = tk.Label(self.company_info_frame, 
@@ -657,7 +633,6 @@ class StockMarket:
                               font=("Arial", 12), bg="black", fg="white")
         shares_owned.grid(row=2, column=0, sticky="w", pady=2)
         
-        # Calculate total value of owned shares
         total_value = self.current_company.owned_shares * self.current_company.current_value
         
         shares_value = tk.Label(self.company_info_frame, 
@@ -665,10 +640,8 @@ class StockMarket:
                               font=("Arial", 12), bg="black", fg="white")
         shares_value.grid(row=2, column=1, sticky="w", pady=2)
         
-        # Update the graph
         self.update_graph()
         
-        # Add trade interface
         self.create_trade_interface()
     
     def update_graph(self):
@@ -676,18 +649,14 @@ class StockMarket:
         if not self.current_company:
             return
             
-        # Clear the axis
         self.ax.clear()
         
-        # Set up the plot
         self.ax.set_facecolor('black')
         self.ax.tick_params(colors='white')
         
-        # Plot the price history
         prices = self.current_company.price_history
         x = range(len(prices))
         
-        # Determine plot color based on price trend
         if prices[-1] >= prices[0]:
             line_color = 'green'
         else:
@@ -695,26 +664,21 @@ class StockMarket:
             
         self.ax.plot(x, prices, color=line_color)
         
-        # Set labels
         self.ax.set_title(f"{self.current_company.name} Price History", color='white')
         self.ax.set_xlabel("Cycles", color='white')
         self.ax.set_ylabel("Price", color='white')
         
-        # Remove grid
         self.ax.grid(False)
         self.fig.subplots_adjust(left=0.12, right=0.95, top=0.90, bottom=0.18)
 
-        # Draw the canvas
         self.canvas.draw()
     
     def create_trade_interface(self):
         """Create the interface for buying and selling stocks"""
-        # Shares to trade label and entry
         shares_label = tk.Label(self.trade_frame, text="Shares:", 
                               font=("Arial", 12), bg="black", fg="white")
         shares_label.grid(row=0, column=0, padx=5, pady=(5, 2))
         
-        # Dropdown for predefined amounts
         share_options = [1, 5, 10, 25, 50, 100]
         self.shares_var = tk.StringVar(value="1")
         
@@ -722,10 +686,8 @@ class StockMarket:
                                      values=share_options, width=5)
         shares_dropdown.grid(row=0, column=1, padx=5, pady=(5, 2))
         
-        # Make the dropdown user editable
         shares_dropdown.config(state="normal")
         
-        # Calculate max shares that can be bought or sold
         max_can_buy = int(self.player_data["credits"] / self.current_company.current_value)
         max_can_sell = self.current_company.owned_shares
         
@@ -739,20 +701,17 @@ class StockMarket:
                                command=lambda: self.shares_var.set(str(max_can_sell)))
         max_sell_btn.grid(row=1, column=1, padx=5, pady=5)
         
-        # Calculate total cost
         def update_total_cost(*args):
             try:
                 shares = int(self.shares_var.get())
                 total = shares * self.current_company.current_value
                 total_label.config(text=f"Total: {total:.2f}")
                 
-                # Update buy button state
                 if shares > 0 and total <= self.player_data["credits"]:
                     buy_btn.config(state=tk.NORMAL)
                 else:
                     buy_btn.config(state=tk.DISABLED)
                     
-                # Update sell button state
                 if shares > 0 and shares <= self.current_company.owned_shares:
                     sell_btn.config(state=tk.NORMAL)
                 else:
@@ -763,51 +722,40 @@ class StockMarket:
                 buy_btn.config(state=tk.DISABLED)
                 sell_btn.config(state=tk.DISABLED)
         
-        # Register callback for share amount changes
         self.shares_var.trace("w", update_total_cost)
         
-        # Total cost label
         total_label = tk.Label(self.trade_frame, text="Total: 0.00", 
                             font=("Arial", 12), bg="black", fg="white")
         total_label.grid(row=0, column=2, padx=20, pady=(5, 2))
         
-        # Buy button
         buy_btn = tk.Button(self.trade_frame, text="Buy", font=("Arial", 12), 
                          bg="green", fg="white", width=8,
                          command=self.buy_stock)
         buy_btn.grid(row=2, column=0, padx=10, pady=10)
         
-        # Sell button
         sell_btn = tk.Button(self.trade_frame, text="Sell", font=("Arial", 12), 
                           bg="red", fg="white", width=8,
                           command=self.sell_stock)
         sell_btn.grid(row=2, column=1, padx=10, pady=10)
         
-        # Initialize button states
         update_total_cost()
     
     def buy_stock(self):
         """Buy stock of the currently selected company"""
         try:
-            # Get share amount
             shares = int(self.shares_var.get())
             
-            # Calculate total cost
             total_cost = shares * self.current_company.current_value
             
-            # Check if player has enough credits
             if total_cost > self.player_data["credits"]:
                 messagebox.showerror("Transaction Failed", "Not enough credits for this purchase.")
                 return
                 
-            # Update player credits
             self.player_data["credits"] -= total_cost
             self.player_data["credits"] = truncate_credits(self.player_data["credits"])
             
-            # Update company owned shares
             self.current_company.owned_shares += shares
             
-            # Update stock holdings in player data
             if "stock_holdings" not in self.player_data:
                 self.player_data["stock_holdings"] = {}
                 
@@ -816,7 +764,6 @@ class StockMarket:
             else:
                 self.player_data["stock_holdings"][self.current_company.name] += shares
             
-            # Track transaction for notes
             transaction = {
                 "type": "buy",
                 "company": self.current_company.name,
@@ -838,17 +785,13 @@ class StockMarket:
                 total_cost,
             )
             
-            # Update display
             self.credits_label.config(text=f"Credits: {self.player_data['credits']:.2f}")
             
-            # Recalculate max shares
             max_can_buy = int(self.player_data["credits"] / self.current_company.current_value)
             
-            # Show success message
             messagebox.showinfo("Transaction Complete", 
                                f"Bought {shares} shares of {self.current_company.name} for {total_cost:.2f} credits.")
             
-            # Refresh company info
             self.on_company_select(None)
         except ValueError:
             messagebox.showerror("Input Error", "Please enter a valid number of shares.")
@@ -856,25 +799,19 @@ class StockMarket:
     def sell_stock(self):
         """Sell stock of the currently selected company"""
         try:
-            # Get share amount
             shares = int(self.shares_var.get())
             
-            # Check if player owns enough shares
             if shares > self.current_company.owned_shares:
                 messagebox.showerror("Transaction Failed", "You don't own that many shares.")
                 return
                 
-            # Calculate total value
             total_value = shares * self.current_company.current_value
             
-            # Update player credits
             self.player_data["credits"] += total_value
             self.player_data["credits"] = truncate_credits(self.player_data["credits"])
             
-            # Update company owned shares
             self.current_company.owned_shares -= shares
             
-            # Update stock holdings in player data
             if "stock_holdings" in self.player_data and self.current_company.name in self.player_data["stock_holdings"]:
                 self.player_data["stock_holdings"][self.current_company.name] -= shares
                 
@@ -885,17 +822,13 @@ class StockMarket:
             # Calculate profit/loss if we have the purchase price history
             profit = 0
             if "stock_purchases" in self.player_data and self.current_company.name in self.player_data["stock_purchases"]:
-                # Get the average purchase price of shares
                 purchases = self.player_data["stock_purchases"][self.current_company.name]
                 if len(purchases) > 0:
-                    # Calculate average purchase price of shares being sold
                     total_cost = sum(purchase["price"] * purchase["shares"] for purchase in purchases[:shares])
                     avg_price = total_cost / shares if shares > 0 else 0
                     
-                    # Calculate profit/loss
                     profit = total_value - (avg_price * shares)
             
-            # Track transaction for notes
             transaction = {
                 "type": "sell",
                 "company": self.current_company.name,
@@ -918,10 +851,8 @@ class StockMarket:
                 total_value,
             )
             
-            # Update display
             self.credits_label.config(text=f"Credits: {self.player_data['credits']:.2f}")
             
-            # Success message
             profit_text = ""
             if profit != 0:
                 if profit > 0:
@@ -932,7 +863,6 @@ class StockMarket:
             messagebox.showinfo("Transaction Complete", 
                                f"Sold {shares} shares of {self.current_company.name} for {total_value:.2f} credits.{profit_text}")
             
-            # Refresh company info
             self.on_company_select(None)
         except ValueError:
             messagebox.showerror("Input Error", "Please enter a valid number of shares.")
@@ -1019,17 +949,12 @@ class StockMarket:
         frame.bind("<MouseWheel>", _on_trade_mousewheel)
         history_window.bind("<MouseWheel>", _on_trade_mousewheel)
 
-        orig_destroy = history_window.destroy
-        def _destroy_and_cleanup():
-            try:
-                history_window.unbind("<MouseWheel>")
-                history_window.unbind("<Button-4>")
-                history_window.unbind("<Button-5>")
-            except tk.TclError:
-                pass
-            orig_destroy()
+        def _history_cleanup():
+            history_window.unbind("<MouseWheel>")
+            history_window.unbind("<Button-4>")
+            history_window.unbind("<Button-5>")
 
-        history_window.destroy = _destroy_and_cleanup
+        patch_destroy_cleanup(history_window, _history_cleanup)
 
         close_btn = tk.Button(history_window, text="Close",
                             font=("Arial", 12), bg="#333333", fg="white",
@@ -1078,10 +1003,8 @@ class StockMarket:
             callback(self.player_data)
     def filter_companies(self, filter_type):
         """Filter companies based on selected filter"""
-        # Update filter state
         self.current_filter = filter_type
         
-        # Update button appearance
         self.all_btn.config(relief=tk.RAISED)
         self.affordable_btn.config(relief=tk.RAISED)
         self.expensive_btn.config(relief=tk.RAISED)
@@ -1093,17 +1016,14 @@ class StockMarket:
         elif filter_type == "Expensive":
             self.expensive_btn.config(relief=tk.SUNKEN)
         
-        # Preserve selection if possible
         selected_company = None
         if self.companies_listbox.curselection():
             selected_idx = self.companies_listbox.curselection()[0]
             if selected_idx < self.companies_listbox.size():
                 selected_company = self.companies_listbox.get(selected_idx)
         
-        # Repopulate the listbox with filtered companies
         self.populate_companies_listbox()
         
-        # Try to restore selection
         if selected_company:
             for i in range(self.companies_listbox.size()):
                 if self.companies_listbox.get(i) == selected_company:
@@ -1112,7 +1032,6 @@ class StockMarket:
                     self.on_company_select(None)  # Explicitly call after selection is restored
                     return
         
-        # If previous selection not found, select the first item if any exist
         if self.companies_listbox.size() > 0:
             self.companies_listbox.selection_set(0)
             self.on_company_select(None)  # Explicitly call after selection is made
@@ -1129,17 +1048,14 @@ class StockMarket:
         else:
             self.high_low_btn.config(relief=tk.SUNKEN)
         
-        # Preserve selection if possible
         selected_company = None
         if self.companies_listbox.curselection():
             selected_idx = self.companies_listbox.curselection()[0]
             if selected_idx < self.companies_listbox.size():
                 selected_company = self.companies_listbox.get(selected_idx)
         
-        # Repopulate the listbox with sorted companies
         self.populate_companies_listbox()
         
-        # Try to restore selection
         if selected_company:
             for i in range(self.companies_listbox.size()):
                 if self.companies_listbox.get(i) == selected_company:
@@ -1148,17 +1064,14 @@ class StockMarket:
                     self.on_company_select(None)  # Explicitly call after selection is restored
                     return
         
-        # If previous selection not found, select the first item if any exist
         if self.companies_listbox.size() > 0:
             self.companies_listbox.selection_set(0)
             self.on_company_select(None)  # Explicitly call after selection is made
     
     def filter_by_ownership(self, ownership_filter):
         """Filter companies based on ownership"""
-        # Update filter state
         self.ownership_filter = ownership_filter
         
-        # Update button appearance
         self.all_ownership_btn.config(relief=tk.RAISED)
         self.owned_btn.config(relief=tk.RAISED)
         self.not_owned_btn.config(relief=tk.RAISED)
@@ -1170,17 +1083,14 @@ class StockMarket:
         elif ownership_filter == "not_owned":
             self.not_owned_btn.config(relief=tk.SUNKEN)
         
-        # Preserve selection if possible
         selected_company = None
         if self.companies_listbox.curselection():
             selected_idx = self.companies_listbox.curselection()[0]
             if selected_idx < self.companies_listbox.size():
                 selected_company = self.companies_listbox.get(selected_idx)
         
-        # Repopulate the listbox with filtered companies
         self.populate_companies_listbox()
         
-        # Try to restore selection
         if selected_company:
             for i in range(self.companies_listbox.size()):
                 if self.companies_listbox.get(i) == selected_company:
@@ -1189,7 +1099,6 @@ class StockMarket:
                     self.on_company_select(None)  # Explicitly call after selection is restored
                     return
         
-        # If previous selection not found, select the first item if any exist
         if self.companies_listbox.size() > 0:
             self.companies_listbox.selection_set(0)
             self.on_company_select(None)  # Explicitly call after selection is made
@@ -1231,28 +1140,22 @@ class StockMarket:
     
     def populate_companies_listbox(self):
         """Populate the companies listbox based on current filter and sort order"""
-        # Clear current contents
         self.companies_listbox.delete(0, tk.END)
         
-        # Get player credits for affordability check
         player_credits = self.player_data["credits"]
         
-        # Prepare filtered and sorted companies list
         filtered_companies = []
         
         for company in self.companies:
-            # Calculate exactly how many shares can be bought
             max_shares = player_credits // company.current_value  # Integer division to get whole shares
             can_afford = max_shares >= 1  # Can afford if at least 1 whole share can be bought
             
-            # Check if company passes the affordability filter
             passes_affordability = (
                 self.current_filter == "All" or
                 (self.current_filter == "Affordable" and can_afford) or
                 (self.current_filter == "Expensive" and not can_afford)
             )
             
-            # Check if company passes the ownership filter
             is_owned = company.owned_shares > 0
             passes_ownership = (
                 self.ownership_filter == "all" or
@@ -1267,19 +1170,15 @@ class StockMarket:
                 or (self.trend_filter == "falling" and price_change < 0)
             )
             
-            # Add to filtered list if it passes all filters
             if passes_affordability and passes_ownership and passes_trend:
                 filtered_companies.append((company.name, company.current_value, price_change))
         
-        # Sort the filtered companies
         if self.sort_order == "price_asc":
             filtered_companies.sort(key=lambda x: x[1])
         else:
             filtered_companies.sort(key=lambda x: x[1], reverse=True)
         
-        # Add sorted companies to the listbox
         for company_name, price, _price_change in filtered_companies:
-            # Add company to listbox
             self.companies_listbox.insert(tk.END, company_name)
         
         # Do NOT automatically select a company here - that happens in __init__ or filter_companies

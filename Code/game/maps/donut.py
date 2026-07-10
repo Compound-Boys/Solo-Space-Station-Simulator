@@ -84,6 +84,57 @@ SPECIAL_ROOM_HALLWAY = {
     QUARTERS_KEY: (0, 0),
 }
 
+# Hallway tiles that replace the default N/S/E/W grid with a room button + corridor dirs.
+# room_grid / dir grids are (row, column) for nav_frame.grid.
+# check_available: only pack corridor dirs when get_available_directions allows them.
+HALLWAY_SPECIAL_NAV = (
+    {
+        "hallway": SPECIAL_ROOM_HALLWAY[BRIDGE_KEY],
+        "room_key": BRIDGE_KEY,
+        "label": "Bridge",
+        "room": "Bridge",
+        "room_grid": (0, 1),
+        "dirs": (("east", 1, 2), ("south", 2, 1)),
+        "check_available": True,
+    },
+    {
+        "hallway": SPECIAL_ROOM_HALLWAY[MEDBAY_KEY],
+        "room_key": MEDBAY_KEY,
+        "label": "MedBay",
+        "room": "MedBay",
+        "room_grid": (1, 2),
+        "dirs": (("north", 0, 1), ("west", 1, 0)),
+        "check_available": True,
+    },
+    {
+        "hallway": SPECIAL_ROOM_HALLWAY[SECURITY_KEY],
+        "room_key": SECURITY_KEY,
+        "label": "Security",
+        "room": "Security",
+        "room_grid": (0, 1),
+        "dirs": (("west", 1, 0), ("south", 2, 1)),
+        "check_available": False,
+    },
+    {
+        "hallway": SPECIAL_ROOM_HALLWAY[ENGINEERING_KEY],
+        "room_key": ENGINEERING_KEY,
+        "label": "Engineering Bay",
+        "room": "Engineering",
+        "room_grid": (0, 1),
+        "dirs": (("west", 1, 0), ("east", 1, 2)),
+        "check_available": False,
+    },
+    {
+        "hallway": SPECIAL_ROOM_HALLWAY[BAR_KEY],
+        "room_key": BAR_KEY,
+        "label": "Bar",
+        "room": "Bar",
+        "room_grid": (2, 1),
+        "dirs": (("west", 1, 0), ("east", 1, 2)),
+        "check_available": False,
+    },
+)
+
 
 def get_available_directions(x, y):
     """Return which of north/south/east/west lead to another tile on the ring.

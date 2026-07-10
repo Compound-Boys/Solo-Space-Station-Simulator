@@ -22,7 +22,6 @@ from game.objects.food import FOOD_ITEMS
 # }
 
 # --- Define Book Content --- 
-# Moved from main.py
 WELCOME_GUIDE_CONTENT = """WELCOME TO SPACE STATION EXPLORER
 
 Welcome to your new home among the stars! This guide will help you get acquainted with life aboard our station.
@@ -499,9 +498,15 @@ def ensure_locker_inventory(player_data):
 class ItemInventoryMixin:
     """Inventory UI and item action handlers. Requires host to provide root, player_data, and add_note()."""
 
-    def show_inventory_popup(self):
+    def show_inventory_popup(self, on_close=None):
         """Show inventory as an in-main-window overlay."""
-        panel, popup = open_modal_panel(self.root, title="Inventory")
+        if on_close is not None:
+            self._inventory_on_close = on_close
+        on_close_cb = getattr(self, "_inventory_on_close", None)
+
+        panel, popup = open_modal_panel(
+            self.root, title="Inventory", on_close=on_close_cb
+        )
 
         title_label = tk.Label(popup, text="Inventory", font=("Arial", 18), bg="black", fg="white")
         title_label.pack(pady=10)

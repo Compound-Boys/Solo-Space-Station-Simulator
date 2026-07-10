@@ -16,6 +16,7 @@ from game.special_rooms.shared import (
     build_room_shell,
     leave_room,
     open_room_in_main_window,
+    room_lighting_chrome,
     show_character_sheet,
 )
 from game.helper_methods.stock_market import StockMarket
@@ -32,6 +33,9 @@ class Quarters(ItemInventoryMixin):
             parent_window, "Your Quarters", player_data, station_crew, return_callback
         )
         self.root = self.quarters_window
+        self._build_quarters_ui()
+
+    def _build_quarters_ui(self):
         style, button_frame = build_room_shell(
             self.quarters_window,
             self.player_data,
@@ -117,6 +121,14 @@ class Quarters(ItemInventoryMixin):
             width=15,
             command=self.save_and_exit,
         ).pack()
+
+    def reload(self):
+        """Rebuild quarters chrome from current player_data."""
+        for widget in list(self.quarters_window.winfo_children()):
+            widget.destroy()
+        style = room_lighting_chrome(self.player_data)
+        self.quarters_window.configure(bg=style["bg"])
+        self._build_quarters_ui()
 
     def add_note(self, text):
         add_note(self.player_data, text)
@@ -484,18 +496,14 @@ class Quarters(ItemInventoryMixin):
         self.player_data = updated_data
 
         # Holdings are already on player_data; skip syncing onto serialized company dicts
+        self.reload()
 
-        try:
-            if computer_window.winfo_exists():
-                computer_window.lift()
-                computer_window.focus_force()
-        except tk.TclError:
-            pass
     def view_character_sheet(self):
         show_character_sheet(
             self.quarters_window,
             self.player_data,
             self.show_inventory_popup,
+            on_close=self.reload,
         )
 
     def save_and_exit(self):

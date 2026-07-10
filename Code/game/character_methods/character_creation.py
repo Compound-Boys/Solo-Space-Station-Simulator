@@ -177,26 +177,21 @@ class CharacterCreation:
         self.show()
 
     def show(self):
-        # Clear the window
         for widget in self.root.winfo_children():
             widget.destroy()
 
-        # Title
         title_label = tk.Label(self.root, text="Character Creation", font=("Arial", 24), bg="black", fg="white")
         title_label.pack(pady=30)
 
-        # Character creation form
         form_frame = tk.Frame(self.root, bg="black")
         form_frame.pack(pady=20)
 
-        # Name input
         name_label = tk.Label(form_frame, text="Character Name:", font=("Arial", 14), bg="black", fg="white")
         name_label.grid(row=0, column=0, sticky="w", pady=10)
 
         self.name_entry = tk.Entry(form_frame, font=("Arial", 14), width=25)
         self.name_entry.grid(row=0, column=1, sticky="w", pady=10)
 
-        # Random Name button
         def set_random_name():
             self.name_entry.delete(0, tk.END)
             self.name_entry.insert(0, random.choice(NPC_NAMES))
@@ -204,7 +199,6 @@ class CharacterCreation:
         random_name_btn = tk.Button(form_frame, text="Random", font=("Arial", 12), command=set_random_name)
         random_name_btn.grid(row=0, column=2, padx=(5, 0), pady=10)
 
-        # Department selection
         department_label = tk.Label(form_frame, text="Department:", font=("Arial", 14), bg="black", fg="white")
         department_label.grid(row=1, column=0, sticky="w", pady=10)
 
@@ -220,7 +214,6 @@ class CharacterCreation:
         department_menu.config(font=("Arial", 14), width=25)
         department_menu.grid(row=1, column=1, sticky="w", pady=10)
 
-        # Job selection
         job_label = tk.Label(form_frame, text="Select Job:", font=("Arial", 14), bg="black", fg="white")
         job_label.grid(row=2, column=0, sticky="w", pady=10)
 
@@ -228,14 +221,12 @@ class CharacterCreation:
         self.job_menu_frame = tk.Frame(form_frame, bg="black")
         self.job_menu_frame.grid(row=2, column=1, pady=10, sticky="w")
 
-        # Credits display based on selected job
         credits_label = tk.Label(form_frame, text="Starting Credits:", font=("Arial", 14), bg="black", fg="white")
         credits_label.grid(row=3, column=0, sticky="w", pady=10)
 
         self.credits_value = tk.Label(form_frame, text="-", font=("Arial", 14), bg="black", fg="white")
         self.credits_value.grid(row=3, column=1, sticky="w", pady=10)
 
-        # Job description frame
         desc_frame = tk.Frame(self.root, bg="black")
         desc_frame.pack(pady=10, fill=tk.X, padx=50)
 
@@ -248,7 +239,6 @@ class CharacterCreation:
         self._rebuild_job_menu([SELECT_JOB])
         self.show_job_placeholder()
 
-        # Buttons
         button_frame = tk.Frame(self.root, bg="black")
         button_frame.pack(pady=20)
 
@@ -314,7 +304,6 @@ class CharacterCreation:
         self.job_description.config(text=job_info["description"])
 
     def start_game(self):
-        # Get player information
         player_name = self.name_entry.get().strip()
 
         if not player_name:
@@ -342,7 +331,6 @@ class CharacterCreation:
         self.player_data["stock_holdings"] = {}
         self.player_data["bar_mixed_stock"] = {}
 
-        # Initialize damage stats
         self.player_data["damage"] = {
             "burn": 0,
             "poison": 0,
@@ -499,7 +487,6 @@ class CharacterCreation:
                 print(f"Generated NPC: {npc_name} (Staff Assistant)")
         # --- End NPC Generation ---
 
-        # Initialize stock market with starting values
         if "stock_market" not in self.player_data:
             self.player_data["stock_market"] = default_stock_market_state()
             self.player_data["stock_market"]["companies"] = serialize_companies(self.companies)
@@ -525,5 +512,4 @@ class CharacterCreation:
 
         self.player_data["station_crew"] = station_crew
 
-        # Hand the finished character and crew back to the game
         self.on_complete(self.player_data, station_crew)

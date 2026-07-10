@@ -89,12 +89,8 @@ class PlayerMovementMixin:
         elif direction == "west":
             y -= 1
 
-        # Update location
         self.player_data["location"]["x"] = x
         self.player_data["location"]["y"] = y
-
-        # Log for debugging
-        print(f"Moving to location: {x},{y}")
 
         # Check if the destination exists in the ship map
         loc_key = f"{x},{y}"

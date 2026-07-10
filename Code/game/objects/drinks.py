@@ -3,7 +3,7 @@
 import datetime
 import tkinter as tk
 
-from game.helper_methods.ui_panels import open_modal_panel
+from game.helper_methods.ui_panels import bind_mousewheel, open_modal_panel
 
 DRINKS_MENU = {
     "Beer": {"price": 10, "alcohol_content": 1, "desc": "A refreshing glass of regular beer."},
@@ -209,16 +209,6 @@ def is_drink_alcoholic(name, details):
     return any(ing in SPIRITS for ing in details.get("ingredients", []))
 
 
-def validate_mixed_drink_ingredients():
-    """Return {drink_name: [missing_ingredients]} for invalid recipes."""
-    available = set(AVAILABLE_INGREDIENTS)
-    return {
-        name: [i for i in data["ingredients"] if i not in available]
-        for name, data in MIXED_DRINKS.items()
-        if any(i not in available for i in data["ingredients"])
-    }
-
-
 def _apply_alcohol_flags():
     """Stamp alcohol metadata onto drink menu entries."""
     for name, details in DRINKS_MENU.items():
@@ -420,14 +410,7 @@ class DrinkMixer:
         def _on_mousewheel(event):
             main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-        mixer_popup.bind("<MouseWheel>", _on_mousewheel)
-
-        orig_destroy = mixer_popup.destroy
-        def _destroy_and_cleanup():
-            mixer_popup.unbind("<MouseWheel>")
-            orig_destroy()
-
-        mixer_popup.destroy = _destroy_and_cleanup
+        bind_mousewheel(mixer_popup, _on_mousewheel)
 
     def _add_to_mix(self, ing_listbox, mix_listbox, available_items):
         """Add an ingredient to the mixing glass."""
@@ -531,17 +514,7 @@ class DrinkMixer:
             except tk.TclError:
                 pass
 
-        recipes_popup.bind("<MouseWheel>", _on_recipe_mousewheel)
-
-        orig_destroy = recipes_popup.destroy
-        def _destroy_and_cleanup():
-            try:
-                recipes_popup.unbind("<MouseWheel>")
-            except Exception:
-                pass
-            orig_destroy()
-
-        recipes_popup.destroy = _destroy_and_cleanup
+        bind_mousewheel(recipes_popup, _on_recipe_mousewheel)
 
         def add_recipe(drink_name):
             if drink_name in MIXED_DRINKS:
@@ -676,17 +649,7 @@ class DrinkMixer:
             except tk.TclError:
                 pass
 
-        ing_popup.bind("<MouseWheel>", _on_ing_mousewheel)
-
-        orig_destroy = ing_popup.destroy
-        def _destroy_and_cleanup():
-            try:
-                ing_popup.unbind("<MouseWheel>")
-            except Exception:
-                pass
-            orig_destroy()
-
-        ing_popup.destroy = _destroy_and_cleanup
+        bind_mousewheel(ing_popup, _on_ing_mousewheel)
 
         ing_text.insert(tk.END, "SPIRITS\n", "header")
         ing_text.insert(tk.END, "-------\n", "header")

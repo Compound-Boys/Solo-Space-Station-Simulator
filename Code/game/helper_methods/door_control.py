@@ -1,5 +1,6 @@
 from tkinter import messagebox
 
+from game.helper_methods.ui_panels import refocus_window
 from game.maps.donut import (
     BRIDGE_KEY,
     MEDBAY_KEY,
@@ -61,8 +62,7 @@ def _show_access_error(parent_window):
         10,
         lambda: messagebox.showinfo("Door Control", ACCESS_ERROR, parent=parent_window),
     )
-    parent_window.after(20, parent_window.lift)
-    parent_window.focus_force()
+    refocus_window(parent_window)
 
 
 def toggle_door_lock(player_data, door_key, parent_window):
@@ -98,6 +98,5 @@ def toggle_door_lock(player_data, door_key, parent_window):
         10,
         lambda: messagebox.showinfo("Door Control", message, parent=parent_window),
     )
-    parent_window.after(20, parent_window.lift)
-    parent_window.focus_force()
+    refocus_window(parent_window)
     return True

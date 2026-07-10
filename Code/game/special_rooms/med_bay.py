@@ -2,21 +2,16 @@ import tkinter as tk
 from tkinter import messagebox
 import math
 
-from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
 from game.helper_methods.oxygen_helper import DOCTOR_REQUIRED_FLOOR
 from game.helper_methods.alcohol_helper import DOCTOR_SOBER_FLOOR, sober_up_cost
-from game.objects.items import ItemInventoryMixin
 from game.special_rooms.shared import (
+    SpecialRoomBase,
     add_note,
     build_npc_contact_section,
-    build_room_shell,
-    open_room_in_main_window,
-    pack_character_sheet_button,
-    try_leave_through_door,
-    show_station_menu as render_station_menu,
+    clear_button_frame,
 )
-from game.helper_methods.ui_panels import open_modal_panel
-from game.maps.donut import MEDBAY_KEY as DOOR_KEY
+from game.helper_methods.ui_panels import bind_mousewheel, open_modal_panel, refocus_window
+from game.maps.donut import MEDBAY_KEY
 
 # Cost multipliers: 1 credit per damage point, with type-based scaling
 COST_MULTIPLIERS = {
@@ -158,46 +153,168 @@ def format_damage_sections(assessment):
     return "\n\n".join(sections)
 
 
-class MedBay(ItemInventoryMixin):
-    def __init__(self, parent_window, player_data, station_crew, return_callback):
-        self.parent_window = parent_window
-        self.player_data = player_data
-        self.station_crew = station_crew
-        self.return_callback = return_callback
+def build_treatment_cost_block(assessment, alcohol=0):
+    """Shared cost totals and breakdown lines for health check / doctor dialogs."""
+    sober_cost = sober_up_cost(alcohol)
+    injury_cost = assessment["total_cost"]
+    total_cost = injury_cost + sober_cost
+    lines = ["Treatment Cost:"]
+    lines.extend(format_cost_breakdown(assessment))
+    if sober_cost > 0:
+        lines.append(f"- Sober up: {sober_cost} credits")
+    lines.append(f"Total: {total_cost} credits")
+    return {
+        "injury_cost": injury_cost,
+        "sober_cost": sober_cost,
+        "total_cost": total_cost,
+        "lines": lines,
+    }
 
-        self.medbay_window = open_room_in_main_window(
-            parent_window, "MedBay", player_data, station_crew, return_callback
-        )
-        self.root = self.medbay_window
-        _, self.button_frame = build_room_shell(
-            self.medbay_window,
-            self.player_data,
-            "Station Medical Bay",
-            "The medical bay is clean and orderly. Various medical equipment lines the walls, and a few examination beds are visible. The station's medical staff handle everything from routine checkups to emergency trauma care.",
-        )
 
-        self._build_station_menu()
+def build_health_check_report(player_data):
+    """Full health-check report text (scan results + recommendation + costs)."""
+    assessment = assess_injuries(player_data)
+    overall_health = assessment["overall_limb_health"]
+    has_non_limb = bool(assessment["active_damage_types"])
+    alcohol = player_data.get("alcohol_percent", 0) or 0
+    sober_cost = sober_up_cost(alcohol)
 
-        pack_character_sheet_button(self.medbay_window, self.player_data, self)
+    health_report = "Health Check Results:\n\n"
+    if assessment["limbs"]:
+        health_report += f"Overall Limb Health: {overall_health:.1f}%\n\n"
+    health_report += format_damage_sections(assessment)
 
-        # Exit button
-        exit_btn = tk.Button(self.medbay_window, text="Exit Room", font=("Arial", 14), width=15, command=self.on_closing)
-        exit_btn.pack(pady=20)
+    if alcohol > 0:
+        health_report += f"\n\nBlood Alcohol: {alcohol:.1f}%"
+        if alcohol >= DOCTOR_SOBER_FLOOR:
+            health_report += (
+                f"\n• Intoxication is at or above {DOCTOR_SOBER_FLOOR}%. "
+                f"Doctor treatment is required to sober up "
+                f"({sober_cost} credits)."
+            )
+        else:
+            health_report += (
+                "\n• Alcohol will metabolize over time "
+                "(about 5% every 2 minutes)."
+            )
 
-    def add_note(self, text):
-        add_note(self.player_data, text)
-    
+    needs_attention = overall_health < 60 or has_non_limb or alcohol >= DOCTOR_SOBER_FLOOR
+    health_report += "\n\nRecommendation: "
+    if needs_attention:
+        health_report += "Medical attention recommended."
+    else:
+        health_report += "No immediate medical attention required."
+
+    if overall_health < 100 or has_non_limb:
+        health_report += "\n\nDetailed Notes:"
+
+        if assessment["critical_limbs"]:
+            health_report += f"\n• Critical damage detected in {', '.join(assessment['critical_limbs'])}. "
+            health_report += "Immediate treatment required."
+
+        if assessment["injured_limbs"]:
+            health_report += f"\n• Moderate trauma detected in {', '.join(assessment['injured_limbs'])}. "
+            health_report += "Rest and treatment advised."
+
+        if has_non_limb:
+            health_report += (
+                f"\n• Non-limb damage detected: {', '.join(assessment['active_damage_types'])}."
+            )
+
+        oxygen_damage = assessment["non_limb"]["oxygen"]["value"]
+        if oxygen_damage > 0:
+            if oxygen_damage >= DOCTOR_REQUIRED_FLOOR:
+                health_report += (
+                    f"\n• Oxygen damage is at {oxygen_damage:.0f}% "
+                    f"(at or above {DOCTOR_REQUIRED_FLOOR}%). "
+                    "You must be healed by the doctor to fully recover."
+                )
+            else:
+                health_report += (
+                    f"\n• Oxygen damage is at {oxygen_damage:.0f}% "
+                    f"(below {DOCTOR_REQUIRED_FLOOR}%). "
+                    "You can rest to restore yourself while life support is functional."
+                )
+
+        if overall_health < 75:
+            health_report += "\n• Movement and performance significantly impaired."
+        elif overall_health < 90 and assessment["limbs"]:
+            health_report += "\n• Some physical activities may be difficult."
+
+    cost = build_treatment_cost_block(assessment, alcohol)
+    if cost["total_cost"] > 0:
+        health_report += "\n\nEstimated Treatment Cost:"
+        for line in format_cost_breakdown(assessment):
+            health_report += f"\n{line}"
+        if cost["sober_cost"] > 0:
+            health_report += f"\n- Sober up: {cost['sober_cost']} credits"
+        health_report += f"\nTotal: {cost['total_cost']} credits"
+        health_report += "\n(Talk to Doctor to receive treatment)"
+    else:
+        health_report += "\n\nNo treatment needed."
+
+    return health_report
+
+
+def build_doctor_exam_message(player_data):
+    """Doctor dialog body + cost totals for treatment confirmation."""
+    assessment = assess_injuries(player_data)
+    alcohol = player_data.get("alcohol_percent", 0) or 0
+    cost = build_treatment_cost_block(assessment, alcohol)
+
+    if cost["total_cost"] == 0:
+        return {
+            "assessment": assessment,
+            "alcohol": alcohol,
+            **cost,
+            "message": "The doctor examines you. 'You're in perfect health! No treatment needed.'",
+            "needs_treatment": False,
+        }
+
+    message = "The doctor examines you.\n\n"
+    message += format_damage_sections(assessment)
+    if alcohol > 0:
+        message += f"\n\nBlood Alcohol: {alcohol:.1f}%"
+    message += "\n\n" + "\n".join(cost["lines"])
+    message += "\n\nWould you like to proceed with treatment?"
+    return {
+        "assessment": assessment,
+        "alcohol": alcohol,
+        **cost,
+        "message": message,
+        "needs_treatment": True,
+    }
+
+
+class MedBay(SpecialRoomBase):
+    ROOM_TITLE = "MedBay"
+    ROOM_HEADING = "Station Medical Bay"
+    ROOM_DESCRIPTION = (
+        "The medical bay is clean and orderly. Various medical equipment lines the walls, and a few "
+        "examination beds are visible. The station's medical staff handle everything from routine "
+        "checkups to emergency trauma care."
+    )
+    DOOR_KEY = MEDBAY_KEY
+    WINDOW_ATTR = "medbay_window"
+
+    def station_entries(self):
+        return [{
+            "label": "Enter MedBay Station",
+            "command": self.access_medbay_station,
+        }]
+
     def show_room_options(self):
-        """Show regular room options that all players can access"""
-        # Clear existing buttons
-        for widget in self.button_frame.winfo_children():
-            widget.destroy()
-            
-        # Health check option
-        health_check_btn = tk.Button(self.button_frame, text="Request Health Check", font=("Arial", 14), width=20, command=self.health_check)
+        clear_button_frame(self.button_frame)
+
+        health_check_btn = tk.Button(
+            self.button_frame,
+            text="Request Health Check",
+            font=("Arial", 14),
+            width=20,
+            command=self.health_check,
+        )
         health_check_btn.pack(pady=10)
-        
-        # Talk to doctor option (or "Call" them if they've stepped away)
+
         build_npc_contact_section(
             self.button_frame,
             self.player_data,
@@ -210,131 +327,32 @@ class MedBay(ItemInventoryMixin):
             absent_flavor="The doctor is currently away from MedBay.",
         )
 
-        if can_control_door(self.player_data, DOOR_KEY):
-            back_btn = tk.Button(self.button_frame, text="Back to Station Menu", font=("Arial", 14), width=20, 
-                               command=self.show_station_menu)
-            back_btn.pack(pady=10)
+        self.pack_back_to_station_menu()
     
     def health_check(self):
-        assessment = assess_injuries(self.player_data)
-        overall_health = assessment["overall_limb_health"]
-        has_non_limb = bool(assessment["active_damage_types"])
-        alcohol = self.player_data.get("alcohol_percent", 0) or 0
-        sober_cost = sober_up_cost(alcohol)
-
-        health_report = "Health Check Results:\n\n"
-        if assessment["limbs"]:
-            health_report += f"Overall Limb Health: {overall_health:.1f}%\n\n"
-        health_report += format_damage_sections(assessment)
-
-        if alcohol > 0:
-            health_report += f"\n\nBlood Alcohol: {alcohol:.1f}%"
-            if alcohol >= DOCTOR_SOBER_FLOOR:
-                health_report += (
-                    f"\n• Intoxication is at or above {DOCTOR_SOBER_FLOOR}%. "
-                    f"Doctor treatment is required to sober up "
-                    f"({sober_cost} credits)."
-                )
-            else:
-                health_report += (
-                    "\n• Alcohol will metabolize over time "
-                    "(about 5% every 2 minutes)."
-                )
-
-        needs_attention = overall_health < 60 or has_non_limb or alcohol >= DOCTOR_SOBER_FLOOR
-        health_report += "\n\nRecommendation: "
-        if needs_attention:
-            health_report += "Medical attention recommended."
-        else:
-            health_report += "No immediate medical attention required."
-
-        if overall_health < 100 or has_non_limb:
-            health_report += "\n\nDetailed Notes:"
-
-            if assessment["critical_limbs"]:
-                health_report += f"\n• Critical damage detected in {', '.join(assessment['critical_limbs'])}. "
-                health_report += "Immediate treatment required."
-
-            if assessment["injured_limbs"]:
-                health_report += f"\n• Moderate trauma detected in {', '.join(assessment['injured_limbs'])}. "
-                health_report += "Rest and treatment advised."
-
-            if has_non_limb:
-                health_report += (
-                    f"\n• Non-limb damage detected: {', '.join(assessment['active_damage_types'])}."
-                )
-
-            oxygen_damage = assessment["non_limb"]["oxygen"]["value"]
-            if oxygen_damage > 0:
-                if oxygen_damage >= DOCTOR_REQUIRED_FLOOR:
-                    health_report += (
-                        f"\n• Oxygen damage is at {oxygen_damage:.0f}% "
-                        f"(at or above {DOCTOR_REQUIRED_FLOOR}%). "
-                        "You must be healed by the doctor to fully recover."
-                    )
-                else:
-                    health_report += (
-                        f"\n• Oxygen damage is at {oxygen_damage:.0f}% "
-                        f"(below {DOCTOR_REQUIRED_FLOOR}%). "
-                        "You can rest to restore yourself while life support is functional."
-                    )
-
-            if overall_health < 75:
-                health_report += "\n• Movement and performance significantly impaired."
-            elif overall_health < 90 and assessment["limbs"]:
-                health_report += "\n• Some physical activities may be difficult."
-
-        injury_cost = assessment["total_cost"]
-        combined_cost = injury_cost + sober_cost
-        if combined_cost > 0:
-            health_report += "\n\nEstimated Treatment Cost:"
-            for line in format_cost_breakdown(assessment):
-                health_report += f"\n{line}"
-            if sober_cost > 0:
-                health_report += f"\n- Sober up: {sober_cost} credits"
-            health_report += f"\nTotal: {combined_cost} credits"
-            health_report += "\n(Talk to Doctor to receive treatment)"
-        else:
-            health_report += "\n\nNo treatment needed."
-
+        health_report = build_health_check_report(self.player_data)
         self.medbay_window.after(
             10,
             lambda: messagebox.showinfo("Medical Scan", health_report, parent=self.medbay_window),
         )
-        self.medbay_window.after(20, self.medbay_window.lift)
-        self.medbay_window.focus_force()
+        refocus_window(self.medbay_window)
 
     def talk_to_doctor(self):
         """Talk to a doctor who can provide healing for a fee based on damage"""
-        assessment = assess_injuries(self.player_data)
-        injury_cost = assessment["total_cost"]
-        alcohol = self.player_data.get("alcohol_percent", 0) or 0
-        sober_cost = sober_up_cost(alcohol)
-        total_cost = injury_cost + sober_cost
+        exam = build_doctor_exam_message(self.player_data)
 
-        if total_cost == 0:
-            message = "The doctor examines you. 'You're in perfect health! No treatment needed.'"
+        if not exam["needs_treatment"]:
             self.medbay_window.after(
                 10,
-                lambda: messagebox.showinfo("Doctor", message, parent=self.medbay_window),
+                lambda: messagebox.showinfo("Doctor", exam["message"], parent=self.medbay_window),
             )
             return
 
-        message = "The doctor examines you.\n\n"
-        message += format_damage_sections(assessment)
-        if alcohol > 0:
-            message += f"\n\nBlood Alcohol: {alcohol:.1f}%"
-        message += "\n\nTreatment Cost:"
-        for line in format_cost_breakdown(assessment):
-            message += f"\n{line}"
-        if sober_cost > 0:
-            message += f"\n- Sober up: {sober_cost} credits"
-        message += f"\nTotal: {total_cost} credits"
-        message += "\n\nWould you like to proceed with treatment?"
-
+        total_cost = exam["total_cost"]
+        sober_cost = exam["sober_cost"]
         _panel, dialog = open_modal_panel(self.medbay_window, title="Doctor")
         msg_label = tk.Label(
-            dialog, text=message, font=("Arial", 12), bg="black", fg="white",
+            dialog, text=exam["message"], font=("Arial", 12), bg="black", fg="white",
             wraplength=420, justify=tk.LEFT,
         )
         msg_label.pack(pady=20, padx=10)
@@ -441,102 +459,63 @@ class MedBay(ItemInventoryMixin):
 
             add_note(self.player_data, note_text)
 
-        self.medbay_window.after(20, self.medbay_window.lift)
-        self.medbay_window.focus_force()
-    
+        refocus_window(self.medbay_window)
+
     def access_medbay_station(self):
-        # Show medbay station options for authorized personnel
-        # Clear existing buttons
-        for widget in self.button_frame.winfo_children():
-            widget.destroy()
-            
-        # Add healing option
-        heal_btn = tk.Button(self.button_frame, text="Heal Injuries", font=("Arial", 14), width=20, command=self.heal_player)
+        clear_button_frame(self.button_frame)
+
+        heal_btn = tk.Button(
+            self.button_frame, text="Heal Injuries", font=("Arial", 14), width=20, command=self.heal_player
+        )
         heal_btn.pack(pady=10)
-        
-        # Add Crew Vitals Button
-        vitals_btn = tk.Button(self.button_frame, text="Check Crew Vitals", font=("Arial", 14), width=20, command=self.show_crew_vitals)
+
+        vitals_btn = tk.Button(
+            self.button_frame, text="Check Crew Vitals", font=("Arial", 14), width=20, command=self.show_crew_vitals
+        )
         vitals_btn.pack(pady=10)
-        
-        # Back button
-        back_btn = tk.Button(self.button_frame, text="Back to Station Menu", font=("Arial", 14), width=20, 
-                           command=self.show_station_menu)
+
+        back_btn = tk.Button(
+            self.button_frame,
+            text="Back to Station Menu",
+            font=("Arial", 14),
+            width=20,
+            command=self.show_station_menu,
+        )
         back_btn.pack(pady=10)
     
     def heal_player(self):
         """Heal the player's limbs to full health"""
-        # Check if player has limb data
         if "limbs" in self.player_data:
-            # Store original health values for report
             original_health = self.player_data["limbs"].copy()
             
-            # Heal all limbs to 100%
             for limb in self.player_data["limbs"]:
                 self.player_data["limbs"][limb] = 100
             
-            # Create healing report
             healing_report = "Medical Treatment Results:\n\n"
             healing_report += "All limbs restored to full health.\n\n"
             healing_report += "Previous Status:\n"
             
-            # Check if there were any injuries to track
             had_injuries = False
             injury_details = []
             
-            # Show previous health values
             for limb, health in original_health.items():
                 limb_name = limb.replace('_', ' ').title()
                 healing_report += f"- {limb_name}: {health}% → 100%\n"
                 
-                # Track injuries for note
                 if health < 100:
                     had_injuries = True
                     injury_details.append(f"{limb_name} ({health}% → 100%)")
             
-            # Show dialog with healing results
             self.medbay_window.after(10, lambda: messagebox.showinfo("Medical Treatment", healing_report, parent=self.medbay_window))
             
-            # Add note about healing if there were injuries
             if had_injuries:
                 note_text = f"Received advanced medical treatment at MedBay Station. Healed: {', '.join(injury_details)}"
                 add_note(self.player_data, note_text)
                 
         else:
             self.medbay_window.after(10, lambda: messagebox.showinfo("Medical Treatment", "No injuries to treat.", parent=self.medbay_window))
-        
-        # Make sure the window stays on top after dialog
-        self.medbay_window.after(20, self.medbay_window.lift)
-        self.medbay_window.focus_force()
-    
-    def toggle_door_lock(self):
-        toggle_room_door_lock(self.player_data, DOOR_KEY, self.medbay_window)
-    
-    def on_closing(self):
-        try_leave_through_door(
-            self.medbay_window,
-            self.player_data,
-            DOOR_KEY,
-            self.return_callback,
-            self.station_crew,
-        )
 
-    def _build_station_menu(self, before_show=None):
-        render_station_menu(
-            self.button_frame,
-            self.player_data,
-            door_key=DOOR_KEY,
-            stations=[{
-                "label": "Enter MedBay Station",
-                "command": self.access_medbay_station,
-            }],
-            show_room_options=self.show_room_options,
-            toggle_door_lock=self.toggle_door_lock,
-            before_show=before_show,
-        )
-
-    def show_station_menu(self):
-        """Return to main station menu options"""
-        self._build_station_menu()
+        refocus_window(self.medbay_window)
 
     def show_crew_vitals(self):
         """Display a window showing the vitals of all crew members."""
@@ -544,19 +523,16 @@ class MedBay(ItemInventoryMixin):
         vitals_window.configure(bg="black")
 
 
-        # --- Header ---
         header_frame = tk.Frame(vitals_window, bg="black")
         header_frame.pack(pady=10)
         title_label = tk.Label(header_frame, text="Crew Vitals Monitor", font=("Arial", 18, "bold"), bg="black", fg="white")
         title_label.pack(side=tk.LEFT, padx=10)
 
-        # Toggle Details Button
         details_visible = tk.BooleanVar(value=False)
         details_button = tk.Button(header_frame, text="Show Details", font=("Arial", 10),
                                    command=lambda: toggle_details_view(details_visible, details_button, crew_frame))
         details_button.pack(side=tk.LEFT, padx=10)
 
-        # --- Scrollable Crew Area ---
         canvas_frame = tk.Frame(vitals_window, bg="black")
         canvas_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
@@ -570,12 +546,10 @@ class MedBay(ItemInventoryMixin):
         crew_frame = tk.Frame(canvas, bg="black") # Frame to hold crew info
         canvas_window = canvas.create_window((0, 0), window=crew_frame, anchor="nw")
 
-        # --- Populate Crew Vitals ---
         all_crew = [self.player_data] + self.station_crew
         crew_widgets = {} # To store widgets for toggling details
 
         def update_crew_display(show_details):
-            # Clear previous widgets
             for widget in crew_frame.winfo_children():
                 widget.destroy()
             crew_widgets.clear()
@@ -585,11 +559,9 @@ class MedBay(ItemInventoryMixin):
                 job = crew_member.get("job", "N/A")
                 is_player = (name == self.player_data.get("name"))
 
-                # Frame for each crew member
                 member_frame = tk.Frame(crew_frame, bg="#111111" if i % 2 == 0 else "#222222", bd=1, relief=tk.SOLID)
                 member_frame.pack(fill=tk.X, pady=2, padx=2)
 
-                # --- Compact View Row ---
                 compact_frame = tk.Frame(member_frame, bg=member_frame.cget("bg"))
                 compact_frame.pack(fill=tk.X, pady=3, padx=5)
 
@@ -598,7 +570,6 @@ class MedBay(ItemInventoryMixin):
                                       bg=compact_frame.cget("bg"), fg="light green" if is_player else "white", anchor="w")
                 name_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-                # Calculate overall health status
                 limbs = crew_member.get("limbs", {})
                 damage = crew_member.get("damage", {})
                 total_limb_health = sum(limbs.values())
@@ -624,11 +595,9 @@ class MedBay(ItemInventoryMixin):
                                         bg=status_color, fg="black", width=10)
                 status_label.pack(side=tk.RIGHT, padx=5)
 
-                # --- Detailed View Frame (Initially hidden) ---
                 detail_frame = tk.Frame(member_frame, bg=member_frame.cget("bg"))
                 # Packed later by toggle function if show_details is True
 
-                # Limb Health Details
                 limbs_title = tk.Label(detail_frame, text="Limb Health:", font=("Arial", 10, "bold"),
                                        bg=detail_frame.cget("bg"), fg="cyan")
                 limbs_title.grid(row=0, column=0, sticky="w", padx=10, pady=(5,0))
@@ -645,7 +614,6 @@ class MedBay(ItemInventoryMixin):
                          col_count = 0
                          row_count += 1
 
-                # Other Damage Details
                 damage_title = tk.Label(detail_frame, text="Other Damage:", font=("Arial", 10, "bold"),
                                        bg=detail_frame.cget("bg"), fg="cyan")
                 damage_title.grid(row=row_count, column=0, sticky="w", padx=10, pady=(5,0))
@@ -668,8 +636,6 @@ class MedBay(ItemInventoryMixin):
                 if show_details:
                     detail_frame.pack(fill=tk.X, pady=(0, 5), padx=5) # Show details
 
-            # --- End Loop ---
-            # Update scrollregion after populating
             crew_frame.update_idletasks()
             canvas.configure(scrollregion=canvas.bbox("all"))
             canvas.yview_moveto(0) # Scroll to top
@@ -683,27 +649,13 @@ class MedBay(ItemInventoryMixin):
                 button.config(text="Show Details")
                 update_crew_display(show_details=False)
 
-        # Initial population (compact view)
         update_crew_display(show_details=False)
 
-        # --- Mousewheel Scrolling ---
         def _on_vitals_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
 
-        vitals_window.bind("<MouseWheel>", _on_vitals_mousewheel)
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width)) # Adjust frame width
+        bind_mousewheel(vitals_window, _on_vitals_mousewheel)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
 
-        # --- Close Button ---
         close_btn = tk.Button(vitals_window, text="Close", font=("Arial", 12), command=vitals_window.destroy)
         close_btn.pack(pady=10)
-
-        # --- Cleanup on Close ---
-        orig_destroy = vitals_window.destroy
-        def _destroy_and_cleanup():
-            try:
-                vitals_window.unbind("<MouseWheel>")
-            except:
-                pass
-            orig_destroy()
-        vitals_window.destroy = _destroy_and_cleanup
-
