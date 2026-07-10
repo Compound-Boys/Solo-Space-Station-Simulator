@@ -13,6 +13,10 @@ POST_DEATH_OXYGEN = 50
 POST_DEATH_LIMB_HEALTH = 20
 RECOVERY_SECONDS_PER_PERCENT = 30
 
+# Grace period (master-timer seconds) between life support hitting 0 and
+# oxygen damage actually starting, per the station-wide emergency announcement.
+OXYGEN_DEPLETION_GRACE_SECONDS = 15
+
 # Player warning messages (keyed by threshold %)
 OXYGEN_WARNING_MESSAGES = {
     30: "You're feeling light-headed and having difficulty breathing. Oxygen levels are dropping.",
@@ -84,8 +88,34 @@ def life_support_entering_damage_range(previous, new):
     return previous > DAMAGE_THRESHOLD_LEVEL and new <= DAMAGE_THRESHOLD_LEVEL
 
 
-def apply_oxygen_tick(player_data, station_crew, elapsed_seconds):
+def _oxygen_depletion_grace_active(player_data, master_elapsed_seconds):
+    """True if the post-emergency-announcement grace period is still running.
+
+    Clears the timer once it expires so damage resumes normally afterward.
+    """
+    if master_elapsed_seconds is None:
+        return False
+
+    timers = player_data.get("damage_timers") or {}
+    depletion = timers.get("oxygen_depletion")
+    if not depletion or not depletion.get("active"):
+        return False
+
+    damage_starts_at = depletion.get("damage_starts_at_seconds")
+    if damage_starts_at is None or master_elapsed_seconds >= damage_starts_at:
+        depletion["active"] = False
+        return False
+
+    return True
+
+
+def apply_oxygen_tick(player_data, station_crew, elapsed_seconds, master_elapsed_seconds=None):
     """Apply oxygen damage or recovery for one battery tick.
+
+    ``elapsed_seconds`` is the real-time delta since the previous tick (used
+    to scale damage/recovery); ``master_elapsed_seconds`` is the current
+    master game clock value, used only to check the oxygen-depletion grace
+    period start/end.
 
     Mutates crew ``damage["oxygen"]``. Returns player-facing events for UI:
     ``{"crossed_warnings": [...], "died": bool, "life_support_level": int}``.
@@ -98,8 +128,13 @@ def apply_oxygen_tick(player_data, station_crew, elapsed_seconds):
     }
 
     all_crew = [player_data] + list(station_crew)
-    apply_damage = life_support_level <= DAMAGE_THRESHOLD_LEVEL
-    apply_recovery = not apply_damage
+    life_support_failing = life_support_level <= DAMAGE_THRESHOLD_LEVEL
+    in_grace_period = life_support_failing and _oxygen_depletion_grace_active(
+        player_data, master_elapsed_seconds
+    )
+    # During the grace period, oxygen holds steady: no damage, no recovery.
+    apply_damage = life_support_failing and not in_grace_period
+    apply_recovery = not life_support_failing
 
     oxygen_damage_rate = 0
     if apply_damage:
@@ -119,11 +154,6 @@ def apply_oxygen_tick(player_data, station_crew, elapsed_seconds):
             crew_member["damage"]["oxygen"] = new_oxygen_damage
 
             if is_player:
-                print(
-                    f"Player Oxygen damage: Current={current_oxygen_damage}%, "
-                    f"Adding={oxygen_damage_rate}% -> New={new_oxygen_damage}% "
-                    f"(elapsed={elapsed_seconds:.1f}s, LS={life_support_level})"
-                )
                 for threshold in WARNING_THRESHOLDS:
                     if current_oxygen_damage < threshold <= new_oxygen_damage:
                         events["crossed_warnings"].append(threshold)
@@ -136,12 +166,6 @@ def apply_oxygen_tick(player_data, station_crew, elapsed_seconds):
             if current_oxygen_damage > floor:
                 new_oxygen_damage = max(floor, current_oxygen_damage - recovery_amount)
                 crew_member["damage"]["oxygen"] = new_oxygen_damage
-                if is_player:
-                    print(
-                        f"Player Oxygen recovery: Current={current_oxygen_damage}%, "
-                        f"Recovered={recovery_amount}% -> New={new_oxygen_damage}% "
-                        f"(floor={floor}, elapsed={elapsed_seconds:.1f}s)"
-                    )
 
     return events
 

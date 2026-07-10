@@ -20,7 +20,8 @@ from game.helper_methods.jail import (
     jail_seconds_remaining,
     maybe_offer_arrest_after_call,
 )
-from game.helper_methods.ui_panels import bind_mousewheel, open_modal_panel, refocus_window
+from game.helper_methods.game_clock import get_elapsed_seconds
+from game.helper_methods.ui_panels import bind_mousewheel, open_modal_panel, refocus_window, schedule_ui_tick
 from game.objects.items import ItemInventoryMixin
 
 ROOM_GEOMETRY = "1012x759"
@@ -278,7 +279,9 @@ def try_leave_through_door(
     from game.maps.donut import SECURITY_KEY
 
     if is_jailed(player_data) and door_key == SECURITY_KEY:
-        remaining = format_jail_time(jail_seconds_remaining(player_data))
+        remaining = format_jail_time(
+            jail_seconds_remaining(player_data, get_elapsed_seconds(player_data))
+        )
         room_window.after(
             10,
             lambda: messagebox.showinfo(
@@ -657,16 +660,31 @@ def build_npc_contact_section(
 
     # Jailed crew cannot be called back to their post.
     if is_jailed(away_npc):
-        remaining = format_jail_time(jail_seconds_remaining(away_npc))
         name = away_npc.get("name", "They")
-        tk.Label(
+
+        def _jail_label_text():
+            remaining = format_jail_time(
+                jail_seconds_remaining(away_npc, get_elapsed_seconds(player_data))
+            )
+            return f"{name} is in jail and will be released in {remaining}."
+
+        jail_label = tk.Label(
             button_frame,
-            text=f"{name} is in jail and will be released in {remaining}.",
+            text=_jail_label_text(),
             font=("Arial", 11, "italic"),
             bg=button_frame.cget("bg"),
             fg="orange",
             wraplength=300,
-        ).pack(pady=10)
+        )
+        jail_label.pack(pady=10)
+
+        def _update_jail_label():
+            if not is_jailed(away_npc):
+                refresh_callback()
+                return
+            jail_label.config(text=_jail_label_text())
+
+        schedule_ui_tick(jail_label, _update_jail_label)
         return True
 
     flavor = absent_flavor or f"The {job_name} is away from their post."
@@ -681,7 +699,9 @@ def build_npc_contact_section(
 
     def _call_and_refresh():
         if is_jailed(away_npc):
-            remaining = format_jail_time(jail_seconds_remaining(away_npc))
+            remaining = format_jail_time(
+                jail_seconds_remaining(away_npc, get_elapsed_seconds(player_data))
+            )
             messagebox.showinfo(
                 "In Jail",
                 f"{away_npc.get('name', 'They')} is in jail and will be released in {remaining}.",
@@ -691,7 +711,7 @@ def build_npc_contact_section(
             refocus_window(room_window)
             return
 
-        success, message = call_npc(away_npc)
+        success, message = call_npc(away_npc, get_elapsed_seconds(player_data))
         title = "Call Successful" if success else "No Answer"
         messagebox.showinfo(title, message, parent=room_window)
         if success:
@@ -700,6 +720,7 @@ def build_npc_contact_section(
                 player_data,
                 away_npc,
                 parent=room_window,
+                elapsed_seconds=get_elapsed_seconds(player_data),
             )
         refresh_callback()
         refocus_window(room_window)

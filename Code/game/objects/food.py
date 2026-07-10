@@ -14,9 +14,7 @@ FOOD_ITEMS = {
         "name": "Energy Bar",
         "description": "A dense, nutrient-rich bar. Tastes like cardboard.",
         "category": "Food",
-        "attributes": {
-            "hunger_restore": 30,
-        },
+        "attributes": {},
         "actions": ["examine", "eat", "drop"],
     },
     "emergency_rations": {  # From locker
@@ -24,9 +22,7 @@ FOOD_ITEMS = {
         "name": "Emergency Rations",
         "description": "Standard emergency food supply. Use only when necessary.",
         "category": "Food",
-        "attributes": {
-            "hunger_restore": 50,
-        },
+        "attributes": {},
         "actions": ["examine", "eat", "drop"],
     },
 }

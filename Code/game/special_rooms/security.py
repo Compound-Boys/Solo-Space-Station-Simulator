@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import messagebox
 
-from game.helper_methods.ui_panels import open_modal_panel, refocus_window
+from game.helper_methods.ui_panels import open_modal_panel, refocus_window, schedule_ui_tick
 from game.helper_methods.jail import (
     add_jail_time,
     format_jail_time,
@@ -10,6 +10,7 @@ from game.helper_methods.jail import (
     release_member,
     warrant_reason_text,
 )
+from game.helper_methods.game_clock import get_elapsed_seconds
 from game.special_rooms.shared import (
     PLAYER_CREW_INDEX,
     SpecialRoomBase,
@@ -68,6 +69,7 @@ class Security(SpecialRoomBase):
                 game=None,
                 is_player=True,
                 guard_name="The security guard",
+                elapsed_seconds=get_elapsed_seconds(self.player_data),
             )
             if result == "jailed":
                 self.show_room_options()
@@ -453,7 +455,14 @@ class Security(SpecialRoomBase):
 
     def view_jail(self):
         """Open the Jail menu listing prisoners and sentence controls."""
-        panel, popup = open_modal_panel(self.security_window, title="Jail")
+        cancel_tick = {"fn": None}
+
+        def _on_close():
+            if cancel_tick["fn"] is not None:
+                cancel_tick["fn"]()
+                cancel_tick["fn"] = None
+
+        panel, popup = open_modal_panel(self.security_window, title="Jail", on_close=_on_close)
         popup.configure(bg="black")
 
         title_label = tk.Label(
@@ -469,12 +478,18 @@ class Security(SpecialRoomBase):
         def _format_row(member, is_player=False):
             name = member.get("name", "Unknown")
             job = member.get("job", "Unknown")
-            remaining = format_jail_time(jail_seconds_remaining(member))
+            remaining = format_jail_time(
+                jail_seconds_remaining(member, get_elapsed_seconds(self.player_data))
+            )
             charge = warrant_reason_text(member)
             you = " (YOU)" if is_player else ""
             return f"{name} ({job}){you} — {remaining} remaining | Charge: {charge}"
 
         def refresh_list(preserve_index=None):
+            if preserve_index is None:
+                selection = prisoner_listbox.curselection()
+                if selection:
+                    preserve_index = selection[0]
             prisoners = list_prisoners(self.player_data, self.station_crew)
             if not prisoners:
                 prisoner_listbox.delete(0, tk.END)
@@ -548,7 +563,7 @@ class Security(SpecialRoomBase):
             list_index, member, is_player = _selected_prisoner()
             if member is None:
                 return
-            if not add_jail_time(member):
+            if not add_jail_time(member, get_elapsed_seconds(self.player_data)):
                 messagebox.showinfo(
                     "Add Time",
                     "Could not add time to that sentence.",
@@ -563,6 +578,7 @@ class Security(SpecialRoomBase):
             )
 
         refresh_list()
+        cancel_tick["fn"] = schedule_ui_tick(popup, refresh_list)
 
         button_frame = tk.Frame(popup, bg="black")
         button_frame.pack(pady=10)

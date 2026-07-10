@@ -5,17 +5,29 @@ This document explains how to build and run the Space Station Explorer game as a
 ## Prerequisites
 
 - Python 3.6 or higher
-- Required packages (automatically installed by the build script):
-  - matplotlib
-  - PyInstaller
+- Required packages from `requirements.txt`:
+  - matplotlib (also pulls in Pillow, used to convert the shared icon for Windows)
+  - PyInstaller (the Windows build script will install this automatically if missing)
 
 ## Building the Executable
 
 ### Windows
 
-1. Double-click on the `build.bat` file.
-2. Wait for the build process to complete (this may take several minutes).
-3. The executable will be created in the `dist/SpaceStationExplorer` folder.
+1. Double-click on the `build.bat` file (or run `build.bat` from a command prompt).
+2. Wait for the build process to complete.
+3. The executable will be created at `dist/SpaceStationExplorer.exe`, with a
+   `_internal` folder beside it. Keep those together. Saves continue to live in
+   `dist/saves/` (same place as older one-file builds), so existing save files
+   keep working.
+
+For a full rebuild that clears PyInstaller's cache:
+
+```bat
+build.bat --clean
+```
+
+The Windows EXE icon is generated at build time from the same image the Linux
+AppImage uses: `packaging/linux/space_station_icon.png`.
 
 ### Manual Build (Windows)
 
@@ -23,6 +35,7 @@ You can also manually build the executable:
 
 1. Install required packages: `pip install -r requirements.txt`
 2. Run the build script: `python build_exe.py`
+3. Optional full rebuild: `python build_exe.py --clean`
 
 ### Linux (AppImage)
 
@@ -57,15 +70,16 @@ Or mark it executable in your file manager (Properties → Permissions →
 
 ## Running the Game
 
-- **Windows:** double-click `SpaceStationExplorer.exe` in the
-  `dist/SpaceStationExplorer` folder.
+- **Windows:** double-click `SpaceStationExplorer.exe` in the `dist` folder
+  (keep `_internal` next to it).
 - **Linux:** run the `.AppImage` as described above.
 
 ## Save Files
 
-- **Windows:** saves are stored in the `saves` folder alongside the executable,
-  so you can copy the whole `dist/SpaceStationExplorer` folder (saves included)
-  to another location or computer.
+- **Windows:** saves are stored in `dist/saves/` alongside the executable,
+  so you can copy the whole `dist` folder (EXE, `_internal`, and `saves`)
+  to another location or computer. Existing saves from previous builds in
+  that folder are reused automatically.
 - **Linux:** because an AppImage is mounted read-only, saves are stored in a
   per-user data directory instead:
   `~/.local/share/SpaceStationExplorer/saves`
@@ -77,4 +91,4 @@ Or mark it executable in your file manager (Properties → Permissions →
   - Open a command prompt in the executable's folder and type `SpaceStationExplorer.exe`
 
 - If you get missing dependency errors during build, manually install them:
-  - `pip install matplotlib pyinstaller` 
+  - `pip install -r requirements.txt`

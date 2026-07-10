@@ -1,6 +1,5 @@
 import tkinter as tk
 from tkinter import messagebox
-import datetime
 
 from game.objects.items import add_to_inventory, get_item_definition
 from game.helper_methods.power_constants import SYSTEM_POWER_RATES
@@ -8,11 +7,13 @@ from game.helper_methods.oxygen_helper import (
     LIFE_SUPPORT_DAMAGE_BEGIN_TITLE,
     LIFE_SUPPORT_DAMAGE_BEGIN_MESSAGE,
     OXYGEN_DEPLETION_ANNOUNCEMENT_TEXT,
+    OXYGEN_DEPLETION_GRACE_SECONDS,
     OXYGEN_DEPLETION_MODAL_BODY,
     OXYGEN_DEPLETION_FOLLOWUP_TITLE,
     OXYGEN_DEPLETION_FOLLOWUP_MESSAGE,
     life_support_entering_damage_range,
 )
+from game.helper_methods.game_clock import get_elapsed_seconds
 from game.special_rooms.shared import (
     SpecialRoomBase,
     add_note,
@@ -126,9 +127,8 @@ class Engineering(SpecialRoomBase):
         button_frame.pack(pady=10)
 
         fabricatable_item_ids = {
-            "Tool": ["wrench", "screwdriver", "wirecutters", "flashlight", "basic_tools"],
-            "Book": ["welcome_guide", "station_map", "maintenance_manual"],
-            "Component": ["circuit_board", "battery_pack", "power_cell"],
+            "Tool": ["wrench", "screwdriver", "wirecutters", "basic_tools"],
+            "Book": ["welcome_guide", "station_map"],
         }
 
         fabricatable_items_data = {}
@@ -296,7 +296,7 @@ class Engineering(SpecialRoomBase):
         back_btn.pack(pady=15)
     
     def _has_engineering_access(self):
-        """True if the player may use engineering toolbox / panel controls."""
+        """True if the player may use engineering panel controls."""
         return (
             ("permissions" in self.player_data and self.player_data["permissions"].get("engineering_station", False))
             or (self.player_data.get("job") == "Engineer")
@@ -309,7 +309,6 @@ class Engineering(SpecialRoomBase):
             self.player_data["station_power"] = {
                 "battery_level": 25.0,
                 "solar_charging": False,
-                "last_update_time": datetime.datetime.now().isoformat()
             }
 
         if "system_levels" not in self.player_data["station_power"]:
@@ -323,107 +322,6 @@ class Engineering(SpecialRoomBase):
         if "power_mode" not in self.player_data["station_power"]:
             self.player_data["station_power"]["power_mode"] = "balanced"
 
-    def access_toolbox(self):
-        """Access the engineering toolbox with specialized tools"""
-        if self._has_engineering_access():
-            _panel, toolbox_window = open_modal_panel(self.engineering_window, title="Engineering Toolbox")
-            
-            title_label = tk.Label(toolbox_window, text="Specialized Engineering Tools", font=("Arial", 18, "bold"), bg="black", fg="white")
-            title_label.pack(pady=15)
-            
-            desc_label = tk.Label(toolbox_window, text="This secure toolbox contains specialized equipment for station maintenance and emergency repairs.", 
-                                 font=("Arial", 12), bg="black", fg="white", wraplength=500)
-            desc_label.pack(pady=10)
-            
-            tools_outer_frame = tk.Frame(toolbox_window, bg="black")
-            tools_outer_frame.pack(pady=10, fill=tk.BOTH, expand=True)
-            
-            scrollbar = tk.Scrollbar(tools_outer_frame)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-            
-            tools_canvas = tk.Canvas(tools_outer_frame, bg="black", highlightthickness=0)
-            tools_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            
-            scrollbar.config(command=tools_canvas.yview)
-            tools_canvas.configure(yscrollcommand=scrollbar.set)
-            
-            tools_frame = tk.Frame(tools_canvas, bg="black")
-            
-            canvas_window = tools_canvas.create_window((0, 0), window=tools_frame, anchor=tk.NW)
-            
-            specialized_tools = [
-                {"name": "Power Coupling Optimizer", "description": "Balances load across power distribution networks."},
-                {"name": "Quantum Harmonizer", "description": "Aligns phase shifts in sensitive equipment."},
-                {"name": "Plasma Flow Regulator", "description": "Controls plasma injection rates in the reactor core."},
-                {"name": "Singularity Containment Monitor", "description": "Monitors field stability in high-energy systems."},
-                {"name": "Thermal Dampening Coils", "description": "Reduces heat signatures in sensitive areas."},
-                {"name": "Antimatter Containment Field", "description": "Maintains the integrity of antimatter storage units."},
-                {"name": "Subspace Field Modulator", "description": "Calibrates subspace field generators for communications."},
-                {"name": "Graviton Pulse Emitter", "description": "Creates localized gravity fields for specialized repairs."},
-                {"name": "Tachyon Detection Grid", "description": "Scans for tachyon particles that may indicate temporal anomalies."},
-                {"name": "Neural Interface Adapter", "description": "Allows direct neural connection to station systems for diagnostics."}
-            ]
-            
-            for i, tool in enumerate(specialized_tools):
-                tool_frame = tk.Frame(tools_frame, bg="#222222", bd=1, relief=tk.RIDGE)
-                tool_frame.pack(fill=tk.X, padx=20, pady=5)
-                
-                name_label = tk.Label(tool_frame, text=tool["name"], font=("Arial", 14, "bold"), bg="#222222", fg="#00CCFF")
-                name_label.pack(anchor="w", padx=10, pady=5)
-                
-                desc_label = tk.Label(tool_frame, text=tool["description"], font=("Arial", 12), bg="#222222", fg="white", wraplength=500)
-                desc_label.pack(anchor="w", padx=10, pady=5)
-                
-                use_btn = tk.Button(tool_frame, text="Use Tool", font=("Arial", 12), bg="#555555", fg="white", 
-                                command=lambda t=tool["name"]: messagebox.showinfo("Tool Usage", f"You used the {t} to optimize station systems.", parent=toolbox_window))
-                use_btn.pack(anchor="e", padx=10, pady=5)
-            
-            def configure_scroll_region(event):
-                tools_canvas.configure(scrollregion=tools_canvas.bbox("all"))
-                tools_canvas.itemconfig(canvas_window, width=tools_canvas.winfo_width())
-            
-            tools_frame.bind("<Configure>", configure_scroll_region)
-            tools_canvas.bind("<Configure>", lambda e: tools_canvas.itemconfig(canvas_window, width=e.width))
-            
-            def on_mousewheel(event):
-                try:
-                    # Windows style scrolling
-                    tools_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-                except Exception as e:
-                    try:
-                        # Linux style scrolling
-                        if event.num == 4:
-                            tools_canvas.yview_scroll(-1, "units")
-                        elif event.num == 5:
-                            tools_canvas.yview_scroll(1, "units")
-                    except:
-                        pass  # Ignore errors if the canvas was destroyed
-            
-            tools_canvas.bind("<MouseWheel>", on_mousewheel)
-            tools_canvas.bind("<Button-4>", on_mousewheel)
-            tools_canvas.bind("<Button-5>", on_mousewheel)
-            
-            toolbox_window.bind("<MouseWheel>", on_mousewheel)
-            toolbox_window.bind("<Button-4>", on_mousewheel)
-            toolbox_window.bind("<Button-5>", on_mousewheel)
-            
-            close_btn = tk.Button(toolbox_window, text="Close Toolbox", font=("Arial", 14), bg="#333333", fg="white",
-                                command=toolbox_window.destroy)
-            close_btn.pack(pady=15)
-
-            def _toolbox_cleanup():
-                toolbox_window.unbind("<MouseWheel>")
-                toolbox_window.unbind("<Button-4>")
-                toolbox_window.unbind("<Button-5>")
-
-            patch_destroy_cleanup(toolbox_window, _toolbox_cleanup)
-
-        else:
-            warning_message = "WARNING: These specialized engineering tools should only be handled by trained personnel. Improper use could result in station damage, injury, or death. Access restricted to Engineering staff and Command personnel only."
-            messagebox.showwarning("Access Restricted", warning_message, parent=self.engineering_window)
-
-        refocus_window(self.engineering_window)
-    
     def _build_battery_section(self, parent, ctx):
         """Build main battery status UI; stores widgets on ctx."""
         battery_frame = tk.Frame(parent, bg="#222222", bd=1, relief=tk.RIDGE)
@@ -537,7 +435,7 @@ class Engineering(SpecialRoomBase):
                                 bg="#333333", fg="white")
             name_label.pack(side=tk.LEFT, padx=10, pady=3)
 
-            status_color = "#00FF00" if system["status"] == "Online" else "#FFFF00" if system["status"] == "Standby" else "#FF0000"
+            status_color = "#00FF00" if system["status"] == "Online" else "#FF0000"
             status_label = tk.Label(system_frame, text=system["status"], font=("Arial", 12),
                                   bg="#333333", fg=status_color)
             status_label.pack(side=tk.RIGHT, padx=10, pady=3)
@@ -862,15 +760,6 @@ class Engineering(SpecialRoomBase):
         scrollable_frame.update_idletasks()
         canvas.config(scrollregion=canvas.bbox("all"))
 
-        self.battery_update_refs = {
-            "battery_fill": ctx["battery_fill"],
-            "battery_percent": ctx["battery_percent"],
-            "status_label": ctx["status_label"],
-            "solar_label": ctx["solar_label"],
-            "systems_list_frame": ctx["systems_list_frame"],
-            "systems": ctx["systems"]
-        }
-
         system_sliders = ctx["system_sliders"]
         update_battery_display = ctx["update_battery_display"]
 
@@ -921,21 +810,19 @@ class Engineering(SpecialRoomBase):
                 self.player_data["announcements"] = []
                 
             announcement = {
-                "timestamp": datetime.datetime.now().isoformat(),
                 "text": OXYGEN_DEPLETION_ANNOUNCEMENT_TEXT,
                 "type": "emergency",
-                "seen": False
             }
             
             self.player_data["announcements"].append(announcement)
             
             if "damage_timers" not in self.player_data:
                 self.player_data["damage_timers"] = {}
-                
+
+            elapsed_seconds = get_elapsed_seconds(self.player_data)
             self.player_data["damage_timers"]["oxygen_depletion"] = {
                 "active": True,
-                "start_time": datetime.datetime.now().isoformat(),
-                "warning_shown": False
+                "damage_starts_at_seconds": elapsed_seconds + OXYGEN_DEPLETION_GRACE_SECONDS,
             }
             
             # Mark announcement as active so we don't show multiple popups

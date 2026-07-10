@@ -1,11 +1,12 @@
 import tkinter as tk
-import datetime
 import random
 from tkinter import messagebox
 
 from game.objects.items import build_default_locker_inventory
 from game.helper_methods.stock_market import default_stock_market_state, serialize_companies
 from game.helper_methods.npc_movement import location_for_post, pick_random_hallway_location
+from game.helper_methods.random_events import ensure_job_event
+from game.helper_methods.game_clock import default_game_clock
 
 # List of potential NPC names
 NPC_NAMES = [
@@ -342,7 +343,8 @@ class CharacterCreation:
         self.player_data["fine_amount"] = 0
         self.player_data["fine_reason"] = ""
         self.player_data["in_jail"] = False
-        self.player_data["jail_release_at"] = None
+        self.player_data["jail_release_at_seconds"] = None
+        self.player_data["game_clock"] = default_game_clock()
 
         self.player_data["credits"] = job_info["credits"]
 
@@ -385,6 +387,8 @@ class CharacterCreation:
                 # wandering the hallway ring rather than parked in quarters.
                 "location": pick_random_hallway_location(),
                 "room_visit_remaining": 0,
+                "npc_goal": None,
+                "npc_goal_room_key": None,
                 "limbs": {
                     "left_arm": 100, "right_arm": 100, "left_leg": 100,
                     "right_leg": 100, "chest": 100, "head": 100,
@@ -395,7 +399,7 @@ class CharacterCreation:
                 "fine_amount": 0,
                 "fine_reason": "",
                 "in_jail": False,
-                "jail_release_at": None,
+                "jail_release_at_seconds": None,
                 "permissions": permissions_for_job("Staff Assistant"),
             }
 
@@ -415,6 +419,8 @@ class CharacterCreation:
                 "location": location_for_post("Captain"),
                 "on_duty": True,
                 "room_visit_remaining": 0,
+                "npc_goal": None,
+                "npc_goal_room_key": None,
                 "limbs": {
                     "left_arm": 100, "right_arm": 100, "left_leg": 100,
                     "right_leg": 100, "chest": 100, "head": 100,
@@ -425,11 +431,10 @@ class CharacterCreation:
                 "fine_amount": 0,
                 "fine_reason": "",
                 "in_jail": False,
-                "jail_release_at": None,
+                "jail_release_at_seconds": None,
                 "permissions": permissions_for_job("Captain"),
             }
             station_crew.append(captain_data)
-            print(f"Generated NPC: {captain_name} (Captain)")
 
             vacant_roles = [
                 j for j in department_heads if j not in (job, "Captain")
@@ -438,7 +443,6 @@ class CharacterCreation:
             for i in range(assistant_count):
                 npc_name = _pick_npc_name(f"StaffAssistant{i + 1}")
                 station_crew.append(_make_staff_assistant(npc_name))
-                print(f"Generated NPC: {npc_name} (Staff Assistant)")
         else:
             for npc_job, data in department_heads.items():
                 if npc_job != job:  # If the player didn't take this job
@@ -452,6 +456,8 @@ class CharacterCreation:
                         "location": location_for_post(npc_job),
                         "on_duty": True,
                         "room_visit_remaining": 0,
+                        "npc_goal": None,
+                        "npc_goal_room_key": None,
                         "limbs": {
                             "left_arm": 100, "right_arm": 100, "left_leg": 100,
                             "right_leg": 100, "chest": 100, "head": 100,
@@ -462,7 +468,7 @@ class CharacterCreation:
                         "fine_amount": 0,
                         "fine_reason": "",
                         "in_jail": False,
-                        "jail_release_at": None,
+                        "jail_release_at_seconds": None,
                         "permissions": {
                             s: (j == npc_job)
                             for j, d in department_heads.items()
@@ -478,13 +484,11 @@ class CharacterCreation:
                         npc_data["permissions"]["botany_station"] = True
 
                     station_crew.append(npc_data)
-                    print(f"Generated NPC: {npc_name} ({npc_job})")
 
             # Non-HoP games also get 2 Staff Assistants
             for i in range(2):
                 npc_name = _pick_npc_name(f"StaffAssistant{i + 1}")
                 station_crew.append(_make_staff_assistant(npc_name))
-                print(f"Generated NPC: {npc_name} (Staff Assistant)")
         # --- End NPC Generation ---
 
         if "stock_market" not in self.player_data:
@@ -500,7 +504,6 @@ class CharacterCreation:
         self.player_data["station_power"] = {
             "battery_level": 25.0,
             "solar_charging": solar_charging,
-            "last_update_time": datetime.datetime.now().isoformat(),
             "system_levels": {
                 "life_support": 10,
                 "hallway_lighting": 5,
@@ -511,5 +514,6 @@ class CharacterCreation:
         }
 
         self.player_data["station_crew"] = station_crew
+        ensure_job_event(self.player_data)
 
         self.on_complete(self.player_data, station_crew)

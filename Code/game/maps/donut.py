@@ -23,7 +23,6 @@ BOTANY_KEY = "3,-1"
 
 # Where a new game (or a player who somehow loses their location) starts.
 QUARTERS_LOCATION = {"x": -1, "y": 0}
-STARTING_LOCATION = dict(QUARTERS_LOCATION)
 
 # --- Ship map: every tile's name/description/lock state ---
 SHIP_MAP = {

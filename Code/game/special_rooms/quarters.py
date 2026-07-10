@@ -8,7 +8,6 @@ from game.objects.items import (
     add_to_inventory,
     ensure_locker_inventory,
     format_inventory_label,
-    get_item_definition,
     remove_one_from_inventory,
 )
 from game.special_rooms.shared import (
@@ -456,14 +455,12 @@ class Quarters(ItemInventoryMixin):
         market_data = self.player_data.get("stock_market", {})
         companies = market_data.get("companies", [])
         cycle_number = market_data.get("cycle_number", 1)
-        day_number = market_data.get("day_number", 1)
 
         StockMarket(
             self.quarters_window,
             self.player_data,
             companies,
             cycle_number,
-            day_number,
             lambda updated_data: self._stock_market_return(updated_data, computer_window),
         )
 

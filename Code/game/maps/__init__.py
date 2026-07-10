@@ -8,7 +8,7 @@ added without touching the game code that consumes them:
     SHIP_MAP             -- dict of "x,y" -> {"name", "desc", ["locked"]}
     SPECIAL_ROOM_TILES    -- dict of "x,y" -> special room name (door tiles)
     SPECIAL_ROOM_HALLWAY  -- dict of "x,y" -> (x, y) hallway tile in front of it
-    STARTING_LOCATION     -- dict {"x": int, "y": int} where a new game begins
+    QUARTERS_LOCATION     -- dict {"x": int, "y": int} where a new game begins
     get_available_directions(x, y) -- dict of north/south/east/west bools
     render_map_text()     -- str, a readable text version of the map
 """

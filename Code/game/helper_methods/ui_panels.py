@@ -133,15 +133,31 @@ def patch_destroy_cleanup(widget, cleanup_fn):
     return widget
 
 
-def bind_mousewheel(widget, handler):
-    """Bind MouseWheel on widget and unbind automatically on destroy."""
-    widget.bind("<MouseWheel>", handler)
+def bind_mousewheel(widget, handler, *, recursive=False):
+    """Bind MouseWheel on widget and unbind automatically on destroy.
+
+    When recursive=True, also bind every current descendant so scrolling works
+    while the cursor is over labels/frames inside the widget (Tk does not
+    bubble MouseWheel the way it does Button-1).
+    """
+    bound = []
+
+    def _bind(w):
+        w.bind("<MouseWheel>", handler)
+        bound.append(w)
+        if recursive:
+            for child in w.winfo_children():
+                _bind(child)
+
+    _bind(widget)
 
     def cleanup():
-        try:
-            widget.unbind("<MouseWheel>")
-        except tk.TclError:
-            pass
+        for w in bound:
+            try:
+                w.unbind("<MouseWheel>")
+            except tk.TclError:
+                pass
+        bound.clear()
 
     patch_destroy_cleanup(widget, cleanup)
     return cleanup
@@ -153,6 +169,10 @@ def make_scrollable_frame(parent, *, bg="black"):
     Returns (outer_frame, canvas, inner_frame, cleanup).
     Pack/grid outer_frame yourself; call cleanup() when tearing down if needed
     (also runs automatically if you patch_destroy_cleanup on a parent overlay).
+
+    MouseWheel is bound on the canvas; after packing content into inner_frame,
+    call bind_mousewheel(outer_or_parent, handler, recursive=True) so scrolling
+    also works over child labels.
     """
     outer = tk.Frame(parent, bg=bg)
     canvas = tk.Canvas(outer, bg=bg, highlightthickness=0)
@@ -185,6 +205,42 @@ def make_scrollable_frame(parent, *, bg="black"):
             pass
 
     return outer, canvas, inner, cleanup
+
+
+def schedule_ui_tick(widget, callback, interval_ms=1000):
+    """Run callback every interval_ms until widget is destroyed. Returns cancel()."""
+    state = {"after_id": None, "cancelled": False}
+
+    def _tick():
+        if state["cancelled"]:
+            return
+        try:
+            if not widget.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        try:
+            callback()
+        except tk.TclError:
+            return
+        try:
+            if not widget.winfo_exists():
+                return
+            state["after_id"] = widget.after(interval_ms, _tick)
+        except tk.TclError:
+            state["after_id"] = None
+
+    def cancel():
+        state["cancelled"] = True
+        if state["after_id"] is not None:
+            try:
+                widget.after_cancel(state["after_id"])
+            except (tk.TclError, ValueError):
+                pass
+            state["after_id"] = None
+
+    state["after_id"] = widget.after(interval_ms, _tick)
+    return cancel
 
 
 _KIND_RANK = {"info": 0, "warning": 1, "error": 2}

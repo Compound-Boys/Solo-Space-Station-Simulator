@@ -4,16 +4,13 @@ import random
 from tkinter import messagebox
 
 from game.helper_methods.alcohol_helper import stumble_chance, fall_chance
+from game.helper_methods.game_clock import get_elapsed_seconds
 from game.helper_methods.jail import (
     format_jail_time,
     is_jailed,
     jail_seconds_remaining,
 )
-from game.helper_methods.npc_movement import (
-    find_hall_passersby,
-    roll_departures,
-    step_wanderers,
-)
+from game.helper_methods.npc_movement import find_hall_passersby
 from game.helper_methods.random_events import maybe_trigger_hallway_event
 
 
@@ -67,7 +64,9 @@ class PlayerMovementMixin:
     def move_direction(self, direction):
         """Move in the specified direction with random event chance"""
         if is_jailed(self.player_data):
-            remaining = format_jail_time(jail_seconds_remaining(self.player_data))
+            remaining = format_jail_time(
+                jail_seconds_remaining(self.player_data, get_elapsed_seconds(self.player_data))
+            )
             messagebox.showinfo(
                 "In Jail",
                 f"You are in jail. Time remaining: {remaining}.",
@@ -98,20 +97,11 @@ class PlayerMovementMixin:
             messagebox.showerror("Error", "You can't go that way!")
             self.player_data["location"]["x"] = x - (1 if direction == "north" else -1 if direction == "south" else 0)
             self.player_data["location"]["y"] = y - (1 if direction == "east" else -1 if direction == "west" else 0)
-
-        # NPCs move independently of the player's own random hallway events:
-        # posted NPCs may leave/return, and wandering NPCs take a step.
-        roll_departures(self.station_crew)
-        step_wanderers(
-            self.station_crew,
-            self.ship_map,
-            game=self,
-            player_data=self.player_data,
-        )
-
-        # If a room-entry warrant sweep just jailed the player, stop here.
-        if is_jailed(self.player_data):
             return
+
+        # NPCs take a step whenever the player does; idle timer resets.
+        if hasattr(self, "advance_npcs_from_player_move"):
+            self.advance_npcs_from_player_move()
 
         maybe_trigger_hallway_event(self)
 

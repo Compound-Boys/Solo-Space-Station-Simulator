@@ -1,15 +1,16 @@
 """NPC hallway movement: leaving/returning to post, calling NPCs back,
-wandering, and hallway-passing detection.
+wandering, goal-driven room visits, and hallway-passing detection.
 
 Department-head NPCs (Captain, Head of Personnel, Security Guard, Doctor,
 Engineer, Botanist, Bartender) are each tied to a "post" - the special room
-for their job. They can randomly leave that post to wander the hallway ring,
-and the player can "call" them back. Staff Assistants have no post; they
-wander the ring continuously and can duck into special rooms for a few
-rounds before popping back out.
+for their job. They can randomly leave that post, then choose to wander the
+hallway, beeline to another room (stay 2 ticks, then return home), or head
+straight back to their station. Staff Assistants have no post; they wander
+or visit rooms, then resume wandering.
 """
 
 import random
+from collections import deque
 
 from game.maps import donut
 
@@ -31,8 +32,18 @@ PATROL_JOBS = frozenset({"Captain", "Security Guard"})
 NPC_CALL_SUCCESS_CHANCE = 0.75
 NPC_AUTO_RETURN_CHANCE = 0.15
 STAFF_ROOM_VISIT_CHANCE = 0.25
-STAFF_ROOM_VISIT_ROUNDS = (2, 5)
+ROOM_VISIT_TICKS = 2
 NPC_EVENT_CHANCE = 0.15
+
+# Off-duty posted NPC three-way weights (sum to 1.0).
+GOAL_WEIGHT_RETURN = NPC_AUTO_RETURN_CHANCE  # 0.15
+GOAL_WEIGHT_ROOM = STAFF_ROOM_VISIT_CHANCE  # 0.25
+GOAL_WEIGHT_WANDER = 1.0 - GOAL_WEIGHT_RETURN - GOAL_WEIGHT_ROOM  # 0.60
+
+# Rooms NPCs may visit (not Quarters).
+VISITABLE_ROOM_KEYS = tuple(
+    key for key in donut.SPECIAL_ROOM_HALLWAY if key != donut.QUARTERS_KEY
+)
 
 
 def leave_post_chance_for(npc):
@@ -94,18 +105,18 @@ def _hallway_tile_for_post(post_key):
     return donut.SPECIAL_ROOM_HALLWAY.get(post_key)
 
 
-def _room_key_for_hallway_tile(tile):
-    for room_key, hallway_tile in donut.SPECIAL_ROOM_HALLWAY.items():
-        if hallway_tile == tile:
-            return room_key
-    return None
-
-
 def _is_hallway_location(location):
     if not isinstance(location, dict) or "x" not in location or "y" not in location:
         return False
     key = f"{location.get('x')},{location.get('y')}"
     return key in donut.SHIP_MAP and key not in donut.SPECIAL_ROOM_TILES
+
+
+def _is_inside_special_room(location):
+    if not isinstance(location, dict) or "x" not in location or "y" not in location:
+        return False
+    key = f"{location.get('x')},{location.get('y')}"
+    return key in donut.SPECIAL_ROOM_TILES
 
 
 def pick_random_hallway_location():
@@ -115,42 +126,50 @@ def pick_random_hallway_location():
     return _location_dict_from_key(key)
 
 
-# --- Save/load migration --------------------------------------------------
+def _clear_npc_goal(npc):
+    npc["npc_goal"] = None
+    npc["npc_goal_room_key"] = None
 
-def ensure_npc_movement_fields(station_crew):
-    """Back-compat migration for saves made before NPC movement existed."""
-    for npc in station_crew:
-        npc.setdefault("in_jail", False)
-        npc.setdefault("jail_release_at", None)
-        npc.setdefault("warrant", False)
-        npc.setdefault("warrant_reason", "")
-        npc.setdefault("fine_amount", 0)
-        npc.setdefault("fine_reason", "")
-        if npc.get("in_jail", False):
-            npc["location"] = _location_dict_from_key(donut.SECURITY_KEY)
-            npc["room_visit_remaining"] = 0
-            if has_post(npc):
-                npc["on_duty"] = False
-            continue
-        if has_post(npc):
-            npc.setdefault("on_duty", True)
-            if npc.get("on_duty", True):
-                location = location_for_post(npc.get("job"))
-                if location is not None:
-                    npc["location"] = location
-            npc.setdefault("room_visit_remaining", 0)
-        else:
-            npc.setdefault("room_visit_remaining", 0)
-            if npc.get("room_visit_remaining", 0) <= 0 and not _is_hallway_location(
-                npc.get("location")
-            ):
-                npc["location"] = pick_random_hallway_location()
+
+# --- Goal selection --------------------------------------------------------
+
+def _pick_visit_room_key(npc):
+    """Choose a visitable room other than this NPC's own post."""
+    own_post = post_key_for_job(npc.get("job")) if has_post(npc) else None
+    choices = [key for key in VISITABLE_ROOM_KEYS if key != own_post]
+    if not choices:
+        choices = list(VISITABLE_ROOM_KEYS)
+    return random.choice(choices)
+
+
+def _pick_posted_npc_goal(npc):
+    """Three-way roll: wander / visit room / return to station."""
+    roll = random.random()
+    if roll < GOAL_WEIGHT_RETURN:
+        npc["npc_goal"] = "return_to_post"
+        npc["npc_goal_room_key"] = None
+    elif roll < GOAL_WEIGHT_RETURN + GOAL_WEIGHT_ROOM:
+        npc["npc_goal"] = "visit_room"
+        npc["npc_goal_room_key"] = _pick_visit_room_key(npc)
+    else:
+        npc["npc_goal"] = "wander"
+        npc["npc_goal_room_key"] = None
+
+
+def _pick_staff_assistant_goal(npc):
+    """Two-way roll: visit room (0.25) or wander (0.75)."""
+    if random.random() < STAFF_ROOM_VISIT_CHANCE:
+        npc["npc_goal"] = "visit_room"
+        npc["npc_goal_room_key"] = _pick_visit_room_key(npc)
+    else:
+        npc["npc_goal"] = "wander"
+        npc["npc_goal_room_key"] = None
 
 
 # --- Leaving post ----------------------------------------------------------
 
 def _send_npc_wandering(npc):
-    """Mark a posted NPC as off duty and place them just outside their door."""
+    """Mark a posted NPC as off duty, place them outside their door, pick a goal."""
     npc["on_duty"] = False
     post_key = post_key_for_job(npc.get("job"))
     hallway_tile = _hallway_tile_for_post(post_key) if post_key else None
@@ -159,6 +178,7 @@ def _send_npc_wandering(npc):
     else:
         npc["location"] = pick_random_hallway_location()
     npc["room_visit_remaining"] = 0
+    _pick_posted_npc_goal(npc)
 
 
 def roll_departures(station_crew):
@@ -182,18 +202,21 @@ def _return_to_post(npc):
     if location is not None:
         npc["location"] = location
     npc["room_visit_remaining"] = 0
+    _clear_npc_goal(npc)
 
 
-def call_npc(npc):
+def call_npc(npc, elapsed_seconds=0.0):
     """Attempt to call an off-duty NPC back to their post.
 
+    ``elapsed_seconds`` is the current master game clock value, used to
+    compute the jail countdown if the NPC happens to be locked up.
     Returns (success, message).
     """
     name = npc.get("name", "They")
     if npc.get("in_jail", False):
         from game.helper_methods.jail import format_jail_time, jail_seconds_remaining
 
-        remaining = format_jail_time(jail_seconds_remaining(npc))
+        remaining = format_jail_time(jail_seconds_remaining(npc, elapsed_seconds))
         return False, f"{name} is in jail and will be released in {remaining}."
 
     if npc.get("on_duty", True):
@@ -219,10 +242,83 @@ def reassign_npc_post(npc, new_job):
         npc["on_duty"] = True
         npc["location"] = location
         npc["room_visit_remaining"] = 0
+        _clear_npc_goal(npc)
     else:
         npc.pop("on_duty", None)
         npc["room_visit_remaining"] = 0
         npc["location"] = pick_random_hallway_location()
+        _pick_staff_assistant_goal(npc)
+
+
+# --- Pathfinding / beeline -------------------------------------------------
+
+def _hallway_neighbor_tiles(x, y, ship_map):
+    """Return adjacent hallway tiles reachable from (x, y)."""
+    directions = donut.get_available_directions(x, y)
+    neighbors = []
+    for direction, ok in directions.items():
+        if not ok:
+            continue
+        nx, ny = x, y
+        if direction == "north":
+            nx += 1
+        elif direction == "south":
+            nx -= 1
+        elif direction == "east":
+            ny += 1
+        elif direction == "west":
+            ny -= 1
+        key = f"{nx},{ny}"
+        if key in ship_map and key not in donut.SPECIAL_ROOM_TILES:
+            neighbors.append((nx, ny))
+    return neighbors
+
+
+def _beeline_one_step(npc, target_xy, ship_map):
+    """Move one hallway step toward target_xy. Returns True if already there."""
+    location = npc.get("location") or {}
+    if _is_inside_special_room(location):
+        room_key = f"{location.get('x')},{location.get('y')}"
+        hallway_tile = donut.SPECIAL_ROOM_HALLWAY.get(room_key)
+        if hallway_tile:
+            npc["location"] = {"x": hallway_tile[0], "y": hallway_tile[1]}
+        else:
+            npc["location"] = pick_random_hallway_location()
+        location = npc["location"]
+
+    if not _is_hallway_location(location):
+        npc["location"] = pick_random_hallway_location()
+        location = npc["location"]
+
+    start = (location["x"], location["y"])
+    target = (int(target_xy[0]), int(target_xy[1]))
+    if start == target:
+        return True
+
+    # BFS for shortest path; store parent pointers to reconstruct first step.
+    queue = deque([start])
+    parents = {start: None}
+    found = False
+    while queue:
+        current = queue.popleft()
+        if current == target:
+            found = True
+            break
+        for neighbor in _hallway_neighbor_tiles(current[0], current[1], ship_map):
+            if neighbor not in parents:
+                parents[neighbor] = current
+                queue.append(neighbor)
+
+    if not found:
+        _wander_one_step(npc, ship_map)
+        return False
+
+    # Walk back from target to find the step after start.
+    step = target
+    while parents[step] is not None and parents[step] != start:
+        step = parents[step]
+    npc["location"] = {"x": step[0], "y": step[1]}
+    return step == target
 
 
 # --- Wandering ---------------------------------------------------------
@@ -274,7 +370,6 @@ def _apply_silent_npc_event(npc):
             limb = random.choice(injured)
             heal = random.randint(2, 8)
             limbs[limb] = min(100, limbs[limb] + heal)
-    # "nothing" is intentionally a no-op so events don't always matter.
 
 
 def _maybe_trigger_silent_event(npc):
@@ -282,47 +377,13 @@ def _maybe_trigger_silent_event(npc):
         _apply_silent_npc_event(npc)
 
 
-def _advance_room_visit(npc):
-    """Tick down an in-progress room visit. Returns True if still inside."""
-    remaining = npc.get("room_visit_remaining", 0)
-    if remaining <= 0:
-        return False
-    npc["room_visit_remaining"] = remaining - 1
-    if npc["room_visit_remaining"] <= 0:
-        _exit_visited_room(npc)
-    return True
-
-
-def _maybe_enter_room(npc, game=None, player_data=None, station_crew=None):
-    """If standing outside a door, maybe duck into that room. Returns True if entered."""
-    location = npc.get("location") or {}
-    tile = (location.get("x"), location.get("y"))
-    room_key = _room_key_for_hallway_tile(tile)
-    if room_key and random.random() < STAFF_ROOM_VISIT_CHANCE:
-        _enter_room(npc, room_key, game=game, player_data=player_data, station_crew=station_crew)
-        return True
-    return False
-
-
-def _step_off_duty_npc(npc, ship_map, game=None, player_data=None, station_crew=None):
-    """Advance a wandering (off-duty) posted NPC by one round."""
-    if _advance_room_visit(npc):
-        return
-    if random.random() < NPC_AUTO_RETURN_CHANCE:
-        _return_to_post(npc)
-        return
-    _wander_one_step(npc, ship_map)
-    if _maybe_enter_room(npc, game=game, player_data=player_data, station_crew=station_crew):
-        return
-    _maybe_trigger_silent_event(npc)
-
-
 def _enter_room(npc, room_key, game=None, player_data=None, station_crew=None):
     npc["location"] = _location_dict_from_key(room_key)
-    npc["room_visit_remaining"] = random.randint(*STAFF_ROOM_VISIT_ROUNDS)
+    npc["room_visit_remaining"] = ROOM_VISIT_TICKS
 
     # Security Guards check warrants when they enter a room.
     if npc.get("job") == "Security Guard" and station_crew is not None:
+        from game.helper_methods.game_clock import get_elapsed_seconds
         from game.helper_methods.jail import (
             arrest_wanted_in_room,
             has_fine,
@@ -331,7 +392,8 @@ def _enter_room(npc, room_key, game=None, player_data=None, station_crew=None):
             resolve_fine_with_guard,
         )
 
-        # Collect unpaid fines from anyone already in the room (including the player).
+        elapsed_seconds = get_elapsed_seconds(player_data) if player_data else 0.0
+
         if (
             player_data
             and has_fine(player_data)
@@ -344,6 +406,7 @@ def _enter_room(npc, room_key, game=None, player_data=None, station_crew=None):
                 game=game,
                 is_player=True,
                 guard_name=npc.get("name", "A security guard"),
+                elapsed_seconds=elapsed_seconds,
             )
 
         for other in list(station_crew):
@@ -360,6 +423,7 @@ def _enter_room(npc, room_key, game=None, player_data=None, station_crew=None):
                     game=game,
                     is_player=False,
                     guard_name=npc.get("name", "A security guard"),
+                    elapsed_seconds=elapsed_seconds,
                 )
 
         arrest_wanted_in_room(
@@ -368,10 +432,12 @@ def _enter_room(npc, room_key, game=None, player_data=None, station_crew=None):
             station_crew,
             game=game,
             guard=npc,
+            elapsed_seconds=elapsed_seconds,
         )
 
 
-def _exit_visited_room(npc):
+def _exit_visited_room_to_hallway(npc):
+    """Place the NPC on the hallway tile outside their current room."""
     location = npc.get("location") or {}
     room_key = f"{location.get('x')},{location.get('y')}"
     hallway_tile = donut.SPECIAL_ROOM_HALLWAY.get(room_key)
@@ -379,24 +445,144 @@ def _exit_visited_room(npc):
         npc["location"] = {"x": hallway_tile[0], "y": hallway_tile[1]}
     else:
         npc["location"] = pick_random_hallway_location()
+    npc["room_visit_remaining"] = 0
+
+
+def _tick_room_visit_then_return_home(npc):
+    """Countdown an in-room visit; when done, exit hall and set return-to-post."""
+    remaining = npc.get("room_visit_remaining", 0)
+    if remaining <= 0:
+        return False
+    npc["room_visit_remaining"] = remaining - 1
+    if npc["room_visit_remaining"] <= 0:
+        _exit_visited_room_to_hallway(npc)
+        npc["npc_goal"] = "return_to_post"
+        npc["npc_goal_room_key"] = None
+    return True
+
+
+def _tick_room_visit_then_wander(npc):
+    """Countdown an in-room visit for staff; when done, exit and clear goal."""
+    remaining = npc.get("room_visit_remaining", 0)
+    if remaining <= 0:
+        return False
+    npc["room_visit_remaining"] = remaining - 1
+    if npc["room_visit_remaining"] <= 0:
+        _exit_visited_room_to_hallway(npc)
+        _clear_npc_goal(npc)
+    return True
+
+
+def _pursue_visit_room(npc, ship_map, game=None, player_data=None, station_crew=None):
+    """Beeline to goal room; enter when at the door."""
+    room_key = npc.get("npc_goal_room_key")
+    if not room_key:
+        npc["npc_goal"] = "wander"
+        return
+
+    location = npc.get("location") or {}
+    current_key = f"{location.get('x')},{location.get('y')}"
+    if current_key == room_key and npc.get("room_visit_remaining", 0) > 0:
+        return
+
+    hallway_tile = donut.SPECIAL_ROOM_HALLWAY.get(room_key)
+    if not hallway_tile:
+        npc["npc_goal"] = "wander"
+        return
+
+    arrived = _beeline_one_step(npc, hallway_tile, ship_map)
+    if arrived:
+        _enter_room(npc, room_key, game=game, player_data=player_data, station_crew=station_crew)
+
+
+def _pursue_return_to_post(npc, ship_map):
+    """Beeline to post hallway door, then clock in on duty."""
+    post_key = post_key_for_job(npc.get("job"))
+    hallway_tile = _hallway_tile_for_post(post_key) if post_key else None
+    if not hallway_tile:
+        _return_to_post(npc)
+        return
+
+    arrived = _beeline_one_step(npc, hallway_tile, ship_map)
+    if arrived:
+        _return_to_post(npc)
+
+
+def _step_off_duty_npc(npc, ship_map, game=None, player_data=None, station_crew=None):
+    """Advance a wandering (off-duty) posted NPC by one round."""
+    goal = npc.get("npc_goal")
+
+    # Inside a visit: count down, then head home.
+    location = npc.get("location") or {}
+    current_key = f"{location.get('x')},{location.get('y')}"
+    if (
+        goal == "visit_room"
+        and npc.get("room_visit_remaining", 0) > 0
+        and current_key == npc.get("npc_goal_room_key")
+    ):
+        _tick_room_visit_then_return_home(npc)
+        return
+
+    if goal == "visit_room":
+        _pursue_visit_room(
+            npc, ship_map, game=game, player_data=player_data, station_crew=station_crew
+        )
+        return
+
+    if goal == "return_to_post":
+        _pursue_return_to_post(npc, ship_map)
+        return
+
+    # Wander (or missing goal): one random step, then re-roll next goal.
+    if not goal:
+        _pick_posted_npc_goal(npc)
+        goal = npc.get("npc_goal")
+        if goal == "visit_room":
+            _pursue_visit_room(
+                npc, ship_map, game=game, player_data=player_data, station_crew=station_crew
+            )
+            return
+        if goal == "return_to_post":
+            _pursue_return_to_post(npc, ship_map)
+            return
+
+    _wander_one_step(npc, ship_map)
+    _maybe_trigger_silent_event(npc)
+    _pick_posted_npc_goal(npc)
 
 
 def _step_staff_assistant(npc, ship_map, game=None, player_data=None, station_crew=None):
-    """Advance a wandering Staff Assistant by one round.
+    """Advance a Staff Assistant by one round (wander or visit room)."""
+    goal = npc.get("npc_goal")
+    location = npc.get("location") or {}
+    current_key = f"{location.get('x')},{location.get('y')}"
 
-    They may already be visiting a room (room_visit_remaining > 0), in which
-    case they just wait out the visit; otherwise they take a hallway step and
-    may duck into a room they're standing outside of.
-    """
-    if _advance_room_visit(npc):
+    if (
+        goal == "visit_room"
+        and npc.get("room_visit_remaining", 0) > 0
+        and current_key == npc.get("npc_goal_room_key")
+    ):
+        _tick_room_visit_then_wander(npc)
         return
+
+    if goal == "visit_room":
+        _pursue_visit_room(
+            npc, ship_map, game=game, player_data=player_data, station_crew=station_crew
+        )
+        return
+
+    if not goal:
+        _pick_staff_assistant_goal(npc)
+        goal = npc.get("npc_goal")
+        if goal == "visit_room":
+            _pursue_visit_room(
+                npc, ship_map, game=game, player_data=player_data, station_crew=station_crew
+            )
+            return
 
     _wander_one_step(npc, ship_map)
-
-    if _maybe_enter_room(npc, game=game, player_data=player_data, station_crew=station_crew):
-        return
-
     _maybe_trigger_silent_event(npc)
+    _pick_staff_assistant_goal(npc)
 
 
 def step_wanderers(station_crew, ship_map, game=None, player_data=None):
