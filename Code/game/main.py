@@ -24,10 +24,13 @@ from game.helper_methods.npc_movement import (
 from game.helper_methods.jail import (
     arrest_member,
     ensure_crew_jail_fields,
+    fined_in_room,
     format_jail_time,
+    has_fine,
     is_jailed,
     jail_seconds_remaining,
     offer_player_arrest_choice,
+    resolve_fine_with_guard,
     tick_jail_releases,
     wanted_in_room,
     warrant_reason_text,
@@ -126,6 +129,8 @@ class SpaceStationGame(ItemInventoryMixin):
             "alcohol_percent": 0,
             "warrant": False,
             "warrant_reason": "",
+            "fine_amount": 0,
+            "fine_reason": "",
             "in_jail": False,
             "jail_release_at": None,
             "station_power": default_station_power(),
@@ -880,10 +885,39 @@ class SpaceStationGame(ItemInventoryMixin):
     def _handle_hallway_security_encounter(self, npc):
         """Arrest on hallway pass-by if one party is Security and the other is wanted.
 
+        Also collects unpaid fines when a fined person meets a security guard.
         Returns True if an arrest (or security-specific handling) occurred.
         """
         npc_is_guard = npc.get("job") == "Security Guard"
         player_is_guard = self.player_data.get("job") == "Security Guard"
+
+        # Unpaid fines: pay or go to jail when meeting security.
+        if npc_is_guard and has_fine(self.player_data) and not is_jailed(self.player_data):
+            result = resolve_fine_with_guard(
+                self.player_data,
+                parent=self.root,
+                game=self,
+                is_player=True,
+                guard_name=npc.get("name", "A security guard"),
+            )
+            if result == "jailed":
+                return True
+            # Paid: still allow warrant handling below if wanted.
+
+        if (
+            player_is_guard
+            and has_fine(npc)
+            and not is_jailed(npc)
+        ):
+            result = resolve_fine_with_guard(
+                npc,
+                parent=self.root,
+                game=self,
+                is_player=False,
+                guard_name=self.player_data.get("name", "Security"),
+            )
+            if result is not None:
+                return True
 
         if npc_is_guard and self.player_data.get("warrant", False) and not is_jailed(self.player_data):
             charge = warrant_reason_text(self.player_data)
@@ -910,11 +944,22 @@ class SpaceStationGame(ItemInventoryMixin):
         return False
 
     def _scan_room_for_warrants(self, room_key):
-        """As a Security Guard player, offer Arrest/Let Go for each wanted person in the room."""
+        """As a Security Guard player, collect fines and offer Arrest/Let Go for wanted people."""
         if self.player_data.get("job") != "Security Guard":
             return
         if is_jailed(self.player_data):
             return
+
+        for npc in list(fined_in_room(room_key, self.player_data, self.station_crew)):
+            if is_jailed(npc) or not has_fine(npc):
+                continue
+            resolve_fine_with_guard(
+                npc,
+                parent=self.root,
+                game=self,
+                is_player=False,
+                guard_name=self.player_data.get("name", "Security"),
+            )
 
         for npc in list(wanted_in_room(room_key, self.player_data, self.station_crew)):
             if is_jailed(npc) or not npc.get("warrant", False):
