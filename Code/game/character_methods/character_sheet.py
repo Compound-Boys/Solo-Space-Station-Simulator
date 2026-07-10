@@ -1,5 +1,7 @@
 import tkinter as tk
 
+from game.objects.items import inventory_item_count
+
 
 def render_character_sheet(
     parent,
@@ -73,10 +75,20 @@ def render_character_sheet(
     )
     alcohol_label.pack(anchor="w", padx=10, pady=5)
 
+    if alcohol_value >= 25:
+        alcohol_hint = tk.Label(
+            info_frame,
+            text="Seek medical treatment to sober up.",
+            font=("Arial", 11),
+            bg="black",
+            fg="orange",
+        )
+        alcohol_hint.pack(anchor="w", padx=10, pady=(0, 5))
+
     button_frame = tk.Frame(info_frame, bg="black")
     button_frame.pack(anchor="w", padx=10, pady=5, fill=tk.X)
 
-    inv_count = len(player_data.get("inventory", []))
+    inv_count = inventory_item_count(player_data)
     inv_btn = tk.Button(
         button_frame,
         text=f"View Inventory ({inv_count} items)",

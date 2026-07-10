@@ -6,15 +6,15 @@ import tkinter as tk
 from game.helper_methods.ui_panels import open_modal_panel
 
 DRINKS_MENU = {
-    "Beer": {"price": 10, "desc": "A refreshing glass of regular beer."},
-    "Whiskey": {"price": 20, "desc": "A shot of strong whiskey."},
-    "Wine": {"price": 15, "desc": "A fine glass of red wine."},
-    "Vodka": {"price": 15, "desc": "A shot of clear, strong vodka."},
-    "Gin": {"price": 15, "desc": "A botanical spirit with a distinctive flavor."},
-    "Rum": {"price": 15, "desc": "A sweet spirit distilled from sugarcane."},
-    "Tequila": {"price": 18, "desc": "A spirit made from the blue agave plant."},
-    "Brandy": {"price": 22, "desc": "A spirit distilled from wine or fermented fruit juice."},
-    "Scotch": {"price": 25, "desc": "A smoky whisky from Scotland."},
+    "Beer": {"price": 10, "alcohol_content": 1, "desc": "A refreshing glass of regular beer."},
+    "Whiskey": {"price": 20, "alcohol_content": 2, "desc": "A shot of strong whiskey."},
+    "Wine": {"price": 15, "alcohol_content": 2, "desc": "A fine glass of red wine."},
+    "Vodka": {"price": 15, "alcohol_content": 2, "desc": "A shot of clear, strong vodka."},
+    "Gin": {"price": 15, "alcohol_content": 2, "desc": "A botanical spirit with a distinctive flavor."},
+    "Rum": {"price": 15, "alcohol_content": 2, "desc": "A sweet spirit distilled from sugarcane."},
+    "Tequila": {"price": 18, "alcohol_content": 2, "desc": "A spirit made from the blue agave plant."},
+    "Brandy": {"price": 22, "alcohol_content": 2, "desc": "A spirit distilled from wine or fermented fruit juice."},
+    "Scotch": {"price": 25, "alcohol_content": 2, "desc": "A smoky whisky from Scotland."},
     "Orange Juice": {"price": 5, "desc": "A glass of fresh orange juice."},
     "Cranberry Juice": {"price": 5, "desc": "Tart and refreshing red juice."},
     "Pineapple Juice": {"price": 6, "desc": "Sweet tropical juice."},
@@ -31,102 +31,152 @@ MIXED_DRINKS = {
     "Screwdriver": {
         "ingredients": ["Vodka", "Orange Juice"],
         "price": 25,
+        "alcohol_content": 2,
         "desc": "A classic mix of vodka and orange juice.",
     },
     "Gin and Tonic": {
         "ingredients": ["Gin", "Tonic Water"],
         "price": 20,
+        "alcohol_content": 2,
         "desc": "A refreshing mix of gin and tonic water.",
     },
     "Rum and Cola": {
         "ingredients": ["Rum", "Cola"],
         "price": 20,
+        "alcohol_content": 2,
         "desc": "A sweet mix of rum and cola.",
     },
     "Whiskey Sour": {
         "ingredients": ["Whiskey", "Lemon Juice", "Sugar"],
         "price": 28,
+        "alcohol_content": 2,
         "desc": "A perfect balance of sour and sweet with whiskey.",
     },
     "Margarita": {
         "ingredients": ["Tequila", "Lime Juice", "Triple Sec"],
         "price": 30,
+        "alcohol_content": 2,
         "desc": "A tangy, refreshing cocktail with a salt rim.",
     },
     "Bloody Mary": {
         "ingredients": ["Vodka", "Tomato Juice", "Hot Sauce", "Worcestershire Sauce"],
         "price": 28,
+        "alcohol_content": 2,
         "desc": "A savory, spicy morning cocktail.",
     },
     "Mojito": {
         "ingredients": ["Rum", "Lime Juice", "Mint", "Sugar", "Soda Water"],
         "price": 32,
+        "alcohol_content": 2,
         "desc": "A refreshing minty cocktail from Cuba.",
     },
     "Piña Colada": {
         "ingredients": ["Rum", "Coconut Cream", "Pineapple Juice"],
         "price": 30,
+        "alcohol_content": 2,
         "desc": "A tropical blend that tastes like vacation.",
     },
     "Cosmopolitan": {
         "ingredients": ["Vodka", "Triple Sec", "Cranberry Juice", "Lime Juice"],
         "price": 30,
+        "alcohol_content": 2,
         "desc": "A sophisticated, slightly tart cocktail.",
     },
     "Old Fashioned": {
         "ingredients": ["Whiskey", "Bitters", "Sugar", "Water"],
         "price": 32,
+        "alcohol_content": 4,
         "desc": "A timeless cocktail that never goes out of style.",
     },
     "Negroni": {
         "ingredients": ["Gin", "Vermouth", "Campari"],
         "price": 30,
+        "alcohol_content": 4,
         "desc": "A perfectly balanced bitter and sweet aperitif.",
     },
     "Manhattan": {
         "ingredients": ["Whiskey", "Vermouth", "Bitters"],
         "price": 32,
+        "alcohol_content": 4,
         "desc": "A sophisticated whiskey cocktail.",
     },
     "Mai Tai": {
         "ingredients": ["Rum", "Lime Juice", "Orange Curacao", "Orgeat Syrup"],
         "price": 35,
+        "alcohol_content": 4,
         "desc": "A complex tropical rum cocktail.",
     },
     "Daiquiri": {
         "ingredients": ["Rum", "Lime Juice", "Sugar"],
         "price": 28,
+        "alcohol_content": 2,
         "desc": "A simple, refreshing rum cocktail.",
     },
     "Tom Collins": {
         "ingredients": ["Gin", "Lemon Juice", "Sugar", "Soda Water"],
         "price": 28,
+        "alcohol_content": 2,
         "desc": "A refreshing gin cocktail served in a tall glass.",
     },
     "Singapore Sling": {
         "ingredients": ["Gin", "Cherry Brandy", "Pineapple Juice", "Lime Juice", "Grenadine"],
         "price": 35,
+        "alcohol_content": 4,
         "desc": "A complex, fruity gin cocktail.",
+    },
+    "Between the Sheets": {
+        "ingredients": ["Brandy", "Rum", "Triple Sec", "Lemon Juice"],
+        "price": 35,
+        "alcohol_content": 3,
+        "desc": "A potent classic blending brandy, rum, orange, and lemon.",
+    },
+    "Suffering Bastard": {
+        "ingredients": ["Brandy", "Gin", "Lime Juice", "Bitters", "Ginger Ale"],
+        "price": 34,
+        "alcohol_content": 3,
+        "desc": "A sharp brandy and gin cocktail softened with ginger ale.",
+    },
+    "Boston Sidecar": {
+        "ingredients": ["Brandy", "Rum", "Triple Sec", "Lime Juice"],
+        "price": 34,
+        "alcohol_content": 3,
+        "desc": "A rum and brandy variation on the citrus-forward Sidecar.",
+    },
+    "Brass Monkey": {
+        "ingredients": ["Vodka", "Rum", "Orange Juice"],
+        "price": 30,
+        "alcohol_content": 3,
+        "desc": "A retro mix of vodka, rum, and orange juice.",
     },
     "Long Island Iced Tea": {
         "ingredients": ["Vodka", "Gin", "Rum", "Tequila", "Triple Sec", "Lemon Juice", "Cola"],
         "price": 40,
+        "alcohol_content": 5,
         "desc": "A potent mix of multiple spirits with a cola finish.",
     },
     "Space Blaster": {
         "ingredients": ["Vodka", "Blue Curacao", "Sprite", "Lemon Juice"],
         "price": 35,
+        "alcohol_content": 2,
         "desc": "A station specialty with an electric blue color.",
     },
     "Quantum Fizz": {
         "ingredients": ["Gin", "Lime Juice", "Sugar", "Mint", "Helium Gas"],
         "price": 38,
+        "alcohol_content": 2,
         "desc": "A unique drink that temporarily changes your voice.",
     },
     "Nebula Cloud": {
         "ingredients": ["Whiskey", "Honey", "Dry Ice", "Cinnamon"],
         "price": 42,
+        "alcohol_content": 2,
         "desc": "A smoky cocktail that mimics a space nebula.",
+    },
+    "Solar Flare": {
+        "ingredients": ["Tequila", "Rum", "Pineapple Juice", "Lime Juice", "Grenadine"],
+        "price": 36,
+        "alcohol_content": 3,
+        "desc": "A fiery tropical station special with a bright red glow.",
     },
 }
 
@@ -142,7 +192,7 @@ AVAILABLE_INGREDIENTS = [
 ]
 
 BASIC_RECIPES = ["Screwdriver", "Gin and Tonic", "Rum and Cola", "Whiskey Sour", "Daiquiri"]
-SPECIAL_RECIPES = ["Space Blaster", "Quantum Fizz", "Nebula Cloud"]
+SPECIAL_RECIPES = ["Space Blaster", "Quantum Fizz", "Nebula Cloud", "Solar Flare"]
 SPIRITS = ["Vodka", "Gin", "Rum", "Whiskey", "Tequila", "Brandy", "Scotch"]
 MODIFIERS = [
     "Lemon Juice", "Lime Juice", "Sugar", "Salt", "Honey", "Triple Sec",
@@ -170,11 +220,14 @@ def validate_mixed_drink_ingredients():
 
 
 def _apply_alcohol_flags():
-    """Stamp alcoholic flag onto drink menu entries."""
+    """Stamp alcohol metadata onto drink menu entries."""
     for name, details in DRINKS_MENU.items():
         details["alcoholic"] = is_drink_alcoholic(name, details)
     for name, details in MIXED_DRINKS.items():
         details["alcoholic"] = is_drink_alcoholic(name, details)
+        if details["alcoholic"] and "alcohol_content" not in details:
+            spirit_count = sum(ingredient in SPIRITS for ingredient in details["ingredients"])
+            details["alcohol_content"] = 3 if spirit_count > 1 else 2
 
 
 _apply_alcohol_flags()
@@ -432,6 +485,9 @@ class DrinkMixer:
             feedback = get_mix_feedback(ingredients)
             result_text = f"You've created an unknown concoction. {feedback}"
             result_label.config(text=result_text, fg="red")
+
+        # Clear the glass so the next drink must be mixed from scratch
+        mix_listbox.delete(0, tk.END)
 
     def show_recipes(self):
         """Show a list of known drink recipes."""

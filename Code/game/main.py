@@ -60,6 +60,11 @@ from game.helper_methods.oxygen_helper import (
     apply_oxygen_tick,
     apply_oxygen_death_state,
 )
+from game.helper_methods.alcohol_helper import (
+    apply_alcohol_tick,
+    stumble_chance,
+    fall_chance,
+)
 from game.helper_methods.ui_panels import (
     open_modal_panel,
     configure_message_buffer,
@@ -268,6 +273,12 @@ class SpaceStationGame(ItemInventoryMixin):
             
             # Check oxygen levels based on life support setting
             self.check_life_support_status(elapsed_seconds)
+
+            # Metabolize alcohol over time while intoxicated
+            try:
+                apply_alcohol_tick(self.player_data, elapsed_seconds)
+            except Exception as e:
+                print(f"Error applying alcohol tick: {e}")
 
             # Release anyone whose jail sentence has expired
             try:
@@ -811,6 +822,52 @@ class SpaceStationGame(ItemInventoryMixin):
         # Show the hallway
         self.show_hallway()
     
+    def _try_alcohol_movement_impairment(self):
+        """Roll stumble (then optional fall) before moving. Return True if move is cancelled."""
+        alcohol = self.player_data.get("alcohol_percent", 0) or 0
+        s_chance = stumble_chance(alcohol)
+        if s_chance <= 0 or random.random() >= (s_chance / 100.0):
+            return False
+
+        f_chance = fall_chance(alcohol)
+        if f_chance > 0 and random.random() < (f_chance / 100.0):
+            limbs = self.player_data.get("limbs") or {}
+            if limbs:
+                limb = random.choice(list(limbs.keys()))
+                damage = random.randint(1, 5)
+                original_health = limbs[limb]
+                limbs[limb] = max(0, original_health - damage)
+                limb_name = limb.replace("_", " ").title()
+                messagebox.showinfo(
+                    "You Fall",
+                    f"You stumble and fall hard!\n\n"
+                    f"Your {limb_name} took {damage}% blunt damage "
+                    f"and is now at {limbs[limb]}%.",
+                )
+                self.add_note(
+                    f"Fell while intoxicated ({alcohol:.1f}% alcohol). "
+                    f"{limb_name} took {damage}% blunt damage "
+                    f"(from {original_health}% to {limbs[limb]}%)."
+                )
+            else:
+                messagebox.showinfo(
+                    "You Fall",
+                    "You stumble and fall hard!",
+                )
+                self.add_note(
+                    f"Fell while intoxicated ({alcohol:.1f}% alcohol)."
+                )
+            return True
+
+        messagebox.showinfo(
+            "You Stumble",
+            "You stumble and lose your footing. You stay where you are.",
+        )
+        self.add_note(
+            f"Stumbled while intoxicated ({alcohol:.1f}% alcohol) and failed to move."
+        )
+        return True
+
     def move_direction(self, direction):
         """Move in the specified direction with random event chance"""
         if is_jailed(self.player_data):
@@ -819,6 +876,9 @@ class SpaceStationGame(ItemInventoryMixin):
                 "In Jail",
                 f"You are in jail. Time remaining: {remaining}.",
             )
+            return
+
+        if self._try_alcohol_movement_impairment():
             return
 
         x = self.player_data["location"]["x"]

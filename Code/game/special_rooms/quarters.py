@@ -5,7 +5,14 @@ from tkinter import messagebox
 from game.character_methods.character_sheet import render_character_sheet
 from game.helper_methods.game import Game
 from game.helper_methods.ui_panels import open_modal_panel
-from game.objects.items import ItemInventoryMixin, ensure_locker_inventory, get_item_definition
+from game.objects.items import (
+    ItemInventoryMixin,
+    add_to_inventory,
+    ensure_locker_inventory,
+    format_inventory_label,
+    get_item_definition,
+    remove_one_from_inventory,
+)
 from game.special_rooms.shared import add_note, build_room_shell, leave_room, open_room_in_main_window
 from game.helper_methods.stock_market import StockMarket
 
@@ -224,7 +231,7 @@ class Quarters(ItemInventoryMixin):
                 name_text = str(item_def)
                 description = ""
                 if isinstance(item_def, dict):
-                    name_text = item_def.get("name", "Unknown Item")
+                    name_text = format_inventory_label(item_def)
                     description = item_def.get("description", "")
 
                 tk.Label(
@@ -287,7 +294,7 @@ class Quarters(ItemInventoryMixin):
                 name_text = str(item_def)
                 item_color = "red"
                 if isinstance(item_def, dict) and "name" in item_def:
-                    name_text = item_def["name"]
+                    name_text = format_inventory_label(item_def)
                     item_color = "white"
 
                 tk.Label(
@@ -356,25 +363,11 @@ class Quarters(ItemInventoryMixin):
             item_name = item_def.get("name", "Unknown Item")
             item_id = item_def.get("id")
 
-        player_inventory = self.player_data.setdefault("inventory", [])
-        if item_id:
-            has_item = any(
-                isinstance(inv_item, dict) and inv_item.get("id") == item_id
-                for inv_item in player_inventory
-            )
-            if has_item:
-                messagebox.showinfo(
-                    "Already Have It",
-                    f"You already have a {item_name}.",
-                    parent=self.quarters_window,
-                )
-                return
-
         taken_item = locker_inventory.pop(locker_index)
         if isinstance(taken_item, dict):
-            player_inventory.append(taken_item.copy())
+            add_to_inventory(self.player_data, taken_item.copy())
         else:
-            player_inventory.append(taken_item)
+            add_to_inventory(self.player_data, taken_item)
 
         note_text = f"Took {item_name}" + (f" ({item_id})" if item_id else "") + " from locker."
         add_note(self.player_data, note_text)
@@ -396,11 +389,15 @@ class Quarters(ItemInventoryMixin):
             item_name = item_to_store.get("name", "Unknown Item")
             item_id = item_to_store.get("id")
 
-        del player_inventory[item_index]
-        if isinstance(item_to_store, dict):
-            locker_inventory.insert(0, item_to_store.copy())
+        removed = remove_one_from_inventory(self.player_data, item_index)
+        if removed is None:
+            messagebox.showerror("Error", "Could not store the item.", parent=self.quarters_window)
+            return
+
+        if isinstance(removed, dict):
+            locker_inventory.insert(0, removed.copy())
         else:
-            locker_inventory.insert(0, item_to_store)
+            locker_inventory.insert(0, removed)
 
         note_text = f"Stored {item_name}" + (f" ({item_id})" if item_id else "") + " in locker."
         add_note(self.player_data, note_text)

@@ -3,7 +3,7 @@ from tkinter import messagebox
 import datetime
 
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
-from game.objects.items import get_item_definition
+from game.objects.items import add_to_inventory, get_item_definition
 from game.helper_methods.power_constants import SYSTEM_POWER_RATES
 from game.helper_methods.oxygen_helper import (
     LIFE_SUPPORT_DAMAGE_BEGIN_TITLE,
@@ -235,11 +235,8 @@ class Engineering:
                      fab_popup.after(3000, lambda: feedback_label.config(text="")) # Clear message
                      return
 
-                # Ensure inventory list exists
-                self.player_data.setdefault("inventory", [])
-
-                # Add the full item dictionary copy to inventory
-                self.player_data["inventory"].append(item_definition_copy)
+                # Ensure inventory list exists and stack by id when possible
+                add_to_inventory(self.player_data, item_definition_copy)
 
                 # Show confirmation message
                 feedback_label.config(text=f"'{item_name}' created successfully.", fg="cyan")
