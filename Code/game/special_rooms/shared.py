@@ -3,6 +3,7 @@ import datetime
 import tkinter as tk
 from tkinter import messagebox
 
+from game.character_methods.character_sheet import render_character_sheet
 from game.helper_methods.door_control import can_control_door, is_door_locked
 from game.helper_methods.lighting_helper import (
     ensure_station_power_lighting,
@@ -64,6 +65,144 @@ def add_note(player_data, text):
         "timestamp": datetime.datetime.now().isoformat(),
         "text": text,
     })
+
+
+def show_holdings_popup(parent_window, player_data):
+    """Show stock holdings as an in-main-window overlay."""
+    panel, popup = open_modal_panel(parent_window, title="Stock Holdings")
+
+    tk.Label(
+        popup,
+        text="Stock Holdings",
+        font=("Arial", 18),
+        bg="black",
+        fg="white",
+    ).pack(pady=10)
+
+    frame = tk.Frame(popup, bg="black")
+    frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
+
+    scrollbar = tk.Scrollbar(frame)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    holdings_list = tk.Listbox(
+        frame,
+        bg="black",
+        fg="white",
+        font=("Arial", 12),
+        width=30,
+        height=15,
+        yscrollcommand=scrollbar.set,
+    )
+    holdings_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    scrollbar.config(command=holdings_list.yview)
+
+    if not player_data.get("stock_holdings", {}):
+        holdings_list.insert(tk.END, "You don't own any company stocks.")
+    else:
+        for company, shares in player_data["stock_holdings"].items():
+            holdings_list.insert(tk.END, f"{company}: {shares} shares")
+
+    tk.Button(
+        popup,
+        text="Close",
+        font=("Arial", 12),
+        width=10,
+        command=panel.close,
+    ).pack(pady=10)
+
+
+def show_notes_popup(parent_window, player_data):
+    """Show character notes as an in-main-window overlay."""
+    panel, popup = open_modal_panel(parent_window, title="Character Notes")
+
+    tk.Label(
+        popup,
+        text="Character Notes",
+        font=("Arial", 18),
+        bg="black",
+        fg="white",
+    ).pack(pady=10)
+
+    frame = tk.Frame(popup, bg="black")
+    frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
+
+    scrollbar = tk.Scrollbar(frame)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    notes_text = tk.Text(
+        frame,
+        bg="black",
+        fg="white",
+        font=("Arial", 12),
+        width=60,
+        height=20,
+        yscrollcommand=scrollbar.set,
+        wrap=tk.WORD,
+    )
+    notes_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    scrollbar.config(command=notes_text.yview)
+    notes_text.config(state=tk.DISABLED)
+
+    if player_data.get("notes"):
+        notes_text.config(state=tk.NORMAL)
+        for note in reversed(player_data["notes"]):
+            if "timestamp" in note and "text" in note:
+                try:
+                    dt = datetime.datetime.fromisoformat(note["timestamp"])
+                    formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except (ValueError, TypeError):
+                    formatted_time = note["timestamp"]
+                notes_text.insert(tk.END, f"{formatted_time}:\n{note['text']}\n\n")
+            else:
+                notes_text.insert(tk.END, f"{str(note)}\n\n")
+        notes_text.config(state=tk.DISABLED)
+    else:
+        notes_text.config(state=tk.NORMAL)
+        notes_text.insert(tk.END, "No notes recorded yet.")
+        notes_text.config(state=tk.DISABLED)
+
+    tk.Button(
+        popup,
+        text="Close",
+        font=("Arial", 12),
+        width=10,
+        command=panel.close,
+    ).pack(pady=10)
+
+
+def show_character_sheet(parent_window, player_data, on_inventory):
+    """Open the character sheet as an in-main-window overlay."""
+    panel, sheet_window = open_modal_panel(parent_window, title="Character Sheet")
+
+    tk.Button(
+        sheet_window,
+        text="Close",
+        font=("Arial", 14),
+        width=15,
+        command=panel.close,
+    ).pack(side=tk.BOTTOM, pady=20)
+
+    render_character_sheet(
+        sheet_window,
+        player_data,
+        on_inventory=on_inventory,
+        on_holdings=lambda: show_holdings_popup(parent_window, player_data),
+        on_notes=lambda: show_notes_popup(parent_window, player_data),
+    )
+
+
+def pack_character_sheet_button(parent_window, player_data, inventory_host):
+    """Pack a Character Sheet button that opens the shared sheet overlay."""
+    tk.Button(
+        parent_window,
+        text="Character Sheet",
+        font=("Arial", 14),
+        width=15,
+        command=lambda: show_character_sheet(
+            parent_window, player_data, inventory_host.show_inventory_popup
+        ),
+    ).pack(pady=10)
 
 
 def leave_room(return_callback, player_data, station_crew):

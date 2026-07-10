@@ -3,7 +3,7 @@ from tkinter import messagebox
 import datetime
 
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
-from game.objects.items import add_to_inventory, get_item_definition
+from game.objects.items import ItemInventoryMixin, add_to_inventory, get_item_definition
 from game.helper_methods.power_constants import SYSTEM_POWER_RATES
 from game.helper_methods.oxygen_helper import (
     LIFE_SUPPORT_DAMAGE_BEGIN_TITLE,
@@ -19,13 +19,14 @@ from game.special_rooms.shared import (
     build_npc_contact_section,
     build_room_shell,
     open_room_in_main_window,
+    pack_character_sheet_button,
     try_leave_through_door,
     show_station_menu as render_station_menu,
 )
 from game.helper_methods.ui_panels import open_modal_panel, report_message
 from game.maps.donut import ENGINEERING_KEY as DOOR_KEY
 
-class Engineering:
+class Engineering(ItemInventoryMixin):
     def __init__(self, parent_window, player_data, station_crew, return_callback):
         self.parent_window = parent_window
         self.player_data = player_data
@@ -35,6 +36,7 @@ class Engineering:
         self.engineering_window = open_room_in_main_window(
             parent_window, "Engineering Bay", player_data, station_crew, return_callback
         )
+        self.root = self.engineering_window
         _, self.button_frame = build_room_shell(
             self.engineering_window,
             self.player_data,
@@ -43,10 +45,15 @@ class Engineering:
         )
 
         self._build_station_menu()
-        
+
+        pack_character_sheet_button(self.engineering_window, self.player_data, self)
+
         # Exit button
         exit_btn = tk.Button(self.engineering_window, text="Exit Room", font=("Arial", 14), width=15, command=self.on_closing)
         exit_btn.pack(pady=20)
+
+    def add_note(self, text):
+        add_note(self.player_data, text)
     
     def show_room_options(self):
         """Show regular room options that all players can access"""

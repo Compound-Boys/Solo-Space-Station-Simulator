@@ -11,18 +11,21 @@ from game.helper_methods.jail import (
     release_member,
     warrant_reason_text,
 )
+from game.objects.items import ItemInventoryMixin
 from game.special_rooms.shared import (
+    add_note,
     build_npc_contact_section,
     build_room_shell,
     leave_room,
     open_room_in_main_window,
+    pack_character_sheet_button,
     show_crew_manifest as render_crew_manifest,
     try_leave_through_door,
     show_station_menu as render_station_menu,
 )
 from game.maps.donut import SECURITY_KEY as DOOR_KEY
 
-class Security:
+class Security(ItemInventoryMixin):
     def __init__(self, parent_window, player_data, station_crew, return_callback):
         self.parent_window = parent_window
         self.player_data = player_data
@@ -32,6 +35,7 @@ class Security:
         self.security_window = open_room_in_main_window(
             parent_window, "Security", player_data, station_crew, return_callback
         )
+        self.root = self.security_window
         _, self.button_frame = build_room_shell(
             self.security_window,
             self.player_data,
@@ -40,10 +44,15 @@ class Security:
         )
 
         self._build_station_menu()
-        
+
+        pack_character_sheet_button(self.security_window, self.player_data, self)
+
         # Exit button
         exit_btn = tk.Button(self.security_window, text="Exit Room", font=("Arial", 14), width=15, command=self.on_closing)
         exit_btn.pack(pady=20)
+
+    def add_note(self, text):
+        add_note(self.player_data, text)
     
     def show_room_options(self):
         """Show regular room options that all players can access"""

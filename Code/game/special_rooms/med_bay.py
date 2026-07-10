@@ -5,11 +5,13 @@ import math
 from game.helper_methods.door_control import can_control_door, toggle_door_lock as toggle_room_door_lock
 from game.helper_methods.oxygen_helper import DOCTOR_REQUIRED_FLOOR
 from game.helper_methods.alcohol_helper import DOCTOR_SOBER_FLOOR, sober_up_cost
+from game.objects.items import ItemInventoryMixin
 from game.special_rooms.shared import (
     add_note,
     build_npc_contact_section,
     build_room_shell,
     open_room_in_main_window,
+    pack_character_sheet_button,
     try_leave_through_door,
     show_station_menu as render_station_menu,
 )
@@ -156,7 +158,7 @@ def format_damage_sections(assessment):
     return "\n\n".join(sections)
 
 
-class MedBay:
+class MedBay(ItemInventoryMixin):
     def __init__(self, parent_window, player_data, station_crew, return_callback):
         self.parent_window = parent_window
         self.player_data = player_data
@@ -166,6 +168,7 @@ class MedBay:
         self.medbay_window = open_room_in_main_window(
             parent_window, "MedBay", player_data, station_crew, return_callback
         )
+        self.root = self.medbay_window
         _, self.button_frame = build_room_shell(
             self.medbay_window,
             self.player_data,
@@ -174,10 +177,15 @@ class MedBay:
         )
 
         self._build_station_menu()
-        
+
+        pack_character_sheet_button(self.medbay_window, self.player_data, self)
+
         # Exit button
         exit_btn = tk.Button(self.medbay_window, text="Exit Room", font=("Arial", 14), width=15, command=self.on_closing)
         exit_btn.pack(pady=20)
+
+    def add_note(self, text):
+        add_note(self.player_data, text)
     
     def show_room_options(self):
         """Show regular room options that all players can access"""
