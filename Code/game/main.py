@@ -27,7 +27,9 @@ from game.helper_methods.jail import (
     format_jail_time,
     is_jailed,
     jail_seconds_remaining,
+    offer_player_arrest_choice,
     tick_jail_releases,
+    wanted_in_room,
 )
 from game.special_rooms import MedBay, Bridge, Security, Engineering, Bar, Botany, Quarters
 from game.objects.items import ItemInventoryMixin
@@ -899,115 +901,32 @@ class SpaceStationGame(ItemInventoryMixin):
             and npc.get("warrant", False)
             and not is_jailed(npc)
         ):
-            self._offer_player_arrest_choice(npc)
+            self._offer_player_arrest_choice(npc, place="hall")
             return True
 
         return False
 
-    def _offer_player_arrest_choice(self, npc):
-        """Let a Security Guard player Arrest or Let Go a wanted hallway passerby."""
-        name = npc.get("name", "A crew member")
-        job = npc.get("job", "Crew")
-        bribe_amount = None
-        if random.random() < 0.50:
-            bribe_amount = random.randint(5, 50)
-
-        lines = [
-            f"You stop {name} ({job}) in the hall.",
-            "They have an active warrant.",
-        ]
-        if bribe_amount is not None:
-            lines.append(
-                f'{name} leans in and whispers, "Look the other way and I\'ll make it '
-                f'worth your while — {bribe_amount} credits."'
-            )
-        lines.append("\nWhat do you do?")
-
-        choice = self._ask_arrest_or_let_go("\n".join(lines))
-        if choice == "arrest":
-            arrest_member(
-                npc,
-                reason=f"You arrest {name} in the hallway and send them to jail.",
-                game=self,
-                is_player=False,
-                show_message=True,
-            )
+    def _scan_room_for_warrants(self, room_key):
+        """As a Security Guard player, offer Arrest/Let Go for each wanted person in the room."""
+        if self.player_data.get("job") != "Security Guard":
+            return
+        if is_jailed(self.player_data):
             return
 
-        # Let Go
-        if bribe_amount is not None:
-            self.player_data["credits"] = self.player_data.get("credits", 0) + bribe_amount
-            messagebox.showinfo(
-                "Let Go",
-                f"You look the other way. {name} slips you {bribe_amount} credits and hurries off.",
-                parent=self.root,
-            )
-            self.add_note(f"Accepted a {bribe_amount}-credit bribe from {name} and let them go.")
-        else:
-            messagebox.showinfo(
-                "Let Go",
-                f"You wave {name} on. They disappear down the hallway.",
-                parent=self.root,
-            )
-            self.add_note(f"Let wanted crew member {name} go in the hallway.")
+        for npc in list(wanted_in_room(room_key, self.player_data, self.station_crew)):
+            if is_jailed(npc) or not npc.get("warrant", False):
+                continue
+            self._offer_player_arrest_choice(npc, place="room")
 
-    def _ask_arrest_or_let_go(self, message):
-        """Modal with Arrest / Let Go. Returns 'arrest' or 'let_go'."""
-        result = {"choice": "let_go"}
-
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Wanted Crew")
-        dialog.configure(bg="black")
-        dialog.transient(self.root)
-        dialog.grab_set()
-        dialog.resizable(False, False)
-
-        label = tk.Label(
-            dialog,
-            text=message,
-            font=("Arial", 12),
-            bg="black",
-            fg="white",
-            justify=tk.LEFT,
-            wraplength=420,
+    def _offer_player_arrest_choice(self, npc, place="hall"):
+        """Let a Security Guard player Arrest or Let Go a wanted crew member."""
+        offer_player_arrest_choice(
+            self.player_data,
+            npc,
+            parent=self.root,
+            game=self,
+            place=place,
         )
-        label.pack(padx=20, pady=20)
-
-        button_frame = tk.Frame(dialog, bg="black")
-        button_frame.pack(pady=(0, 16))
-
-        def choose(choice):
-            result["choice"] = choice
-            dialog.destroy()
-
-        arrest_btn = tk.Button(
-            button_frame,
-            text="Arrest",
-            font=("Arial", 12),
-            width=12,
-            command=lambda: choose("arrest"),
-        )
-        arrest_btn.pack(side=tk.LEFT, padx=8)
-
-        let_go_btn = tk.Button(
-            button_frame,
-            text="Let Go",
-            font=("Arial", 12),
-            width=12,
-            command=lambda: choose("let_go"),
-        )
-        let_go_btn.pack(side=tk.LEFT, padx=8)
-
-        dialog.update_idletasks()
-        width = dialog.winfo_reqwidth()
-        height = dialog.winfo_reqheight()
-        x = self.root.winfo_rootx() + (self.root.winfo_width() - width) // 2
-        y = self.root.winfo_rooty() + (self.root.winfo_height() - height) // 2
-        dialog.geometry(f"+{x}+{y}")
-
-        dialog.protocol("WM_DELETE_WINDOW", lambda: choose("let_go"))
-        self.root.wait_window(dialog)
-        return result["choice"]
 
     def handle_player_arrest(self, message, show_message=True):
         """Teleport the jailed player into the Security room UI."""
@@ -1196,6 +1115,14 @@ class SpaceStationGame(ItemInventoryMixin):
 
         x_str, y_str = target_key.split(",")
         self.player_data["location"] = {"x": int(x_str), "y": int(y_str)}
+
+        # Security Guard players scan the room for warrants on entry.
+        if (
+            self.player_data.get("job") == "Security Guard"
+            and not is_jailed(self.player_data)
+        ):
+            self._scan_room_for_warrants(target_key)
+
         self._instantiate_special_room(room_name)
 
     def update_player_data_from_room(self, updated_player_data, updated_station_crew=None):
