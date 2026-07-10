@@ -3,7 +3,12 @@ import datetime
 import tkinter as tk
 from tkinter import messagebox
 
-from game.helper_methods.door_control import can_control_door, is_door_locked
+from game.character_methods.character_sheet import render_character_sheet
+from game.helper_methods.door_control import (
+    can_control_door,
+    is_door_locked,
+    toggle_door_lock as toggle_room_door_lock,
+)
 from game.helper_methods.lighting_helper import (
     ensure_station_power_lighting,
     lighting_style,
@@ -15,7 +20,8 @@ from game.helper_methods.jail import (
     jail_seconds_remaining,
     maybe_offer_arrest_after_call,
 )
-from game.helper_methods.ui_panels import open_modal_panel
+from game.helper_methods.ui_panels import bind_mousewheel, open_modal_panel, refocus_window
+from game.objects.items import ItemInventoryMixin
 
 ROOM_GEOMETRY = "1012x759"
 
@@ -66,6 +72,169 @@ def add_note(player_data, text):
     })
 
 
+def show_holdings_popup(parent_window, player_data):
+    """Show stock holdings as an in-main-window overlay."""
+    panel, popup = open_modal_panel(parent_window, title="Stock Holdings")
+
+    tk.Label(
+        popup,
+        text="Stock Holdings",
+        font=("Arial", 18),
+        bg="black",
+        fg="white",
+    ).pack(pady=10)
+
+    frame = tk.Frame(popup, bg="black")
+    frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
+
+    scrollbar = tk.Scrollbar(frame)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    holdings_list = tk.Listbox(
+        frame,
+        bg="black",
+        fg="white",
+        font=("Arial", 12),
+        width=30,
+        height=15,
+        yscrollcommand=scrollbar.set,
+    )
+    holdings_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    scrollbar.config(command=holdings_list.yview)
+
+    if not player_data.get("stock_holdings", {}):
+        holdings_list.insert(tk.END, "You don't own any company stocks.")
+    else:
+        for company, shares in player_data["stock_holdings"].items():
+            holdings_list.insert(tk.END, f"{company}: {shares} shares")
+
+    tk.Button(
+        popup,
+        text="Close",
+        font=("Arial", 12),
+        width=10,
+        command=panel.close,
+    ).pack(pady=10)
+
+
+def show_notes_popup(parent_window, player_data):
+    """Show character notes as an in-main-window overlay."""
+    panel, popup = open_modal_panel(parent_window, title="Character Notes")
+
+    tk.Label(
+        popup,
+        text="Character Notes",
+        font=("Arial", 18),
+        bg="black",
+        fg="white",
+    ).pack(pady=10)
+
+    frame = tk.Frame(popup, bg="black")
+    frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
+
+    scrollbar = tk.Scrollbar(frame)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    notes_text = tk.Text(
+        frame,
+        bg="black",
+        fg="white",
+        font=("Arial", 12),
+        width=60,
+        height=20,
+        yscrollcommand=scrollbar.set,
+        wrap=tk.WORD,
+    )
+    notes_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    scrollbar.config(command=notes_text.yview)
+    notes_text.config(state=tk.DISABLED)
+
+    if player_data.get("notes"):
+        notes_text.config(state=tk.NORMAL)
+        for note in reversed(player_data["notes"]):
+            if "timestamp" in note and "text" in note:
+                try:
+                    dt = datetime.datetime.fromisoformat(note["timestamp"])
+                    formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except (ValueError, TypeError):
+                    formatted_time = note["timestamp"]
+                notes_text.insert(tk.END, f"{formatted_time}:\n{note['text']}\n\n")
+            else:
+                notes_text.insert(tk.END, f"{str(note)}\n\n")
+        notes_text.config(state=tk.DISABLED)
+    else:
+        notes_text.config(state=tk.NORMAL)
+        notes_text.insert(tk.END, "No notes recorded yet.")
+        notes_text.config(state=tk.DISABLED)
+
+    tk.Button(
+        popup,
+        text="Close",
+        font=("Arial", 12),
+        width=10,
+        command=panel.close,
+    ).pack(pady=10)
+
+
+def show_character_sheet(parent_window, player_data, on_inventory, on_close=None):
+    """Open the character sheet as an in-main-window overlay."""
+    panel, sheet_window = open_modal_panel(
+        parent_window, title="Character Sheet", on_close=on_close
+    )
+
+    def render_sheet():
+        for widget in list(sheet_window.winfo_children()):
+            widget.destroy()
+
+        tk.Button(
+            sheet_window,
+            text="Close",
+            font=("Arial", 14),
+            width=15,
+            command=panel.close,
+        ).pack(side=tk.BOTTOM, pady=20)
+
+        def open_inventory():
+            on_inventory(on_close=refresh_sheet_if_open)
+
+        render_character_sheet(
+            sheet_window,
+            player_data,
+            on_inventory=open_inventory,
+            on_holdings=lambda: show_holdings_popup(parent_window, player_data),
+            on_notes=lambda: show_notes_popup(parent_window, player_data),
+        )
+
+    def refresh_sheet_if_open():
+        try:
+            if sheet_window.winfo_exists() and not panel._closed:
+                render_sheet()
+        except tk.TclError:
+            pass
+
+    render_sheet()
+
+
+def pack_character_sheet_button(parent_window, player_data, inventory_host):
+    """Pack a Character Sheet button that opens the shared sheet overlay."""
+    def open_sheet():
+        on_close = getattr(inventory_host, "reload", None)
+        show_character_sheet(
+            parent_window,
+            player_data,
+            inventory_host.show_inventory_popup,
+            on_close=on_close,
+        )
+
+    tk.Button(
+        parent_window,
+        text="Character Sheet",
+        font=("Arial", 14),
+        width=15,
+        command=open_sheet,
+    ).pack(pady=10)
+
+
 def leave_room(return_callback, player_data, station_crew):
     """Hand off to the game; main window is not destroyed."""
     return_callback(player_data, station_crew)
@@ -96,9 +265,16 @@ def open_room_in_main_window(parent_window, title, player_data, station_crew, re
 
 
 
-def try_leave_through_door(room_window, player_data, door_key, return_callback, station_crew):
+def try_leave_through_door(
+    room_window,
+    player_data,
+    door_key,
+    return_callback,
+    station_crew,
+    *,
+    before_leave=None,
+):
     """Leave a special room unless its door is locked or the player is jailed."""
-    from game.helper_methods.jail import format_jail_time, is_jailed, jail_seconds_remaining
     from game.maps.donut import SECURITY_KEY
 
     if is_jailed(player_data) and door_key == SECURITY_KEY:
@@ -111,8 +287,7 @@ def try_leave_through_door(room_window, player_data, door_key, return_callback, 
                 parent=room_window,
             ),
         )
-        room_window.after(20, room_window.lift)
-        room_window.focus_force()
+        refocus_window(room_window)
         return False
 
     if is_door_locked(player_data, door_key):
@@ -124,11 +299,207 @@ def try_leave_through_door(room_window, player_data, door_key, return_callback, 
                 parent=room_window,
             ),
         )
-        room_window.after(20, room_window.lift)
-        room_window.focus_force()
+        refocus_window(room_window)
         return False
+    if before_leave is not None:
+        before_leave()
     leave_room(return_callback, player_data, station_crew)
     return True
+
+
+def clear_button_frame(button_frame):
+    for widget in button_frame.winfo_children():
+        widget.destroy()
+
+
+def pack_station_back_button(button_frame, player_data, door_key, command):
+    """Pack 'Back to Station Menu' when the player can control the room door."""
+    if can_control_door(player_data, door_key):
+        tk.Button(
+            button_frame,
+            text="Back to Station Menu",
+            font=("Arial", 14),
+            width=20,
+            command=command,
+        ).pack(pady=10)
+
+
+PLAYER_CREW_INDEX = -1
+
+
+def member_for_crew_index(crew_index, player_data, station_crew):
+    if crew_index == PLAYER_CREW_INDEX:
+        return player_data
+    return station_crew[crew_index]
+
+
+def build_labeled_listbox(parent, *, label, width=48, height=12, side=None, expand=True, padx=20, pady=10):
+    """LabelFrame + Listbox + Scrollbar. Returns (outer, listbox)."""
+    outer = tk.LabelFrame(
+        parent, text=label, font=("Arial", 12), bg="black", fg="white"
+    )
+    if side is None:
+        outer.pack(fill=tk.BOTH, expand=expand, padx=padx, pady=pady)
+    else:
+        outer.pack(side=side, fill=tk.BOTH, expand=expand, padx=padx)
+
+    scrollbar = tk.Scrollbar(outer, orient=tk.VERTICAL)
+    listbox = tk.Listbox(
+        outer,
+        bg="black",
+        fg="white",
+        font=("Arial", 12),
+        width=width,
+        height=height,
+        exportselection=False,
+        yscrollcommand=scrollbar.set,
+    )
+    scrollbar.config(command=listbox.yview)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    listbox.pack(side=tk.LEFT, pady=5, padx=5, fill=tk.BOTH, expand=True)
+    return outer, listbox
+
+
+def refresh_indexed_listbox(listbox, member_indices, rows, *, preserve_index=None):
+    """
+    Clear listbox and member_indices, then for each (crew_index, row_text) in rows:
+      append crew_index to member_indices and insert row_text.
+    Optionally restore selection to preserve_index.
+    """
+    listbox.delete(0, tk.END)
+    member_indices.clear()
+    for crew_index, row_text in rows:
+        member_indices.append(crew_index)
+        listbox.insert(tk.END, row_text)
+    if preserve_index is not None and 0 <= preserve_index < len(member_indices):
+        listbox.selection_set(preserve_index)
+        listbox.activate(preserve_index)
+
+
+class SpecialRoomBase(ItemInventoryMixin):
+    """Shared shell for door-keyed special rooms (not Quarters)."""
+
+    ROOM_TITLE = ""
+    ROOM_HEADING = ""
+    ROOM_DESCRIPTION = ""
+    DOOR_KEY = None
+    WINDOW_ATTR = "room_window"
+
+    def __init__(self, parent_window, player_data, station_crew, return_callback):
+        self.parent_window = parent_window
+        self.player_data = player_data
+        self.station_crew = station_crew
+        self.return_callback = return_callback
+
+        self._before_open()
+
+        room_window = open_room_in_main_window(
+            parent_window,
+            self.ROOM_TITLE,
+            player_data,
+            station_crew,
+            return_callback,
+        )
+        setattr(self, self.WINDOW_ATTR, room_window)
+        self.room_window = room_window
+        self.root = room_window
+
+        self._after_open()
+
+        _, self.button_frame = build_room_shell(
+            room_window,
+            player_data,
+            self.ROOM_HEADING,
+            self.ROOM_DESCRIPTION,
+        )
+        self._build_station_menu()
+        pack_character_sheet_button(room_window, player_data, self)
+        tk.Button(
+            room_window,
+            text="Exit Room",
+            font=("Arial", 14),
+            width=15,
+            command=self.on_closing,
+        ).pack(pady=20)
+
+    def reload(self):
+        """Rebuild room chrome and menus from current player_data."""
+        for widget in list(self.room_window.winfo_children()):
+            widget.destroy()
+        style = room_lighting_chrome(self.player_data)
+        self.room_window.configure(bg=style["bg"])
+        _, self.button_frame = build_room_shell(
+            self.room_window,
+            self.player_data,
+            self.ROOM_HEADING,
+            self.ROOM_DESCRIPTION,
+        )
+        self._build_station_menu()
+        pack_character_sheet_button(self.room_window, self.player_data, self)
+        tk.Button(
+            self.room_window,
+            text="Exit Room",
+            font=("Arial", 14),
+            width=15,
+            command=self.on_closing,
+        ).pack(pady=20)
+
+    def _before_open(self):
+        """Hook for setup that does not need the room window."""
+
+    def _after_open(self):
+        """Hook for setup that needs the room window."""
+
+    def add_note(self, text):
+        add_note(self.player_data, text)
+
+    def toggle_door_lock(self):
+        toggle_room_door_lock(self.player_data, self.DOOR_KEY, self.room_window)
+
+    def _before_leave(self):
+        """Hook called just before leaving through an unlocked door."""
+
+    def on_closing(self):
+        try_leave_through_door(
+            self.room_window,
+            self.player_data,
+            self.DOOR_KEY,
+            self.return_callback,
+            self.station_crew,
+            before_leave=self._before_leave,
+        )
+
+    def station_entries(self):
+        """Return station menu entries: list of {label, command, subdepartments?}."""
+        return []
+
+    def _station_menu_before_show(self):
+        """Optional callback passed to render_station_menu as before_show."""
+        return None
+
+    def _build_station_menu(self, before_show=None):
+        if before_show is None:
+            before_show = self._station_menu_before_show()
+        show_station_menu(
+            self.button_frame,
+            self.player_data,
+            door_key=self.DOOR_KEY,
+            stations=self.station_entries(),
+            show_room_options=self.show_room_options,
+            toggle_door_lock=self.toggle_door_lock,
+            before_show=before_show,
+        )
+
+    def show_station_menu(self):
+        self._build_station_menu()
+
+    def pack_back_to_station_menu(self):
+        pack_station_back_button(
+            self.button_frame,
+            self.player_data,
+            self.DOOR_KEY,
+            self.show_station_menu,
+        )
 
 
 def player_has_subdepartment_access(player_data, allowed_subdepartments):
@@ -222,20 +593,13 @@ def show_crew_manifest(parent_window, player_data, station_crew):
         except tk.TclError:
             pass
 
-    manifest_window.bind("<MouseWheel>", _on_manifest_mousewheel)
-
-    def _close():
-        try:
-            manifest_window.unbind("<MouseWheel>")
-        except tk.TclError:
-            pass
-        panel.close()
+    bind_mousewheel(manifest_window, _on_manifest_mousewheel)
 
     close_btn = tk.Button(
         manifest_window,
         text="Close",
         font=("Arial", 12),
-        command=_close,
+        command=manifest_window.destroy,
     )
     close_btn.pack(pady=10)
 
@@ -324,8 +688,7 @@ def build_npc_contact_section(
                 parent=room_window,
             )
             refresh_callback()
-            room_window.after(20, room_window.lift)
-            room_window.focus_force()
+            refocus_window(room_window)
             return
 
         success, message = call_npc(away_npc)
@@ -339,8 +702,7 @@ def build_npc_contact_section(
                 parent=room_window,
             )
         refresh_callback()
-        room_window.after(20, room_window.lift)
-        room_window.focus_force()
+        refocus_window(room_window)
 
     tk.Button(
         button_frame,
@@ -363,8 +725,7 @@ def show_station_menu(
     before_show=None,
 ):
     """Build the authorized station menu or fall back to regular room options."""
-    for widget in button_frame.winfo_children():
-        widget.destroy()
+    clear_button_frame(button_frame)
 
     if before_show is not None:
         before_show()

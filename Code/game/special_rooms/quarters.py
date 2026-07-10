@@ -1,8 +1,6 @@
-import datetime
 import tkinter as tk
 from tkinter import messagebox
 
-from game.character_methods.character_sheet import render_character_sheet
 from game.helper_methods.game import Game
 from game.helper_methods.ui_panels import open_modal_panel
 from game.objects.items import (
@@ -13,7 +11,14 @@ from game.objects.items import (
     get_item_definition,
     remove_one_from_inventory,
 )
-from game.special_rooms.shared import add_note, build_room_shell, leave_room, open_room_in_main_window
+from game.special_rooms.shared import (
+    add_note,
+    build_room_shell,
+    leave_room,
+    open_room_in_main_window,
+    room_lighting_chrome,
+    show_character_sheet,
+)
 from game.helper_methods.stock_market import StockMarket
 
 
@@ -28,6 +33,9 @@ class Quarters(ItemInventoryMixin):
             parent_window, "Your Quarters", player_data, station_crew, return_callback
         )
         self.root = self.quarters_window
+        self._build_quarters_ui()
+
+    def _build_quarters_ui(self):
         style, button_frame = build_room_shell(
             self.quarters_window,
             self.player_data,
@@ -113,6 +121,14 @@ class Quarters(ItemInventoryMixin):
             width=15,
             command=self.save_and_exit,
         ).pack()
+
+    def reload(self):
+        """Rebuild quarters chrome from current player_data."""
+        for widget in list(self.quarters_window.winfo_children()):
+            widget.destroy()
+        style = room_lighting_chrome(self.player_data)
+        self.quarters_window.configure(bg=style["bg"])
+        self._build_quarters_ui()
 
     def add_note(self, text):
         add_note(self.player_data, text)
@@ -480,131 +496,15 @@ class Quarters(ItemInventoryMixin):
         self.player_data = updated_data
 
         # Holdings are already on player_data; skip syncing onto serialized company dicts
+        self.reload()
 
-        try:
-            if computer_window.winfo_exists():
-                computer_window.lift()
-                computer_window.focus_force()
-        except tk.TclError:
-            pass
     def view_character_sheet(self):
-        panel, sheet_window = open_modal_panel(self.quarters_window, title="Character Sheet")
-
-        tk.Button(
-            sheet_window,
-            text="Close",
-            font=("Arial", 14),
-            width=15,
-            command=panel.close,
-        ).pack(side=tk.BOTTOM, pady=20)
-
-        render_character_sheet(
-            sheet_window,
+        show_character_sheet(
+            self.quarters_window,
             self.player_data,
-            on_inventory=self.show_inventory_popup,
-            on_holdings=self.show_holdings_popup,
-            on_notes=self._show_notes_popup,
+            self.show_inventory_popup,
+            on_close=self.reload,
         )
-
-    def show_holdings_popup(self):
-        panel, popup = open_modal_panel(self.quarters_window, title="Stock Holdings")
-
-        tk.Label(
-            popup,
-            text="Stock Holdings",
-            font=("Arial", 18),
-            bg="black",
-            fg="white",
-        ).pack(pady=10)
-
-        frame = tk.Frame(popup, bg="black")
-        frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
-
-        scrollbar = tk.Scrollbar(frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        holdings_list = tk.Listbox(
-            frame,
-            bg="black",
-            fg="white",
-            font=("Arial", 12),
-            width=30,
-            height=15,
-            yscrollcommand=scrollbar.set,
-        )
-        holdings_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=holdings_list.yview)
-
-        if not self.player_data.get("stock_holdings", {}):
-            holdings_list.insert(tk.END, "You don't own any company stocks.")
-        else:
-            for company, shares in self.player_data["stock_holdings"].items():
-                holdings_list.insert(tk.END, f"{company}: {shares} shares")
-
-        tk.Button(
-            popup,
-            text="Close",
-            font=("Arial", 12),
-            width=10,
-            command=panel.close,
-        ).pack(pady=10)
-
-    def _show_notes_popup(self):
-        panel, popup = open_modal_panel(self.quarters_window, title="Character Notes")
-
-        tk.Label(
-            popup,
-            text="Character Notes",
-            font=("Arial", 18),
-            bg="black",
-            fg="white",
-        ).pack(pady=10)
-
-        frame = tk.Frame(popup, bg="black")
-        frame.pack(padx=20, pady=10, fill=tk.BOTH, expand=True)
-
-        scrollbar = tk.Scrollbar(frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        notes_text = tk.Text(
-            frame,
-            bg="black",
-            fg="white",
-            font=("Arial", 12),
-            width=60,
-            height=20,
-            yscrollcommand=scrollbar.set,
-            wrap=tk.WORD,
-        )
-        notes_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.config(command=notes_text.yview)
-        notes_text.config(state=tk.DISABLED)
-
-        if self.player_data.get("notes"):
-            notes_text.config(state=tk.NORMAL)
-            for note in reversed(self.player_data["notes"]):
-                if "timestamp" in note and "text" in note:
-                    try:
-                        dt = datetime.datetime.fromisoformat(note["timestamp"])
-                        formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
-                    except (ValueError, TypeError):
-                        formatted_time = note["timestamp"]
-                    notes_text.insert(tk.END, f"{formatted_time}:\n{note['text']}\n\n")
-                else:
-                    notes_text.insert(tk.END, f"{str(note)}\n\n")
-            notes_text.config(state=tk.DISABLED)
-        else:
-            notes_text.config(state=tk.NORMAL)
-            notes_text.insert(tk.END, "No notes recorded yet.")
-            notes_text.config(state=tk.DISABLED)
-
-        tk.Button(
-            popup,
-            text="Close",
-            font=("Arial", 12),
-            width=10,
-            command=panel.close,
-        ).pack(pady=10)
 
     def save_and_exit(self):
         self.player_data["_exit_to_menu"] = True

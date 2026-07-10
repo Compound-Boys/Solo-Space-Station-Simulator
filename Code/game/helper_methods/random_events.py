@@ -159,7 +159,6 @@ def _report_effect(game, title, message):
 
 
 def _add_damage_type(game, damage_key, label, min_damage, max_damage):
-    """Apply incremental damage of a given type to the player."""
     damage = random.randint(min_damage, max_damage)
     original_damage = game.player_data["damage"].get(damage_key, 0)
     game.player_data["damage"][damage_key] = min(100, original_damage + damage)
@@ -175,29 +174,24 @@ def _add_damage_type(game, damage_key, label, min_damage, max_damage):
 
 
 def add_burn_damage(game, min_damage, max_damage):
-    """Apply burn damage to the player."""
     _add_damage_type(game, "burn", "Burn", min_damage, max_damage)
 
 
 def add_poison_damage(game, min_damage, max_damage):
-    """Apply poison damage to the player."""
     _add_damage_type(game, "poison", "Poison", min_damage, max_damage)
 
 
 def combined_effect(effect_functions):
-    """Apply multiple effects in sequence."""
     for effect_fn in effect_functions:
         effect_fn()
 
 
 def damage_random_limb(game, min_damage, max_damage):
-    """Damage a random limb by a random amount."""
     limb = random.choice(list(game.player_data["limbs"].keys()))
     damage_limb(game, limb, min_damage, max_damage)
 
 
 def damage_limb(game, limb, min_damage, max_damage):
-    """Damage a specific limb by a random amount within range (blunt damage)."""
     if limb in game.player_data["limbs"]:
         damage = random.randint(min_damage, max_damage)
 
@@ -219,7 +213,6 @@ def damage_limb(game, limb, min_damage, max_damage):
 
 
 def add_credits(game, amount):
-    """Add credits to the player."""
     game.player_data["credits"] += amount
     _report_effect(game, "Credits Added", f"You gained {amount} credits.")
     game.add_note(
@@ -228,7 +221,6 @@ def add_credits(game, amount):
 
 
 def lose_credits(game, amount):
-    """Subtract credits from the player (min 0)."""
     old_credits = game.player_data["credits"]
     game.player_data["credits"] = max(0, old_credits - amount)
     _report_effect(game, "Credits Lost", f"You lost {amount} credits.")
@@ -301,7 +293,6 @@ def station_announcement(game):
 
 
 def heal_limb(game, limb, min_heal, max_heal):
-    """Restore health to a specific limb within range."""
     if limb not in game.player_data["limbs"]:
         return
 
@@ -324,7 +315,6 @@ def heal_limb(game, limb, min_heal, max_heal):
 
 
 def heal_damage_type(game, damage_key, label, min_heal, max_heal):
-    """Reduce a damage type by a random amount within range."""
     amount = random.randint(min_heal, max_heal)
     original = game.player_data["damage"].get(damage_key, 0)
     game.player_data["damage"][damage_key] = max(0, original - amount)
@@ -426,7 +416,6 @@ def bot_moves_by(game):
 
 
 def add_snack(game):
-    """Add a Snack item to the player's inventory."""
     item_def = get_item_definition("snack")
     if not item_def:
         messagebox.showerror("Error", "Could not find definition for snack.")
