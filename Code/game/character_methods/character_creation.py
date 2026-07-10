@@ -1,5 +1,4 @@
 import tkinter as tk
-import datetime
 import random
 from tkinter import messagebox
 
@@ -7,6 +6,7 @@ from game.objects.items import build_default_locker_inventory
 from game.helper_methods.stock_market import default_stock_market_state, serialize_companies
 from game.helper_methods.npc_movement import location_for_post, pick_random_hallway_location
 from game.helper_methods.random_events import ensure_job_event
+from game.helper_methods.game_clock import default_game_clock
 
 # List of potential NPC names
 NPC_NAMES = [
@@ -343,7 +343,8 @@ class CharacterCreation:
         self.player_data["fine_amount"] = 0
         self.player_data["fine_reason"] = ""
         self.player_data["in_jail"] = False
-        self.player_data["jail_release_at"] = None
+        self.player_data["jail_release_at_seconds"] = None
+        self.player_data["game_clock"] = default_game_clock()
 
         self.player_data["credits"] = job_info["credits"]
 
@@ -396,7 +397,7 @@ class CharacterCreation:
                 "fine_amount": 0,
                 "fine_reason": "",
                 "in_jail": False,
-                "jail_release_at": None,
+                "jail_release_at_seconds": None,
                 "permissions": permissions_for_job("Staff Assistant"),
             }
 
@@ -426,7 +427,7 @@ class CharacterCreation:
                 "fine_amount": 0,
                 "fine_reason": "",
                 "in_jail": False,
-                "jail_release_at": None,
+                "jail_release_at_seconds": None,
                 "permissions": permissions_for_job("Captain"),
             }
             station_crew.append(captain_data)
@@ -463,7 +464,7 @@ class CharacterCreation:
                         "fine_amount": 0,
                         "fine_reason": "",
                         "in_jail": False,
-                        "jail_release_at": None,
+                        "jail_release_at_seconds": None,
                         "permissions": {
                             s: (j == npc_job)
                             for j, d in department_heads.items()
@@ -501,7 +502,6 @@ class CharacterCreation:
         self.player_data["station_power"] = {
             "battery_level": 25.0,
             "solar_charging": solar_charging,
-            "last_update_time": datetime.datetime.now().isoformat(),
             "system_levels": {
                 "life_support": 10,
                 "hallway_lighting": 5,

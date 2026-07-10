@@ -1,4 +1,10 @@
-"""Jail / arrest helpers: sentences, release, and prisoner lookups."""
+"""Jail / arrest helpers: sentences, release, and prisoner lookups.
+
+Sentences are tracked as absolute deadlines on the universal master game
+clock (``jail_release_at_seconds``) rather than wall-clock timestamps.
+Callers pass in the current ``elapsed_seconds`` (see ``game_clock.py``)
+so this module never reads the wall clock itself.
+"""
 
 import datetime
 import random
@@ -36,7 +42,9 @@ def security_hallway_location():
 def _ensure_jail_fields(member):
     """Back-compat migration for saves made before jail existed."""
     member.setdefault("in_jail", False)
-    member.setdefault("jail_release_at", None)
+    member.setdefault("jail_release_at_seconds", None)
+    # Drop the old wall-clock field from pre-refactor saves; it's unused now.
+    member.pop("jail_release_at", None)
     member.setdefault("warrant", False)
     member.setdefault("warrant_reason", "")
     member.setdefault("fine_amount", 0)
@@ -84,6 +92,7 @@ def _jail_for_fine(
     amount,
     reason,
     name,
+    elapsed_seconds,
     refuse=False,
 ):
     """Arrest someone over an unpaid/refused fine. Returns 'jailed'."""
@@ -119,6 +128,7 @@ def _jail_for_fine(
         game=game,
         is_player=is_player,
         show_message=bool(game),
+        elapsed_seconds=elapsed_seconds,
     )
     if game is None:
         if parent is not None:
@@ -139,6 +149,7 @@ def resolve_fine_with_guard(
     game=None,
     is_player=False,
     guard_name="Security",
+    elapsed_seconds=0.0,
 ):
     """Collect an unpaid fine when the member meets a security guard.
 
@@ -167,6 +178,7 @@ def resolve_fine_with_guard(
                 amount=amount,
                 reason=reason,
                 name=name,
+                elapsed_seconds=elapsed_seconds,
                 refuse=True,
             )
 
@@ -202,6 +214,7 @@ def resolve_fine_with_guard(
         amount=amount,
         reason=reason,
         name=name,
+        elapsed_seconds=elapsed_seconds,
         refuse=False,
     )
 
@@ -216,19 +229,18 @@ def is_jailed(member):
     return bool(member.get("in_jail", False))
 
 
-def jail_seconds_remaining(member):
-    """Return whole seconds left on a sentence, or 0 if not jailed / expired."""
+def jail_seconds_remaining(member, elapsed_seconds=0.0):
+    """Return whole seconds left on a sentence, or 0 if not jailed / expired.
+
+    ``elapsed_seconds`` is the current master game clock value (see
+    ``game_clock.get_elapsed_seconds``).
+    """
     if not is_jailed(member):
         return 0
-    release_at = member.get("jail_release_at")
-    if not release_at:
+    release_at = member.get("jail_release_at_seconds")
+    if release_at is None:
         return 0
-    try:
-        release_time = datetime.datetime.fromisoformat(release_at)
-    except (TypeError, ValueError):
-        return 0
-    remaining = (release_time - datetime.datetime.now()).total_seconds()
-    return max(0, int(remaining))
+    return max(0, int(release_at - elapsed_seconds))
 
 
 def format_jail_time(seconds):
@@ -283,20 +295,21 @@ def fined_in_room(room_key, player_data, station_crew, *, exclude=None):
     return fined
 
 
-def arrest_member(member, *, reason="", game=None, is_player=False, show_message=True):
+def arrest_member(
+    member, *, reason="", game=None, is_player=False, show_message=True, elapsed_seconds=0.0
+):
     """Send a crew member to jail for the default sentence.
 
     Returns True if the arrest was applied, False if they were already jailed.
-    Warrant stays active until release.
+    Warrant stays active until release. ``elapsed_seconds`` is the current
+    master game clock value; the release deadline is scheduled relative to it.
     """
     _ensure_jail_fields(member)
     if is_jailed(member):
         return False
 
-    now = datetime.datetime.now()
-    release_at = now + datetime.timedelta(seconds=DEFAULT_SENTENCE_SECONDS)
     member["in_jail"] = True
-    member["jail_release_at"] = release_at.isoformat()
+    member["jail_release_at_seconds"] = elapsed_seconds + DEFAULT_SENTENCE_SECONDS
     member["location"] = security_room_location()
     member["room_visit_remaining"] = 0
     if has_post(member):
@@ -333,7 +346,7 @@ def release_member(member, *, is_player=False, game=None, show_message=True):
 
     name = member.get("name", "Someone")
     member["in_jail"] = False
-    member["jail_release_at"] = None
+    member["jail_release_at_seconds"] = None
     member["warrant"] = False
     member["warrant_reason"] = ""
     member["room_visit_remaining"] = 0
@@ -369,15 +382,14 @@ def release_member(member, *, is_player=False, game=None, show_message=True):
     return True
 
 
-def add_jail_time(member, seconds=ADD_TIME_SECONDS):
+def add_jail_time(member, elapsed_seconds=0.0, seconds=ADD_TIME_SECONDS):
     """Extend an active sentence. Returns True if time was added."""
     _ensure_jail_fields(member)
     if not is_jailed(member):
         return False
 
-    remaining = jail_seconds_remaining(member)
-    new_release = datetime.datetime.now() + datetime.timedelta(seconds=remaining + seconds)
-    member["jail_release_at"] = new_release.isoformat()
+    remaining = jail_seconds_remaining(member, elapsed_seconds)
+    member["jail_release_at_seconds"] = elapsed_seconds + remaining + seconds
     return True
 
 
@@ -394,18 +406,21 @@ def list_prisoners(player_data, station_crew):
 
 def tick_jail_releases(game):
     """Release anyone whose sentence has expired. Returns list of released names."""
+    from game.helper_methods.game_clock import get_elapsed_seconds
+
     released = []
     player_data = game.player_data
     station_crew = game.station_crew
+    elapsed_seconds = get_elapsed_seconds(player_data)
 
     ensure_crew_jail_fields(player_data, station_crew)
 
-    if is_jailed(player_data) and jail_seconds_remaining(player_data) <= 0:
+    if is_jailed(player_data) and jail_seconds_remaining(player_data, elapsed_seconds) <= 0:
         release_member(player_data, is_player=True, game=game, show_message=True)
         released.append(player_data.get("name", "You"))
 
     for npc in station_crew:
-        if is_jailed(npc) and jail_seconds_remaining(npc) <= 0:
+        if is_jailed(npc) and jail_seconds_remaining(npc, elapsed_seconds) <= 0:
             name = npc.get("name", "A crew member")
             release_member(npc, is_player=False, game=game, show_message=False)
             released.append(name)
@@ -413,7 +428,9 @@ def tick_jail_releases(game):
     return released
 
 
-def arrest_wanted_in_room(room_key, player_data, station_crew, *, game=None, guard=None):
+def arrest_wanted_in_room(
+    room_key, player_data, station_crew, *, game=None, guard=None, elapsed_seconds=0.0
+):
     """Arrest wanted NPCs (and player) currently in room_key. Returns arrest count."""
     arrested = 0
 
@@ -430,6 +447,7 @@ def arrest_wanted_in_room(room_key, player_data, station_crew, *, game=None, gua
                 game=game,
                 is_player=False,
                 show_message=bool(game),
+                elapsed_seconds=elapsed_seconds,
             ):
                 arrested += 1
 
@@ -448,6 +466,7 @@ def arrest_wanted_in_room(room_key, player_data, station_crew, *, game=None, gua
             game=game,
             is_player=True,
             show_message=True,
+            elapsed_seconds=elapsed_seconds,
         ):
             arrested += 1
 
@@ -514,7 +533,9 @@ def _ask_arrest_or_let_go(parent, message):
     return result["choice"]
 
 
-def offer_player_arrest_choice(player_data, npc, *, parent, game=None, place="hall"):
+def offer_player_arrest_choice(
+    player_data, npc, *, parent, game=None, place="hall", elapsed_seconds=0.0
+):
     """Let a Security Guard player Arrest or Let Go a wanted crew member.
 
     place: 'hall', 'room', or 'call'
@@ -579,6 +600,7 @@ def offer_player_arrest_choice(player_data, npc, *, parent, game=None, place="ha
             game=game,
             is_player=False,
             show_message=bool(game),
+            elapsed_seconds=elapsed_seconds,
         )
         if game is None:
             messagebox.showinfo("Arrested", arrest_reason, parent=parent)
@@ -620,8 +642,8 @@ def _add_player_note(player_data, game, text):
     )
 
 
-def maybe_offer_arrest_after_call(player_data, npc, *, parent, game=None):
+def maybe_offer_arrest_after_call(player_data, npc, *, parent, game=None, elapsed_seconds=0.0):
     """If the player is Security and the called NPC is wanted, offer Arrest/Let Go."""
     return offer_player_arrest_choice(
-        player_data, npc, parent=parent, game=game, place="call"
+        player_data, npc, parent=parent, game=game, place="call", elapsed_seconds=elapsed_seconds
     )

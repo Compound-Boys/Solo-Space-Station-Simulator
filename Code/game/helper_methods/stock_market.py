@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from tkinter import messagebox, ttk
 
+from game.helper_methods.game_clock import get_elapsed_seconds
 from game.helper_methods.ui_panels import patch_destroy_cleanup
 
 DEFAULT_COMPANY_NAMES = [
@@ -26,8 +27,7 @@ DEFAULT_COMPANY_NAMES = [
     "SmartHome",
 ]
 
-UPDATE_INTERVAL_SECONDS = 60
-CYCLES_PER_DAY = 5
+CYCLE_INTERVAL_SECONDS = 300  # a new cycle every 5 minutes of master game time
 
 class Company:
     def __init__(self, name, starting_value):
@@ -122,20 +122,16 @@ def migrate_stock_holdings_from_companies(player_data):
         player_data["stock_holdings"] = holdings
 
 
-def get_seconds_until_update(last_update_time, interval=UPDATE_INTERVAL_SECONDS):
-    """Calculate seconds remaining until the next market update."""
-    now = datetime.datetime.now()
-    elapsed = (now - last_update_time).total_seconds()
-    return int(max(0, interval - elapsed))
+def get_seconds_until_next_cycle(elapsed_seconds, interval=CYCLE_INTERVAL_SECONDS):
+    """Calculate seconds remaining until the next market cycle, per the master timer."""
+    return int(max(0, interval - (elapsed_seconds % interval)))
 
 
 def default_stock_market_state():
     """Return a fresh stock_market block for player_data."""
     return {
         "cycle_number": 1,
-        "day_number": 1,
         "companies": [],
-        "last_update_time": datetime.datetime.now().isoformat(),
         "trade_log": [],
     }
 
@@ -145,7 +141,7 @@ def truncate_credits(value):
     return math.trunc(value * 100) / 100
 
 
-def record_trade(player_data, cycle, day, side, company_name, shares, price, total):
+def record_trade(player_data, cycle, side, company_name, shares, price, total):
     """Append or merge a buy/sell entry in the current cycle trade log."""
     if "stock_market" not in player_data:
         player_data["stock_market"] = {}
@@ -155,14 +151,13 @@ def record_trade(player_data, cycle, day, side, company_name, shares, price, tot
 
     current_cycle_entry = None
     for entry in player_data["stock_market"]["trade_log"]:
-        if entry.get("cycle") == cycle and entry.get("day") == day:
+        if entry.get("cycle") == cycle:
             current_cycle_entry = entry
             break
 
     if not current_cycle_entry:
         current_cycle_entry = {
             "cycle": cycle,
-            "day": day,
             "trades": {"bought": {}, "sold": {}},
         }
         player_data["stock_market"]["trade_log"].append(current_cycle_entry)
@@ -199,30 +194,29 @@ def generate_market_tip(companies_data):
 
 
 class StockMarketEngine:
-    """Owns live market state and background tick logic."""
+    """Owns live market state and master-timer-driven tick logic."""
 
     def __init__(self, companies=None):
         self.companies = companies if companies is not None else create_default_companies()
         self.cycle_number = 1
-        self.day_number = 1
-        self.last_update_time = datetime.datetime.now()
 
-    def tick_if_due(self):
-        """Advance the market if the update interval has elapsed."""
-        now = datetime.datetime.now()
-        elapsed = (now - self.last_update_time).total_seconds()
-        if elapsed < UPDATE_INTERVAL_SECONDS:
+    def tick_if_due(self, elapsed_seconds):
+        """Advance the market to match the master timer. Returns True if it changed.
+
+        Cycles are scheduled purely off ``elapsed_seconds``: cycle N ends at
+        ``N * CYCLE_INTERVAL_SECONDS``. Catches up fully (not just one cycle)
+        if a lot of time passed since the last check, e.g. after loading a
+        save that sat untouched for a while.
+        """
+        target_cycle = int(elapsed_seconds // CYCLE_INTERVAL_SECONDS) + 1
+        if target_cycle <= self.cycle_number:
             return False
 
-        for company in self.companies:
-            company.update_value()
+        while self.cycle_number < target_cycle:
+            for company in self.companies:
+                company.update_value()
+            self.cycle_number += 1
 
-        self.cycle_number += 1
-        if self.cycle_number > CYCLES_PER_DAY:
-            self.cycle_number = 1
-            self.day_number += 1
-
-        self.last_update_time = now
         return True
 
     def sync_to_player_data(self, player_data):
@@ -234,9 +228,7 @@ class StockMarketEngine:
 
         player_data["stock_market"].update({
             "cycle_number": self.cycle_number,
-            "day_number": self.day_number,
             "companies": serialize_companies(self.companies),
-            "last_update_time": self.last_update_time.isoformat(),
         })
 
         if "trade_log" not in player_data["stock_market"]:
@@ -248,16 +240,7 @@ class StockMarketEngine:
             return
 
         market_data = player_data["stock_market"]
-        self.cycle_number = market_data.get("cycle_number", 0)
-        self.day_number = market_data.get("day_number", 1)
-
-        if "last_update_time" in market_data:
-            try:
-                self.last_update_time = datetime.datetime.fromisoformat(market_data["last_update_time"])
-            except (ValueError, TypeError):
-                self.last_update_time = datetime.datetime.now()
-        else:
-            self.last_update_time = datetime.datetime.now()
+        self.cycle_number = market_data.get("cycle_number", 1)
 
         migrate_stock_holdings_from_companies(player_data)
 
@@ -277,12 +260,11 @@ def hydrate_companies(companies):
 
 
 class StockMarket:
-    def __init__(self, parent_window, player_data, companies, cycle_number, day_number, return_callback):
+    def __init__(self, parent_window, player_data, companies, cycle_number, return_callback):
         self.parent_window = parent_window
         self.player_data = player_data
         self.companies = hydrate_companies(companies)
         self.cycle_number = cycle_number
-        self.day_number = day_number
         self.return_callback = return_callback
         self.current_company = None
 
@@ -331,17 +313,13 @@ class StockMarket:
                                    font=("Arial", 12), bg="black", fg="white")
         self.cycle_label.grid(row=0, column=0, sticky="w", pady=1)
 
-        self.day_label = tk.Label(self.info_frame, text=f"Day: {self.day_number}",
-                                 font=("Arial", 12), bg="black", fg="white")
-        self.day_label.grid(row=1, column=0, sticky="w", pady=1)
-
         self.timer_label = tk.Label(self.info_frame, text="Next Update: Calculating...",
                                   font=("Arial", 12), bg="black", fg="yellow")
-        self.timer_label.grid(row=2, column=0, sticky="w", pady=1)
+        self.timer_label.grid(row=1, column=0, sticky="w", pady=1)
 
         self.credits_label = tk.Label(self.info_frame, text=f"Credits: {player_data['credits']:.2f}",
                                     font=("Arial", 12), bg="black", fg="white")
-        self.credits_label.grid(row=3, column=0, sticky="w", pady=1)
+        self.credits_label.grid(row=2, column=0, sticky="w", pady=1)
 
         self.company_info_frame = tk.Frame(self.header_frame, bg="black")
         self.company_info_frame.pack(side=tk.RIGHT, anchor="ne", fill=tk.X, expand=True)
@@ -478,7 +456,6 @@ class StockMarket:
         self.companies_listbox.bind('<<ListboxSelect>>', self.on_company_select)
         
         self.last_seen_cycle = cycle_number
-        self.last_seen_day = day_number
         
         self.populate_companies_listbox()
         
@@ -492,19 +469,15 @@ class StockMarket:
         """Apply saved company prices and ownership from player_data."""
         refresh_companies_from_player_data(self.companies, self.player_data)
 
-    def _sync_cycle_day_from_player_data(self):
-        """Update cycle/day labels from player_data if they changed."""
+    def _sync_cycle_from_player_data(self):
+        """Update the cycle label from player_data if it changed."""
         market_data = self.player_data.get("stock_market", {})
         poll_cycle = market_data.get("cycle_number", 0)
-        poll_day = market_data.get("day_number", 1)
 
-        if poll_cycle != self.last_seen_cycle or poll_day != self.last_seen_day:
+        if poll_cycle != self.last_seen_cycle:
             self.cycle_number = poll_cycle
-            self.day_number = poll_day
             self.last_seen_cycle = poll_cycle
-            self.last_seen_day = poll_day
             self.cycle_label.config(text=f"Cycle: {self.cycle_number}")
-            self.day_label.config(text=f"Day: {self.day_number}")
             return True
 
         return False
@@ -519,8 +492,8 @@ class StockMarket:
         except tk.TclError:
             return
 
-        cycle_day_changed = self._sync_cycle_day_from_player_data()
-        if cycle_day_changed:
+        cycle_changed = self._sync_cycle_from_player_data()
+        if cycle_changed:
             self._refresh_companies_from_player_data()
             self.populate_companies_listbox()
 
@@ -535,57 +508,18 @@ class StockMarket:
                         self.on_company_select(None)
                         break
 
-        if "stock_market" in self.player_data and "last_update_time" in self.player_data["stock_market"]:
-            try:
-                last_update = datetime.datetime.fromisoformat(self.player_data["stock_market"]["last_update_time"])
-                remaining = get_seconds_until_update(last_update)
+        elapsed_seconds = get_elapsed_seconds(self.player_data)
+        remaining = get_seconds_until_next_cycle(elapsed_seconds)
 
-                if remaining <= 0:
-                    self.timer_label.config(text="Updating Market...", fg="green")
-
-                    if "stock_market" in self.player_data:
-                        self.cycle_number = self.player_data["stock_market"].get("cycle_number", self.cycle_number)
-                        self.day_number = self.player_data["stock_market"].get("day_number", self.day_number)
-                        self.cycle_label.config(text=f"Cycle: {self.cycle_number}")
-                        self.day_label.config(text=f"Day: {self.day_number}")
-                        self._refresh_companies_from_player_data()
-
-                    selected_company = None
-                    if self.companies_listbox.curselection():
-                        selected_idx = self.companies_listbox.curselection()[0]
-                        if selected_idx < self.companies_listbox.size():
-                            selected_company = self.companies_listbox.get(selected_idx)
-
-                    self.populate_companies_listbox()
-
-                    if selected_company:
-                        for i in range(self.companies_listbox.size()):
-                            if self.companies_listbox.get(i) == selected_company:
-                                self.companies_listbox.selection_set(i)
-                                self.companies_listbox.see(i)
-                                self.on_company_select(None)
-                                break
-                        else:
-                            if self.companies_listbox.size() > 0:
-                                self.companies_listbox.selection_set(0)
-                                self.on_company_select(None)
-                    elif self.companies_listbox.size() > 0:
-                        self.companies_listbox.selection_set(0)
-                        self.on_company_select(None)
-
-                    self._timer_after_id = self.stock_window.after(1000, self.update_timer)
-                    return
-
-                minutes = int(remaining // 60)
-                seconds = int(remaining % 60)
-                self.timer_label.config(
-                    text=f"Next Update: {minutes:02d}:{seconds:02d}",
-                    fg="yellow" if remaining > 15 else "orange" if remaining > 5 else "red",
-                )
-            except (ValueError, TypeError):
-                self.timer_label.config(text="Next Update: Unknown", fg="gray")
+        if remaining <= 0:
+            self.timer_label.config(text="Updating Market...", fg="green")
         else:
-            self.timer_label.config(text="Next Update: Unknown", fg="gray")
+            minutes = int(remaining // 60)
+            seconds = int(remaining % 60)
+            self.timer_label.config(
+                text=f"Next Update: {minutes:02d}:{seconds:02d}",
+                fg="yellow" if remaining > 15 else "orange" if remaining > 5 else "red",
+            )
 
         self._timer_after_id = self.stock_window.after(1000, self.update_timer)
     
@@ -777,7 +711,6 @@ class StockMarket:
             record_trade(
                 self.player_data,
                 self.cycle_number,
-                self.day_number,
                 "bought",
                 self.current_company.name,
                 shares,
@@ -843,7 +776,6 @@ class StockMarket:
             record_trade(
                 self.player_data,
                 self.cycle_number,
-                self.day_number,
                 "sold",
                 self.current_company.name,
                 shares,
@@ -904,8 +836,7 @@ class StockMarket:
 
             for entry in reversed(self.player_data["stock_market"]["trade_log"]):
                 cycle = entry.get("cycle", 0)
-                day = entry.get("day", 0)
-                trade_log.insert(tk.END, f"Cycle {cycle} (Day {day}):\n", "cycle")
+                trade_log.insert(tk.END, f"Cycle {cycle}:\n", "cycle")
 
                 trades = entry.get("trades", {})
 

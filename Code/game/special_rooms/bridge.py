@@ -5,6 +5,7 @@ from tkinter import messagebox
 from game.character_methods.character_creation import JOBS, permissions_for_job
 from game.helper_methods.npc_movement import reassign_npc_post
 from game.helper_methods.random_events import ensure_job_event
+from game.helper_methods.station_status import show_station_status as render_station_status
 from game.helper_methods.ui_panels import open_modal_panel, refocus_window
 from game.special_rooms.shared import (
     PLAYER_CREW_INDEX,
@@ -483,9 +484,7 @@ class Bridge(SpecialRoomBase):
             text="Station Status",
             font=("Arial", 14),
             width=20,
-            command=lambda: messagebox.showinfo(
-                "Station Status", "All systems nominal. No critical alerts.", parent=self.bridge_window
-            ),
+            command=self.show_station_status,
         )
         status_btn.pack(pady=5)
 
@@ -572,6 +571,10 @@ class Bridge(SpecialRoomBase):
 
         refocus_window(self.bridge_window)
     
+    def show_station_status(self):
+        """Display the live Station Status briefing for the Captain."""
+        render_station_status(self.bridge_window, self.player_data, self.station_crew)
+
     def show_crew_manifest(self):
         """Display the crew manifest with department listings, including NPCs"""
         render_crew_manifest(self.bridge_window, self.player_data, self.station_crew)

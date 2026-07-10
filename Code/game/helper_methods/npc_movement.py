@@ -121,7 +121,7 @@ def ensure_npc_movement_fields(station_crew):
     """Back-compat migration for saves made before NPC movement existed."""
     for npc in station_crew:
         npc.setdefault("in_jail", False)
-        npc.setdefault("jail_release_at", None)
+        npc.setdefault("jail_release_at_seconds", None)
         npc.setdefault("warrant", False)
         npc.setdefault("warrant_reason", "")
         npc.setdefault("fine_amount", 0)
@@ -184,16 +184,18 @@ def _return_to_post(npc):
     npc["room_visit_remaining"] = 0
 
 
-def call_npc(npc):
+def call_npc(npc, elapsed_seconds=0.0):
     """Attempt to call an off-duty NPC back to their post.
 
+    ``elapsed_seconds`` is the current master game clock value, used to
+    compute the jail countdown if the NPC happens to be locked up.
     Returns (success, message).
     """
     name = npc.get("name", "They")
     if npc.get("in_jail", False):
         from game.helper_methods.jail import format_jail_time, jail_seconds_remaining
 
-        remaining = format_jail_time(jail_seconds_remaining(npc))
+        remaining = format_jail_time(jail_seconds_remaining(npc, elapsed_seconds))
         return False, f"{name} is in jail and will be released in {remaining}."
 
     if npc.get("on_duty", True):
@@ -323,6 +325,7 @@ def _enter_room(npc, room_key, game=None, player_data=None, station_crew=None):
 
     # Security Guards check warrants when they enter a room.
     if npc.get("job") == "Security Guard" and station_crew is not None:
+        from game.helper_methods.game_clock import get_elapsed_seconds
         from game.helper_methods.jail import (
             arrest_wanted_in_room,
             has_fine,
@@ -330,6 +333,8 @@ def _enter_room(npc, room_key, game=None, player_data=None, station_crew=None):
             member_location_key,
             resolve_fine_with_guard,
         )
+
+        elapsed_seconds = get_elapsed_seconds(player_data) if player_data else 0.0
 
         # Collect unpaid fines from anyone already in the room (including the player).
         if (
@@ -344,6 +349,7 @@ def _enter_room(npc, room_key, game=None, player_data=None, station_crew=None):
                 game=game,
                 is_player=True,
                 guard_name=npc.get("name", "A security guard"),
+                elapsed_seconds=elapsed_seconds,
             )
 
         for other in list(station_crew):
@@ -360,6 +366,7 @@ def _enter_room(npc, room_key, game=None, player_data=None, station_crew=None):
                     game=game,
                     is_player=False,
                     guard_name=npc.get("name", "A security guard"),
+                    elapsed_seconds=elapsed_seconds,
                 )
 
         arrest_wanted_in_room(
@@ -368,6 +375,7 @@ def _enter_room(npc, room_key, game=None, player_data=None, station_crew=None):
             station_crew,
             game=game,
             guard=npc,
+            elapsed_seconds=elapsed_seconds,
         )
 
 

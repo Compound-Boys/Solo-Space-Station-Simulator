@@ -522,10 +522,10 @@ def station_announcement(game):
     """Display a random station announcement."""
     announcements = [
         "Reminder to all crew: safety protocols must be followed at all times.",
-        "The cafeteria will be serving special meal rations today.",
-        "Maintenance is scheduled in Sector 7 tomorrow.",
+        "The cafeteria is now serving special meal rations.",
+        "Maintenance is scheduled in Sector 7 shortly.",
         "All personnel are reminded to report suspicious activity to security.",
-        "Weekly crew meeting is postponed until further notice.",
+        "The crew meeting is postponed until further notice.",
         "Environmental controls are being recalibrated. Expect minor temperature fluctuations.",
     ]
 
@@ -634,6 +634,8 @@ def bot_moves_by(game):
                 "A security bot locks onto you. You are wanted — you are under arrest!\n"
                 f"Charge: {charge}",
             )
+            from game.helper_methods.game_clock import get_elapsed_seconds
+
             arrest_member(
                 game.player_data,
                 reason=(
@@ -643,6 +645,7 @@ def bot_moves_by(game):
                 game=game,
                 is_player=True,
                 show_message=False,
+                elapsed_seconds=get_elapsed_seconds(game.player_data),
             )
             game.add_note("Arrested by a security bot while wanted.")
         else:

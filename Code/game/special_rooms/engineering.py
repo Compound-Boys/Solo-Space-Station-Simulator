@@ -8,11 +8,13 @@ from game.helper_methods.oxygen_helper import (
     LIFE_SUPPORT_DAMAGE_BEGIN_TITLE,
     LIFE_SUPPORT_DAMAGE_BEGIN_MESSAGE,
     OXYGEN_DEPLETION_ANNOUNCEMENT_TEXT,
+    OXYGEN_DEPLETION_GRACE_SECONDS,
     OXYGEN_DEPLETION_MODAL_BODY,
     OXYGEN_DEPLETION_FOLLOWUP_TITLE,
     OXYGEN_DEPLETION_FOLLOWUP_MESSAGE,
     life_support_entering_damage_range,
 )
+from game.helper_methods.game_clock import get_elapsed_seconds
 from game.special_rooms.shared import (
     SpecialRoomBase,
     add_note,
@@ -309,7 +311,6 @@ class Engineering(SpecialRoomBase):
             self.player_data["station_power"] = {
                 "battery_level": 25.0,
                 "solar_charging": False,
-                "last_update_time": datetime.datetime.now().isoformat()
             }
 
         if "system_levels" not in self.player_data["station_power"]:
@@ -931,10 +932,11 @@ class Engineering(SpecialRoomBase):
             
             if "damage_timers" not in self.player_data:
                 self.player_data["damage_timers"] = {}
-                
+
+            elapsed_seconds = get_elapsed_seconds(self.player_data)
             self.player_data["damage_timers"]["oxygen_depletion"] = {
                 "active": True,
-                "start_time": datetime.datetime.now().isoformat(),
+                "damage_starts_at_seconds": elapsed_seconds + OXYGEN_DEPLETION_GRACE_SECONDS,
                 "warning_shown": False
             }
             

@@ -1,14 +1,16 @@
 """Shared power system constants and helpers."""
 
-import datetime
-
 
 def default_station_power():
-    """Return a fresh station_power dict for new games or missing save data."""
+    """Return a fresh station_power dict for new games or missing save data.
+
+    Discharge/charge no longer track their own wall-clock timestamp; the
+    universal master game clock (see ``game_clock.py``) supplies the elapsed
+    time used for these calculations.
+    """
     return {
         "battery_level": 25.0,
         "solar_charging": False,
-        "last_update_time": datetime.datetime.now().isoformat(),
         "system_levels": {
             "life_support": 10,
             "hallway_lighting": 5,
