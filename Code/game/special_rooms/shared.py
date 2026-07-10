@@ -9,6 +9,7 @@ from game.helper_methods.lighting_helper import (
     lighting_style,
 )
 from game.helper_methods.npc_movement import any_npc_for_job, call_npc, on_duty_npc_for_job
+from game.helper_methods.jail import maybe_offer_arrest_after_call
 from game.helper_methods.ui_panels import open_modal_panel
 
 ROOM_GEOMETRY = "1012x759"
@@ -299,6 +300,13 @@ def build_npc_contact_section(
         success, message = call_npc(away_npc)
         title = "Call Successful" if success else "No Answer"
         messagebox.showinfo(title, message, parent=room_window)
+        if success:
+            # Security Guard players scan anyone they call back for warrants.
+            maybe_offer_arrest_after_call(
+                player_data,
+                away_npc,
+                parent=room_window,
+            )
         refresh_callback()
         room_window.after(20, room_window.lift)
         room_window.focus_force()

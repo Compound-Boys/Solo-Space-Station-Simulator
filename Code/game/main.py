@@ -27,6 +27,7 @@ from game.helper_methods.jail import (
     format_jail_time,
     is_jailed,
     jail_seconds_remaining,
+    offer_player_arrest_choice,
     tick_jail_releases,
     wanted_in_room,
 )
@@ -919,125 +920,13 @@ class SpaceStationGame(ItemInventoryMixin):
 
     def _offer_player_arrest_choice(self, npc, place="hall"):
         """Let a Security Guard player Arrest or Let Go a wanted crew member."""
-        name = npc.get("name", "A crew member")
-        job = npc.get("job", "Crew")
-        bribe_amount = None
-        if random.random() < 0.50:
-            bribe_amount = random.randint(5, 50)
-
-        if place == "room":
-            lines = [
-                f"You scan the room and spot {name} ({job}).",
-                "They have an active warrant.",
-            ]
-            arrest_reason = f"You arrest {name} in the room and send them to jail."
-            let_go_note = f"Let wanted crew member {name} go after scanning a room."
-        else:
-            lines = [
-                f"You stop {name} ({job}) in the hall.",
-                "They have an active warrant.",
-            ]
-            arrest_reason = f"You arrest {name} in the hallway and send them to jail."
-            let_go_note = f"Let wanted crew member {name} go in the hallway."
-
-        if bribe_amount is not None:
-            lines.append(
-                f'{name} leans in and whispers, "Look the other way and I\'ll make it '
-                f'worth your while — {bribe_amount} credits."'
-            )
-        lines.append("\nWhat do you do?")
-
-        choice = self._ask_arrest_or_let_go("\n".join(lines))
-        if choice == "arrest":
-            arrest_member(
-                npc,
-                reason=arrest_reason,
-                game=self,
-                is_player=False,
-                show_message=True,
-            )
-            return
-
-        # Let Go
-        if bribe_amount is not None:
-            self.player_data["credits"] = self.player_data.get("credits", 0) + bribe_amount
-            npc["warrant"] = False
-            messagebox.showinfo(
-                "Let Go",
-                f"You look the other way. {name} slips you {bribe_amount} credits and hurries off.\n"
-                "Their warrant has been quietly cleared.",
-                parent=self.root,
-            )
-            self.add_note(
-                f"Accepted a {bribe_amount}-credit bribe from {name}, cleared their warrant, and let them go."
-            )
-        else:
-            messagebox.showinfo(
-                "Let Go",
-                f"You wave {name} on. They disappear down the hallway."
-                if place == "hall"
-                else f"You look the other way. {name} stays in the room.",
-                parent=self.root,
-            )
-            self.add_note(let_go_note)
-
-    def _ask_arrest_or_let_go(self, message):
-        """Modal with Arrest / Let Go. Returns 'arrest' or 'let_go'."""
-        result = {"choice": "let_go"}
-
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Wanted Crew")
-        dialog.configure(bg="black")
-        dialog.transient(self.root)
-        dialog.grab_set()
-        dialog.resizable(False, False)
-
-        label = tk.Label(
-            dialog,
-            text=message,
-            font=("Arial", 12),
-            bg="black",
-            fg="white",
-            justify=tk.LEFT,
-            wraplength=420,
+        offer_player_arrest_choice(
+            self.player_data,
+            npc,
+            parent=self.root,
+            game=self,
+            place=place,
         )
-        label.pack(padx=20, pady=20)
-
-        button_frame = tk.Frame(dialog, bg="black")
-        button_frame.pack(pady=(0, 16))
-
-        def choose(choice):
-            result["choice"] = choice
-            dialog.destroy()
-
-        arrest_btn = tk.Button(
-            button_frame,
-            text="Arrest",
-            font=("Arial", 12),
-            width=12,
-            command=lambda: choose("arrest"),
-        )
-        arrest_btn.pack(side=tk.LEFT, padx=8)
-
-        let_go_btn = tk.Button(
-            button_frame,
-            text="Let Go",
-            font=("Arial", 12),
-            width=12,
-            command=lambda: choose("let_go"),
-        )
-        let_go_btn.pack(side=tk.LEFT, padx=8)
-
-        dialog.update_idletasks()
-        width = dialog.winfo_reqwidth()
-        height = dialog.winfo_reqheight()
-        x = self.root.winfo_rootx() + (self.root.winfo_width() - width) // 2
-        y = self.root.winfo_rooty() + (self.root.winfo_height() - height) // 2
-        dialog.geometry(f"+{x}+{y}")
-
-        dialog.protocol("WM_DELETE_WINDOW", lambda: choose("let_go"))
-        self.root.wait_window(dialog)
-        return result["choice"]
 
     def handle_player_arrest(self, message, show_message=True):
         """Teleport the jailed player into the Security room UI."""

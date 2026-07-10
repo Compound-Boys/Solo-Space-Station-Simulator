@@ -1,6 +1,9 @@
 """Jail / arrest helpers: sentences, release, and prisoner lookups."""
 
 import datetime
+import random
+import tkinter as tk
+from tkinter import messagebox
 
 from game.maps import donut
 from game.helper_methods.npc_movement import (
@@ -10,6 +13,9 @@ from game.helper_methods.npc_movement import (
 
 DEFAULT_SENTENCE_SECONDS = 5 * 60
 ADD_TIME_SECONDS = 60
+BRIBE_CHANCE = 0.35
+BRIBE_MIN_CREDITS = 5
+BRIBE_MAX_CREDITS = 50
 
 
 def _location_dict_from_key(key):
@@ -256,3 +262,167 @@ def arrest_wanted_in_room(room_key, player_data, station_crew, *, game=None, gua
             arrested += 1
 
     return arrested
+
+
+def ask_arrest_or_let_go(parent, message):
+    """Modal with Arrest / Let Go. Returns 'arrest' or 'let_go'."""
+    result = {"choice": "let_go"}
+
+    dialog = tk.Toplevel(parent)
+    dialog.title("Wanted Crew")
+    dialog.configure(bg="black")
+    dialog.transient(parent)
+    dialog.grab_set()
+    dialog.resizable(False, False)
+
+    label = tk.Label(
+        dialog,
+        text=message,
+        font=("Arial", 12),
+        bg="black",
+        fg="white",
+        justify=tk.LEFT,
+        wraplength=420,
+    )
+    label.pack(padx=20, pady=20)
+
+    button_frame = tk.Frame(dialog, bg="black")
+    button_frame.pack(pady=(0, 16))
+
+    def choose(choice):
+        result["choice"] = choice
+        dialog.destroy()
+
+    tk.Button(
+        button_frame,
+        text="Arrest",
+        font=("Arial", 12),
+        width=12,
+        command=lambda: choose("arrest"),
+    ).pack(side=tk.LEFT, padx=8)
+
+    tk.Button(
+        button_frame,
+        text="Let Go",
+        font=("Arial", 12),
+        width=12,
+        command=lambda: choose("let_go"),
+    ).pack(side=tk.LEFT, padx=8)
+
+    dialog.update_idletasks()
+    width = dialog.winfo_reqwidth()
+    height = dialog.winfo_reqheight()
+    try:
+        x = parent.winfo_rootx() + (parent.winfo_width() - width) // 2
+        y = parent.winfo_rooty() + (parent.winfo_height() - height) // 2
+        dialog.geometry(f"+{x}+{y}")
+    except tk.TclError:
+        pass
+
+    dialog.protocol("WM_DELETE_WINDOW", lambda: choose("let_go"))
+    parent.wait_window(dialog)
+    return result["choice"]
+
+
+def offer_player_arrest_choice(player_data, npc, *, parent, game=None, place="hall"):
+    """Let a Security Guard player Arrest or Let Go a wanted crew member.
+
+    place: 'hall', 'room', or 'call'
+    Returns 'arrest', 'let_go', or None if the NPC was not eligible.
+    """
+    if player_data.get("job") != "Security Guard":
+        return None
+    if is_jailed(player_data) or is_jailed(npc) or not npc.get("warrant", False):
+        return None
+
+    name = npc.get("name", "A crew member")
+    job = npc.get("job", "Crew")
+    bribe_amount = None
+    if random.random() < BRIBE_CHANCE:
+        bribe_amount = random.randint(BRIBE_MIN_CREDITS, BRIBE_MAX_CREDITS)
+
+    if place == "room":
+        lines = [
+            f"You scan the room and spot {name} ({job}).",
+            "They have an active warrant.",
+        ]
+        arrest_reason = f"You arrest {name} in the room and send them to jail."
+        let_go_note = f"Let wanted crew member {name} go after scanning a room."
+        let_go_plain = f"You look the other way. {name} stays in the room."
+    elif place == "call":
+        lines = [
+            f"{name} ({job}) answers your call and arrives.",
+            "Your scan shows they have an active warrant.",
+        ]
+        arrest_reason = f"You arrest {name} after calling them back and send them to jail."
+        let_go_note = f"Let wanted crew member {name} go after calling them back."
+        let_go_plain = f"You look the other way. {name} remains at their post."
+    else:
+        lines = [
+            f"You stop {name} ({job}) in the hall.",
+            "They have an active warrant.",
+        ]
+        arrest_reason = f"You arrest {name} in the hallway and send them to jail."
+        let_go_note = f"Let wanted crew member {name} go in the hallway."
+        let_go_plain = f"You wave {name} on. They disappear down the hallway."
+
+    if bribe_amount is not None:
+        lines.append(
+            f'{name} leans in and whispers, "Look the other way and I\'ll make it '
+            f'worth your while — {bribe_amount} credits."'
+        )
+    lines.append("\nWhat do you do?")
+
+    choice = ask_arrest_or_let_go(parent, "\n".join(lines))
+    if choice == "arrest":
+        arrest_member(
+            npc,
+            reason=arrest_reason,
+            game=game,
+            is_player=False,
+            show_message=bool(game),
+        )
+        if game is None:
+            messagebox.showinfo("Arrested", arrest_reason, parent=parent)
+            _add_player_note(player_data, None, f"{name} was arrested and sent to jail.")
+        return "arrest"
+
+    if bribe_amount is not None:
+        player_data["credits"] = player_data.get("credits", 0) + bribe_amount
+        npc["warrant"] = False
+        messagebox.showinfo(
+            "Let Go",
+            f"You look the other way. {name} slips you {bribe_amount} credits and hurries off.\n"
+            "Their warrant has been quietly cleared.",
+            parent=parent,
+        )
+        _add_player_note(
+            player_data,
+            game,
+            f"Accepted a {bribe_amount}-credit bribe from {name}, "
+            "cleared their warrant, and let them go.",
+        )
+    else:
+        messagebox.showinfo("Let Go", let_go_plain, parent=parent)
+        _add_player_note(player_data, game, let_go_note)
+
+    return "let_go"
+
+
+def _add_player_note(player_data, game, text):
+    """Record a note via the game helper when available, else on player_data."""
+    if game is not None and hasattr(game, "add_note"):
+        game.add_note(text)
+        return
+    if "notes" not in player_data:
+        player_data["notes"] = []
+    player_data["notes"].append(
+        {"timestamp": datetime.datetime.now().isoformat(), "text": text}
+    )
+
+
+def maybe_offer_arrest_after_call(player_data, npc, *, parent, game=None):
+    """If the player is Security and the called NPC is wanted, offer Arrest/Let Go."""
+    return offer_player_arrest_choice(
+        player_data, npc, parent=parent, game=game, place="call"
+    )
