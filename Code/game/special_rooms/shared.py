@@ -236,6 +236,23 @@ def pack_character_sheet_button(parent_window, player_data, inventory_host):
     ).pack(pady=10)
 
 
+def pack_hands_button(parent_window, inventory_host):
+    """Pack a Hands button that opens the hands popup directly, without
+    needing to go through Character Sheet > Inventory to equip items."""
+
+    def open_hands():
+        on_close = getattr(inventory_host, "reload", None)
+        inventory_host.show_hands_popup(on_close=on_close)
+
+    tk.Button(
+        parent_window,
+        text="Hands",
+        font=("Arial", 14),
+        width=15,
+        command=open_hands,
+    ).pack(pady=10)
+
+
 def leave_room(return_callback, player_data, station_crew):
     """Hand off to the game; main window is not destroyed."""
     return_callback(player_data, station_crew)
@@ -417,6 +434,7 @@ class SpecialRoomBase(ItemInventoryMixin):
         )
         self._build_station_menu()
         pack_character_sheet_button(room_window, player_data, self)
+        pack_hands_button(room_window, self)
         tk.Button(
             room_window,
             text="Exit Room",
@@ -439,6 +457,7 @@ class SpecialRoomBase(ItemInventoryMixin):
         )
         self._build_station_menu()
         pack_character_sheet_button(self.room_window, self.player_data, self)
+        pack_hands_button(self.room_window, self)
         tk.Button(
             self.room_window,
             text="Exit Room",

@@ -96,22 +96,30 @@ class Quarters(ItemInventoryMixin):
 
         tk.Button(
             button_frame,
-            text="Door",
-            font=("Arial", 14),
-            width=15,
-            command=self.on_closing,
-        ).grid(row=1, column=1, padx=10, pady=10)
-
-        tk.Button(
-            button_frame,
             text="Character Sheet",
             font=("Arial", 14),
             width=15,
             command=self.view_character_sheet,
+        ).grid(row=1, column=1, padx=10, pady=10)
+
+        tk.Button(
+            button_frame,
+            text="Door",
+            font=("Arial", 14),
+            width=15,
+            command=self.on_closing,
         ).grid(row=2, column=0, columnspan=2, padx=10, pady=10)
 
         save_frame = tk.Frame(self.quarters_window, bg=room_bg)
         save_frame.pack(pady=30)
+
+        tk.Button(
+            save_frame,
+            text="Hands",
+            font=("Arial", 14),
+            width=15,
+            command=self.show_hands_popup,
+        ).pack(pady=(0, 10))
 
         tk.Button(
             save_frame,

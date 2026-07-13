@@ -266,6 +266,14 @@ def ensure_locker_inventory(player_data):
     return player_data["locker_inventory"]
 
 
+def ensure_hands(player_data):
+    """Return the player's left/right hand slots, creating them if missing."""
+    hands = player_data.setdefault("hands", {})
+    hands.setdefault("left", None)
+    hands.setdefault("right", None)
+    return hands
+
+
 class ItemInventoryMixin:
     """Inventory UI and item action handlers. Requires host to provide root, player_data, and add_note()."""
 
@@ -281,6 +289,32 @@ class ItemInventoryMixin:
 
         title_label = tk.Label(popup, text="Inventory", font=("Arial", 18), bg="black", fg="white")
         title_label.pack(pady=10)
+
+        hands = ensure_hands(self.player_data)
+        hands_frame = tk.Frame(popup, bg="black")
+        hands_frame.pack(pady=(0, 10))
+
+        for side, side_label in (("left", "Left Hand"), ("right", "Right Hand")):
+            held = hands.get(side)
+            held_name = held.get("name", "Item") if isinstance(held, dict) else "Empty"
+            hand_row = tk.Frame(hands_frame, bg="black")
+            hand_row.pack(fill=tk.X, pady=2)
+            tk.Label(
+                hand_row,
+                text=f"{side_label}: {held_name}",
+                font=("Arial", 12),
+                bg="black",
+                fg="white",
+                width=28,
+                anchor="w",
+            ).pack(side=tk.LEFT)
+            if isinstance(held, dict):
+                tk.Button(
+                    hand_row,
+                    text="Unequip",
+                    font=("Arial", 10),
+                    command=lambda s=side: self.unequip_hand_action(s, panel),
+                ).pack(side=tk.LEFT, padx=5)
 
         list_frame = tk.Frame(popup, bg="black")
         scrollbar = tk.Scrollbar(list_frame)
@@ -446,6 +480,8 @@ class ItemInventoryMixin:
                 callback = lambda idx=item_inventory_index, i=item, ap=panel, mp=main_inventory_popup: self.eat_item_action(i, idx, ap, mp)
             elif action == "use":
                 callback = lambda idx=item_inventory_index, i=item, ap=panel, mp=main_inventory_popup: self.use_item_action(i, idx, ap, mp)
+            elif action == "equip":
+                callback = lambda idx=item_inventory_index, i=item, ap=panel, mp=main_inventory_popup: self.equip_item_action(i, idx, ap, mp)
             else:
                 callback = lambda a=action: messagebox.showinfo("WIP", f"Action '{a}' not yet implemented.", parent=actions_popup)
 
@@ -473,6 +509,251 @@ class ItemInventoryMixin:
                 f"Action 'use' not yet implemented for {item.get('name', 'this item')}.",
                 parent=actions_popup,
             )
+
+    def equip_item_action(self, item, item_inventory_index, actions_popup, main_inventory_popup, reopen=None):
+        """Open a Left/Right hand chooser, then move one unit from inventory into that hand.
+
+        reopen: optional callback to reopen the caller's own popup afterward
+        (defaults to show_inventory_popup for the standard inventory flow).
+        """
+        if not isinstance(item, dict) or "equip" not in item.get("actions", []):
+            messagebox.showwarning("Cannot Equip", "This item cannot be equipped.", parent=actions_popup)
+            return
+
+        item_name = item.get("name", "this item")
+        panel, chooser = open_modal_panel(self.root, title=f"Equip: {item_name}")
+
+        tk.Label(
+            chooser,
+            text=f"Equip the {item_name} to which hand?",
+            font=("Arial", 12),
+            bg="black",
+            fg="white",
+            wraplength=350,
+        ).pack(pady=15, padx=15)
+
+        button_frame = tk.Frame(chooser, bg="black")
+        button_frame.pack(pady=10)
+
+        def choose(side):
+            panel.close()
+            self._equip_to_hand(item_inventory_index, side, actions_popup, main_inventory_popup, reopen=reopen)
+
+        tk.Button(
+            button_frame, text="Left Hand", font=("Arial", 12), width=12, command=lambda: choose("left")
+        ).pack(side=tk.LEFT, padx=10)
+        tk.Button(
+            button_frame, text="Right Hand", font=("Arial", 12), width=12, command=lambda: choose("right")
+        ).pack(side=tk.LEFT, padx=10)
+
+        tk.Button(
+            chooser, text="Cancel", font=("Arial", 12), width=12, command=panel.close
+        ).pack(pady=(5, 15))
+
+    def _equip_to_hand(self, item_inventory_index, side, actions_popup, main_inventory_popup, reopen=None):
+        """Move one inventory unit into the given hand slot ('left'/'right')."""
+        hands = ensure_hands(self.player_data)
+        if hands.get(side) is not None:
+            messagebox.showinfo(
+                "Hand Occupied",
+                f"Your {side} hand is already holding something. Unequip it first.",
+                parent=self.root,
+            )
+            return
+
+        inventory = self.player_data.get("inventory", [])
+        if not (0 <= item_inventory_index < len(inventory)):
+            messagebox.showerror("Error", "Invalid item index for equip.", parent=self.root)
+            return
+
+        removed = remove_one_from_inventory(self.player_data, item_inventory_index)
+        if removed is None:
+            messagebox.showerror("Error", "Could not equip that item.", parent=self.root)
+            return
+
+        removed.pop("quantity", None)
+        hands[side] = removed
+
+        if hasattr(actions_popup, "close"):
+            actions_popup.close()
+        else:
+            actions_popup.destroy()
+        if hasattr(main_inventory_popup, "close"):
+            main_inventory_popup.close()
+        else:
+            main_inventory_popup.destroy()
+        (reopen or self.show_inventory_popup)()
+
+        self.add_note(f"Equipped the {removed.get('name', 'item')} to your {side} hand.")
+
+    def unequip_hand_action(self, side, main_inventory_popup, reopen=None):
+        """Return a held item from hand back into inventory."""
+        hands = ensure_hands(self.player_data)
+        item = hands.get(side)
+        if not isinstance(item, dict):
+            return
+
+        add_to_inventory(self.player_data, item)
+        hands[side] = None
+
+        if hasattr(main_inventory_popup, "close"):
+            main_inventory_popup.close()
+        else:
+            main_inventory_popup.destroy()
+        (reopen or self.show_inventory_popup)()
+
+        self.add_note(f"Unequipped the {item.get('name', 'item')} from your {side} hand.")
+
+    def show_hands_popup(self, on_close=None):
+        """Show left/right hand slots and let the player equip items directly,
+        without going through Character Sheet > Inventory.
+
+        on_close runs only when the player closes Hands (not when equip/unequip
+        rebuilds this popup), so callers like View Plants can restore their screen.
+        """
+        self._hands_on_close = on_close
+        on_close_cb = on_close
+
+        def reopen_hands():
+            self.show_hands_popup(on_close=on_close_cb)
+
+        # Do not attach on_close to the panel: equip/unequip call panel.close()
+        # before reopening, and must not trigger the caller's return navigation.
+        panel, popup = open_modal_panel(self.root, title="Hands")
+
+        def finish_hands():
+            panel.close()
+            if on_close_cb is not None:
+                on_close_cb()
+
+        tk.Label(popup, text="Hands", font=("Arial", 18), bg="black", fg="white").pack(pady=10)
+
+        hands = ensure_hands(self.player_data)
+        hands_frame = tk.Frame(popup, bg="black")
+        hands_frame.pack(pady=(0, 10))
+
+        # Per-side action slots (Unequip, or Equip Left/Right when an item is selected).
+        action_slots = {}
+
+        for side, side_label in (("left", "Left Hand"), ("right", "Right Hand")):
+            held = hands.get(side)
+            held_name = held.get("name", "Item") if isinstance(held, dict) else "Empty"
+            hand_row = tk.Frame(hands_frame, bg="black")
+            hand_row.pack(fill=tk.X, pady=2)
+            tk.Label(
+                hand_row,
+                text=f"{side_label}: {held_name}",
+                font=("Arial", 12),
+                bg="black",
+                fg="white",
+                width=28,
+                anchor="w",
+            ).pack(side=tk.LEFT)
+            action_slot = tk.Frame(hand_row, bg="black")
+            action_slot.pack(side=tk.LEFT, padx=5)
+            action_slots[side] = action_slot
+
+        tk.Label(
+            popup,
+            text="Equippable Items",
+            font=("Arial", 14, "bold"),
+            bg="black",
+            fg="white",
+        ).pack(pady=(10, 5))
+
+        equippable = [
+            (index, item)
+            for index, item in enumerate(self.player_data.get("inventory", []) or [])
+            if isinstance(item, dict) and "equip" in item.get("actions", [])
+        ]
+
+        button_frame = tk.Frame(popup, bg="black")
+        button_frame.pack(side=tk.BOTTOM, pady=(5, 10), fill=tk.X, padx=20)
+
+        list_frame = tk.Frame(popup, bg="black")
+        list_frame.pack(padx=20, pady=10)
+
+        scrollbar = tk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        equip_list = tk.Listbox(
+            list_frame,
+            bg="black",
+            fg="white",
+            font=("Arial", 12),
+            width=40,
+            height=15,
+            yscrollcommand=scrollbar.set,
+            exportselection=False,
+        )
+        equip_list.pack(side=tk.LEFT)
+        scrollbar.config(command=equip_list.yview)
+
+        if not equippable:
+            equip_list.insert(tk.END, "You have no equippable items.")
+            equip_list.itemconfig(tk.END, {"fg": "gray"})
+        else:
+            for _index, item in equippable:
+                equip_list.insert(tk.END, format_inventory_label(item))
+
+        close_btn = tk.Button(
+            button_frame, text="Close", font=("Arial", 12), width=12, command=finish_hands
+        )
+        close_btn.pack(padx=5)
+
+        def _selected_equippable():
+            selection = equip_list.curselection()
+            if not selection or not equippable:
+                return None, None
+            listbox_index = selection[0]
+            if not (0 <= listbox_index < len(equippable)):
+                return None, None
+            return equippable[listbox_index]
+
+        def _equip_side(side):
+            item_inventory_index, item = _selected_equippable()
+            if item is None:
+                return
+            self._equip_to_hand(
+                item_inventory_index, side, panel, panel, reopen=reopen_hands
+            )
+
+        def refresh_hand_actions(event=None):
+            item_selected = _selected_equippable()[0] is not None
+            for side in ("left", "right"):
+                slot = action_slots[side]
+                for child in slot.winfo_children():
+                    child.destroy()
+
+                held = hands.get(side)
+                if isinstance(held, dict):
+                    tk.Button(
+                        slot,
+                        text="Unequip",
+                        font=("Arial", 10),
+                        command=lambda s=side: self.unequip_hand_action(
+                            s, panel, reopen=reopen_hands
+                        ),
+                    ).pack(side=tk.LEFT)
+                elif item_selected:
+                    label = "Equip Left" if side == "left" else "Equip Right"
+                    tk.Button(
+                        slot,
+                        text=label,
+                        font=("Arial", 10),
+                        command=lambda s=side: _equip_side(s),
+                    ).pack(side=tk.LEFT)
+
+        equip_list.bind("<<ListboxSelect>>", refresh_hand_actions)
+        refresh_hand_actions()
+
+        def _on_hands_mousewheel(event):
+            try:
+                equip_list.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except tk.TclError:
+                pass
+
+        equip_list.bind("<MouseWheel>", _on_hands_mousewheel)
 
     def _use_medkit(self, item_inventory_index, actions_popup, main_inventory_popup):
         """Heal injured limbs (+10%) and positive burn/poison/oxygen (-10%); consume on success."""
