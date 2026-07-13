@@ -3,6 +3,7 @@ import os
 import sys
 import copy
 import random
+import time
 from tkinter import messagebox
 
 from game.maps import donut
@@ -113,6 +114,7 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
 
         self.npc_move_timer_running = False
         self.npc_move_timer_id = None
+        self._last_npc_move_mono = 0.0
 
         self.market_engine = StockMarketEngine()
         
@@ -249,12 +251,19 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         )
 
     def tick_npc_move(self):
-        """Advance NPCs every NPC_MOVE_INTERVAL_SECONDS, independent of player moves."""
+        """Advance NPCs every NPC_MOVE_INTERVAL_SECONDS, independent of player moves.
+
+        Uses a monotonic wall-clock gate so event-loop catch-up after blocked
+        dialogs cannot fire steps faster than the configured interval.
+        """
         if not self.npc_move_timer_running:
             return
 
         try:
-            self._advance_npcs_one_step()
+            now = time.monotonic()
+            if now - self._last_npc_move_mono >= NPC_MOVE_INTERVAL_SECONDS - 0.05:
+                self._last_npc_move_mono = now
+                self._advance_npcs_one_step()
         except Exception as e:
             print(f"Error advancing NPCs: {e}")
 
@@ -624,6 +633,10 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         character_btn = tk.Button(self.root, text="Character Sheet", font=("Arial", 14), width=15, 
                                 command=self.show_character_sheet_hallway)
         character_btn.pack(pady=10)
+
+        hands_btn = tk.Button(self.root, text="Hands", font=("Arial", 14), width=15,
+                            command=self.show_hands_popup)
+        hands_btn.pack(pady=10)
         
         save_btn = tk.Button(self.root, text="Save and Exit", font=("Arial", 14), width=15,
                           command=self.save_and_exit)

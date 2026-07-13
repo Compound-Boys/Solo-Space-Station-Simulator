@@ -6,16 +6,19 @@ from game.helper_methods.ui_panels import bind_mousewheel, open_modal_panel, ref
 from game.maps.donut import BOTANY_KEY
 from game.objects.botany_items import (
     BOTANY_SEED_IDS,
+    BOTANY_VEND_IDS,
     GROWTH_STAGES,
+    MIRACLE_GROW_SPEED_BONUS,
+    PLENTIFUL_HARVEST_YIELD_MULTIPLIER,
     growth_seconds_to_next_stage,
     growth_stage_label,
     refresh_planter_growth,
 )
 from game.objects.items import (
     add_to_inventory,
+    ensure_hands,
     format_inventory_label,
     get_item_definition,
-    remove_one_from_inventory,
 )
 from game.special_rooms.shared import (
     SpecialRoomBase,
@@ -28,6 +31,16 @@ PLANTERS_PER_ROW = 4
 PLANTER_ROWS = 4
 TOTAL_PLANTERS = PLANTERS_PER_ROW * PLANTER_ROWS
 
+# Consumed from the hand on a single successful application.
+LIQUID_CONSUMABLE_IDS = {"miracle_grow", "plentiful_harvest", "the_ooze_mutagen"}
+
+# Reusable tools that clear a planter; each maps to a growth_class predicate
+# for which plants they're allowed to clear.
+TOOL_GROWTH_CLASS_RULES = {
+    "trowel": lambda growth_class: growth_class != "tree",
+    "chainsaw": lambda growth_class: growth_class == "tree",
+}
+
 
 def _empty_planter():
     return {
@@ -38,6 +51,11 @@ def _empty_planter():
         "growth_class": None,
         "planted_at_seconds": None,
         "growth_stage": 0,
+        "dead": False,
+        "watered": False,
+        "miracle_grow": 0.0,
+        "yield_multiplier": 1,
+        "ooze_applied": False,
     }
 
 
@@ -58,13 +76,13 @@ class Botany(SpecialRoomBase):
                 "planters": [_empty_planter() for _ in range(TOTAL_PLANTERS)],
             }
 
-    def _inventory_seeds(self):
-        """Return (inventory_index, item) pairs for botany seeds in inventory."""
-        seeds = []
+    def _inventory_vend_items(self):
+        """Return (inventory_index, item) pairs for botany vending items in inventory."""
+        items = []
         for index, item in enumerate(self.player_data.get("inventory", []) or []):
-            if isinstance(item, dict) and item.get("id") in BOTANY_SEED_IDS:
-                seeds.append((index, item))
-        return seeds
+            if isinstance(item, dict) and item.get("id") in BOTANY_VEND_IDS:
+                items.append((index, item))
+        return items
 
     def station_entries(self):
         return [{
@@ -178,81 +196,167 @@ class Botany(SpecialRoomBase):
         tk.Label(
             plants_window,
             text=f"Botany Lab Plants — Row {row_index + 1}",
-            font=("Arial", 18, "bold"),
+            font=("Arial", 16, "bold"),
             bg="black",
             fg="white",
-        ).pack(pady=15)
+        ).pack(pady=(8, 4))
 
         tk.Label(
             plants_window,
             text="You observe the plants growing in this hydroponic row.",
-            font=("Arial", 12),
+            font=("Arial", 11),
             bg="black",
             fg="white",
             wraplength=500,
-        ).pack(pady=10)
+        ).pack(pady=(0, 4))
+
+        def back_to_row_picker():
+            panel.close()
+            self.view_plants(allow_harvest=allow_harvest)
+
+        def open_hands_from_plants():
+            """Open Hands, then return to this same planter row when closed."""
+            def return_to_plants():
+                self._view_plants_row(row_index, allow_harvest=allow_harvest)
+
+            panel.close()
+            self.show_hands_popup(on_close=return_to_plants)
+
+        # Pack nav buttons at the bottom first so they keep their slice of the
+        # fixed-size modal, even if the planter list below wants more room.
+        nav_frame = tk.Frame(plants_window, bg="black")
+        nav_frame.pack(side=tk.BOTTOM, pady=(4, 8))
+
+        tk.Button(
+            nav_frame,
+            text="Back",
+            font=("Arial", 14),
+            width=15,
+            command=back_to_row_picker,
+        ).pack(side=tk.LEFT, padx=8)
+
+        tk.Button(
+            nav_frame,
+            text="Hands",
+            font=("Arial", 14),
+            width=15,
+            command=open_hands_from_plants,
+        ).pack(side=tk.LEFT, padx=8)
 
         planters_frame = tk.Frame(plants_window, bg="black")
-        planters_frame.pack(pady=20, fill=tk.BOTH, expand=True)
+        planters_frame.pack(pady=4, fill=tk.BOTH, expand=True)
 
-        # Live-updating widgets for occupied planters in this row.
+        # Live-updating widgets for every planter in this row (empty or occupied).
+        # Every card gets the exact same widgets so planting never changes its height.
         live_rows = []
+
+        # Planter 3's current size is the preferred max; shrink only enough so all 4 fit.
+        preferred_height = 190 if allow_harvest else 130
+        plants_window.update_idletasks()
+        parent_h = plants_window.winfo_height()
+        if parent_h <= 1:
+            parent_h = self.botany_window.winfo_height()
+        if parent_h <= 1:
+            parent_h = 759
+        # Title + description + Back + paddings leave this much for the four cards.
+        chrome = 120
+        available = max(440, parent_h - chrome)
+        card_gap = 4
+        card_height = max(
+            110,
+            min(
+                preferred_height,
+                (available - card_gap * PLANTERS_PER_ROW) // PLANTERS_PER_ROW,
+            ),
+        )
+
+        hands = ensure_hands(self.player_data) if allow_harvest else None
 
         for i in range(start, end):
             planter = planters[i]
-            planter_frame = tk.Frame(planters_frame, bg="#222222", bd=2, relief=tk.RIDGE, width=500)
-            planter_frame.pack(fill=tk.X, padx=20, pady=5)
+            planter_frame = tk.Frame(
+                planters_frame,
+                bg="#222222",
+                bd=2,
+                relief=tk.RIDGE,
+                width=500,
+                height=card_height,
+            )
+            planter_frame.pack_propagate(False)
+            planter_frame.pack(fill=tk.X, padx=20, pady=2)
 
-            if planter["occupied"]:
-                tk.Label(
-                    planter_frame,
-                    text=f"Planter {i + 1}: {planter['plant']}",
-                    font=("Arial", 14, "bold"),
-                    bg="#222222",
-                    fg="light green",
-                ).pack(anchor="w", padx=10, pady=5)
-                stage_label = tk.Label(
-                    planter_frame,
-                    text="",
-                    font=("Arial", 12),
-                    bg="#222222",
-                    fg="white",
-                )
-                stage_label.pack(anchor="w", padx=10, pady=5)
-                time_label = tk.Label(
-                    planter_frame,
-                    text="",
-                    font=("Arial", 11),
-                    bg="#222222",
-                    fg="cyan",
-                )
-                time_label.pack(anchor="w", padx=10, pady=5)
-                harvest_slot = tk.Frame(planter_frame, bg="#222222")
-                harvest_slot.pack(anchor="e", padx=10, pady=5)
-                live_rows.append(
-                    {
-                        "index": i,
-                        "stage_label": stage_label,
-                        "time_label": time_label,
-                        "harvest_slot": harvest_slot,
-                        "harvest_btn": None,
-                    }
-                )
-            else:
-                tk.Label(
-                    planter_frame,
-                    text=f"Planter {i + 1}: Empty",
-                    font=("Arial", 14, "bold"),
-                    bg="#222222",
-                    fg="white",
-                ).pack(anchor="w", padx=10, pady=5)
-                tk.Label(
-                    planter_frame,
-                    text="This planter is ready for seeds.",
-                    font=("Arial", 12),
-                    bg="#222222",
-                    fg="white",
-                ).pack(anchor="w", padx=10, pady=5)
+            title_text = (
+                f"Planter {i + 1}: {planter['plant']}"
+                if planter["occupied"]
+                else f"Planter {i + 1}: Empty"
+            )
+            tk.Label(
+                planter_frame,
+                text=title_text,
+                font=("Arial", 13, "bold"),
+                bg="#222222",
+                fg="light green" if planter["occupied"] else "white",
+            ).pack(anchor="w", padx=10, pady=(4, 2))
+            stage_label = tk.Label(
+                planter_frame,
+                text="",
+                font=("Arial", 11),
+                bg="#222222",
+                fg="white",
+            )
+            stage_label.pack(anchor="w", padx=10, pady=1)
+            time_label = tk.Label(
+                planter_frame,
+                text="",
+                font=("Arial", 10),
+                bg="#222222",
+                fg="cyan",
+            )
+            time_label.pack(anchor="w", padx=10, pady=1)
+
+            # Applied products (Miracle Grow, Plentiful Harvest) — horizontal only.
+            buffs_row = tk.Frame(planter_frame, bg="#222222")
+            buffs_row.pack(anchor="w", padx=10, pady=1)
+
+            # Harvest + hand buttons share one bottom row so card height stays stable.
+            actions_row = tk.Frame(planter_frame, bg="#222222")
+            actions_row.pack(anchor="e", padx=10, pady=(2, 4))
+            harvest_slot = tk.Frame(actions_row, bg="#222222")
+            harvest_slot.pack(side=tk.LEFT, padx=(0, 4))
+            live_rows.append(
+                {
+                    "index": i,
+                    "stage_label": stage_label,
+                    "time_label": time_label,
+                    "buffs_row": buffs_row,
+                    "buff_key": None,
+                    "harvest_slot": harvest_slot,
+                    "harvest_btn": None,
+                }
+            )
+
+            if allow_harvest:
+                hand_slot = tk.Frame(actions_row, bg="#222222")
+                hand_slot.pack(side=tk.LEFT)
+
+                for side, default_label in (
+                    ("left", "Use Left Hand"),
+                    ("right", "Use Right Hand"),
+                ):
+                    held = hands.get(side)
+                    label = (
+                        f"Use {held.get('name', 'Item')}"
+                        if isinstance(held, dict)
+                        else default_label
+                    )
+                    tk.Button(
+                        hand_slot,
+                        text=label,
+                        font=("Arial", 9),
+                        command=lambda idx=i, s=side: self._use_hand_on_planter(
+                            s, idx, plants_window, row_index
+                        ),
+                    ).pack(side=tk.LEFT, padx=2)
 
         def _ensure_harvest_button(row):
             if row["harvest_btn"] is not None:
@@ -261,7 +365,7 @@ class Botany(SpecialRoomBase):
             btn = tk.Button(
                 row["harvest_slot"],
                 text="Harvest",
-                font=("Arial", 11),
+                font=("Arial", 10),
                 command=lambda planter_idx=idx: self._harvest_planter(
                     planter_idx, plants_window, row_index, allow_harvest=True
                 ),
@@ -279,20 +383,85 @@ class Botany(SpecialRoomBase):
                 pass
             row["harvest_btn"] = None
 
+        def _refresh_buffs_row(row, planter):
+            has_miracle = bool(planter.get("occupied") and (planter.get("miracle_grow") or 0.0) > 0)
+            has_plentiful = bool(
+                planter.get("occupied") and int(planter.get("yield_multiplier") or 1) > 1
+            )
+            has_ooze = bool(planter.get("occupied") and planter.get("ooze_applied"))
+            buff_key = (has_miracle, has_plentiful, has_ooze)
+            if row.get("buff_key") == buff_key:
+                return
+            row["buff_key"] = buff_key
+
+            buffs_row = row["buffs_row"]
+            for child in buffs_row.winfo_children():
+                child.destroy()
+
+            if has_miracle:
+                tk.Label(
+                    buffs_row,
+                    text="Miracle Grow",
+                    font=("Arial", 9),
+                    bg="#1A3200",
+                    fg="#90EE90",
+                    padx=4,
+                    pady=1,
+                ).pack(side=tk.LEFT, padx=(0, 6))
+
+            if has_plentiful:
+                tk.Label(
+                    buffs_row,
+                    text="Plentiful Harvest",
+                    font=("Arial", 9),
+                    bg="#1A3200",
+                    fg="#FFD700",
+                    padx=4,
+                    pady=1,
+                ).pack(side=tk.LEFT, padx=(0, 6))
+
+            if has_ooze:
+                tk.Label(
+                    buffs_row,
+                    text="The Ooze",
+                    font=("Arial", 9),
+                    bg="#1A3200",
+                    fg="#7CFC00",
+                    padx=4,
+                    pady=1,
+                ).pack(side=tk.LEFT, padx=(0, 6))
+
         def _refresh_live_labels():
             elapsed_seconds = get_elapsed_seconds(self.player_data)
             for row in live_rows:
                 planter = planters[row["index"]]
                 if not planter.get("occupied"):
-                    row["stage_label"].config(text="Empty")
-                    row["time_label"].config(text="", fg="gray")
+                    row["stage_label"].config(text="Status: Empty", fg="white")
+                    row["time_label"].config(
+                        text="This planter is ready for seeds.", fg="gray"
+                    )
+                    _refresh_buffs_row(row, planter)
                     _clear_harvest_button(row)
                     continue
 
                 growth_stage = refresh_planter_growth(planter, elapsed_seconds)
+                _refresh_buffs_row(row, planter)
+
+                if planter.get("dead"):
+                    row["stage_label"].config(text="Status: Dead", fg="red")
+                    row["time_label"].config(
+                        text="Needs to be cleared with a Trowel or Chainsaw.",
+                        fg="red",
+                    )
+                    _clear_harvest_button(row)
+                    continue
+
                 growth_text = growth_stage_label(growth_stage)
+                needs_water = growth_stage < GROWTH_STAGES and not planter.get("watered")
+                water_hint = " — needs water" if needs_water else ""
                 row["stage_label"].config(
-                    text=f"Stage: {growth_text} ({growth_stage}/{GROWTH_STAGES})"
+                    text=f"Stage: {growth_text} ({growth_stage}/{GROWTH_STAGES}){water_hint}",
+                    fg="orange" if needs_water else "white",
                 )
 
                 if growth_stage >= GROWTH_STAGES:
@@ -306,6 +475,7 @@ class Botany(SpecialRoomBase):
                         planter.get("planted_at_seconds"),
                         planter.get("growth_class"),
                         elapsed_seconds,
+                        planter.get("miracle_grow") or 0.0,
                     )
                     row["time_label"].config(
                         text=f"Next stage in {format_elapsed(next_in)}",
@@ -315,18 +485,6 @@ class Botany(SpecialRoomBase):
 
         _refresh_live_labels()
         cancel_tick["fn"] = schedule_ui_tick(plants_window, _refresh_live_labels)
-
-        def back_to_row_picker():
-            panel.close()
-            self.view_plants(allow_harvest=allow_harvest)
-
-        tk.Button(
-            plants_window,
-            text="Back",
-            font=("Arial", 14),
-            width=15,
-            command=back_to_row_picker,
-        ).pack(pady=20)
 
     def _harvest_planter(self, planter_index, plants_window, row_index, allow_harvest=True):
         """Harvest a mature planter into inventory and clear it (station View Plants only)."""
@@ -338,7 +496,7 @@ class Botany(SpecialRoomBase):
             return
 
         planter = planters[planter_index]
-        if not planter.get("occupied"):
+        if not planter.get("occupied") or planter.get("dead"):
             return
 
         elapsed_seconds = get_elapsed_seconds(self.player_data)
@@ -366,16 +524,175 @@ class Botany(SpecialRoomBase):
             )
             return
 
+        yield_multiplier = max(1, int(planter.get("yield_multiplier") or 1))
+        produce["quantity"] = yield_multiplier
         add_to_inventory(self.player_data, produce)
         plant_name = planter.get("plant") or produce.get("name", "produce")
         planters[planter_index] = _empty_planter()
         add_note(
             self.player_data,
-            f"Harvested {produce.get('name', plant_name)} from planter {planter_index + 1}.",
+            f"Harvested {yield_multiplier}x {produce.get('name', plant_name)} from planter {planter_index + 1}.",
         )
 
         plants_window.destroy()
         self._view_plants_row(row_index, allow_harvest=True)
+
+    def _use_hand_on_planter(self, hand_side, planter_index, plants_window, row_index):
+        """Apply whatever is held in hand_side ('left'/'right') to a planter."""
+        hands = ensure_hands(self.player_data)
+        item = hands.get(hand_side)
+        if not isinstance(item, dict):
+            messagebox.showinfo(
+                "Empty Hand",
+                f"Your {hand_side} hand is empty.",
+                parent=plants_window,
+            )
+            return
+
+        planters = self.player_data["botany"]["planters"]
+        if not (0 <= planter_index < len(planters)):
+            return
+        planter = planters[planter_index]
+        item_id = item.get("id")
+        item_name = item.get("name", "item")
+
+        def _refresh_and_reopen():
+            plants_window.destroy()
+            self._view_plants_row(row_index, allow_harvest=True)
+
+        if item_id in BOTANY_SEED_IDS:
+            if planter.get("occupied"):
+                messagebox.showinfo(
+                    "Planter Occupied",
+                    f"Planter {planter_index + 1} already has a plant in it. Choose an empty planter.",
+                    parent=plants_window,
+                )
+                return
+
+            attrs = item.get("attributes") or {}
+            plant_name = attrs.get("plant_name") or item_name
+            growth_class = attrs.get("growth_class") or "crop"
+            produces = attrs.get("produces")
+
+            planters[planter_index] = {
+                "occupied": True,
+                "plant": plant_name,
+                "seed_id": item_id,
+                "produces": produces,
+                "growth_class": growth_class,
+                "planted_at_seconds": get_elapsed_seconds(self.player_data),
+                "growth_stage": 1,
+                "dead": False,
+                "watered": False,
+                "miracle_grow": 0.0,
+                "yield_multiplier": 1,
+                "ooze_applied": False,
+            }
+            hands[hand_side] = None
+            add_note(
+                self.player_data,
+                f"Planted {item_name} in planter {planter_index + 1} using your {hand_side} hand.",
+            )
+            _refresh_and_reopen()
+            return
+
+        if not planter.get("occupied"):
+            messagebox.showinfo(
+                "Nothing Planted",
+                "There is nothing planted in this planter.",
+                parent=plants_window,
+            )
+            return
+
+        if item_id == "watering_can":
+            if planter.get("dead"):
+                messagebox.showinfo(
+                    "Plant Dead",
+                    "This plant has died. It needs to be cleared with a Trowel or Chainsaw.",
+                    parent=plants_window,
+                )
+                return
+            planter["watered"] = True
+            add_note(self.player_data, f"Watered planter {planter_index + 1}.")
+            _refresh_and_reopen()
+            return
+
+        if item_id in LIQUID_CONSUMABLE_IDS:
+            if planter.get("dead"):
+                messagebox.showinfo(
+                    "Plant Dead",
+                    "This plant has died. It needs to be cleared with a Trowel or Chainsaw.",
+                    parent=plants_window,
+                )
+                return
+
+            if item_id == "miracle_grow":
+                planter["miracle_grow"] = MIRACLE_GROW_SPEED_BONUS
+                add_note(
+                    self.player_data,
+                    f"Applied Miracle Grow to planter {planter_index + 1}.",
+                )
+            elif item_id == "plentiful_harvest":
+                planter["yield_multiplier"] = PLENTIFUL_HARVEST_YIELD_MULTIPLIER
+                add_note(
+                    self.player_data,
+                    f"Applied Plentiful Harvest to planter {planter_index + 1}.",
+                )
+            elif item_id == "the_ooze_mutagen":
+                planter["ooze_applied"] = True
+                add_note(
+                    self.player_data,
+                    f'Applied "The Ooze" Mutagen to planter {planter_index + 1}.',
+                )
+
+            hands[hand_side] = None
+
+            if item_id == "the_ooze_mutagen":
+                plants_window.after(
+                    10,
+                    lambda: messagebox.showinfo(
+                        "Mutation", "The Plant does not mutate.", parent=plants_window
+                    ),
+                )
+            _refresh_and_reopen()
+            return
+
+        if item_id in TOOL_GROWTH_CLASS_RULES:
+            growth_class = planter.get("growth_class")
+            if not TOOL_GROWTH_CLASS_RULES[item_id](growth_class):
+                wrong_hint = (
+                    "Use a Chainsaw on trees."
+                    if item_id == "trowel"
+                    else "Use a Trowel on non-tree plants."
+                )
+                messagebox.showinfo(
+                    "Wrong Tool",
+                    f"The {item_name} can't clear this plant. {wrong_hint}",
+                    parent=plants_window,
+                )
+                return
+
+            if not messagebox.askyesno(
+                "Clear Planter",
+                f"Clear planter {planter_index + 1} with the {item_name}? "
+                "The plant will be lost.",
+                parent=plants_window,
+            ):
+                return
+
+            planters[planter_index] = _empty_planter()
+            add_note(
+                self.player_data,
+                f"Cleared planter {planter_index + 1} with the {item_name}.",
+            )
+            _refresh_and_reopen()
+            return
+
+        messagebox.showinfo(
+            "Cannot Use",
+            f"The {item_name} can't be used on planters.",
+            parent=plants_window,
+        )
 
     def access_botany_station(self):
         """Access the botany station for authorized personnel"""
@@ -390,10 +707,14 @@ class Botany(SpecialRoomBase):
         )
         station_label.pack(pady=10)
 
-        seeds_btn = tk.Button(
-            self.button_frame, text="Seed Machine", font=("Arial", 14), width=20, command=self.access_seed_machine
+        vend_btn = tk.Button(
+            self.button_frame,
+            text="Botany Vending Machine",
+            font=("Arial", 14),
+            width=22,
+            command=self.access_botany_vending,
         )
-        seeds_btn.pack(pady=10)
+        vend_btn.pack(pady=10)
 
         view_btn = tk.Button(
             self.button_frame,
@@ -403,11 +724,6 @@ class Botany(SpecialRoomBase):
             command=lambda: self.view_plants(allow_harvest=True),
         )
         view_btn.pack(pady=10)
-
-        plant_btn = tk.Button(
-            self.button_frame, text="Plant Seeds", font=("Arial", 14), width=20, command=self.plant_seeds
-        )
-        plant_btn.pack(pady=10)
 
         back_btn = tk.Button(
             self.button_frame,
@@ -420,105 +736,194 @@ class Botany(SpecialRoomBase):
 
         refocus_window(self.botany_window)
 
-    def access_seed_machine(self):
-        """Access the seed machine to get seeds"""
-        _panel, seed_window = open_modal_panel(self.botany_window, title="Seed Machine")
+    def access_botany_vending(self, filter_kind="all"):
+        """Access the botany vending machine for seeds, liquids, and tools."""
+        _panel, vend_window = open_modal_panel(
+            self.botany_window, title="Botany Vending Machine"
+        )
+
+        # Pack Close first so later content packing does not shift scroll.
+        close_btn = tk.Button(
+            vend_window,
+            text="Close",
+            font=("Arial", 14),
+            width=15,
+            command=vend_window.destroy,
+        )
+        close_btn.pack(side=tk.BOTTOM, pady=10)
+
         title_label = tk.Label(
-            seed_window, text="Botanical Seed Dispenser", font=("Arial", 18, "bold"), bg="black", fg="white"
+            vend_window,
+            text="Botany Vending Machine",
+            font=("Arial", 18, "bold"),
+            bg="black",
+            fg="white",
         )
         title_label.pack(pady=15)
 
-        desc_text = "This machine dispenses seeds for cultivation in the botany lab's planters."
+        desc_text = (
+            "This machine dispenses seeds, liquids, and tools for the botany lab."
+        )
         desc_label = tk.Label(
-            seed_window, text=desc_text, font=("Arial", 12), bg="black", fg="white", wraplength=600
+            vend_window,
+            text=desc_text,
+            font=("Arial", 12),
+            bg="black",
+            fg="white",
+            wraplength=600,
         )
         desc_label.pack(pady=10)
 
-        main_frame = tk.Frame(seed_window, bg="black")
+        filter_frame = tk.Frame(vend_window, bg="black")
+        filter_frame.pack(pady=5)
+
+        filter_buttons = {}
+        current_filter = {"kind": filter_kind}
+
+        def set_filter(kind):
+            current_filter["kind"] = kind
+            for key, btn in filter_buttons.items():
+                btn.config(relief=tk.SUNKEN if key == kind else tk.RAISED)
+            rebuild_available_list(reset_scroll=True)
+
+        for kind, label in (
+            ("all", "All"),
+            ("seed", "Seeds"),
+            ("liquid", "Liquids"),
+            ("tool", "Tools"),
+        ):
+            btn = tk.Button(
+                filter_frame,
+                text=label,
+                font=("Arial", 12),
+                width=10,
+                command=lambda k=kind: set_filter(k),
+            )
+            btn.pack(side=tk.LEFT, padx=5)
+            filter_buttons[kind] = btn
+
+        filter_buttons[current_filter["kind"]].config(relief=tk.SUNKEN)
+
+        main_frame = tk.Frame(vend_window, bg="black")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        left_frame = tk.LabelFrame(main_frame, text="Available Seeds", font=("Arial", 14), bg="black", fg="white")
+        left_frame = tk.LabelFrame(
+            main_frame, text="Available Items", font=("Arial", 14), bg="black", fg="white"
+        )
         left_frame.pack(side=tk.LEFT, padx=10, pady=10, fill=tk.BOTH, expand=True)
 
         left_canvas = tk.Canvas(left_frame, bg="black", highlightthickness=0)
-        left_scrollbar = tk.Scrollbar(left_frame, orient=tk.VERTICAL, command=left_canvas.yview)
+        left_scrollbar = tk.Scrollbar(
+            left_frame, orient=tk.VERTICAL, command=left_canvas.yview
+        )
         left_canvas.configure(yscrollcommand=left_scrollbar.set)
 
         left_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         left_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        seeds_frame = tk.Frame(left_canvas, bg="black")
-        left_canvas.create_window((0, 0), window=seeds_frame, anchor=tk.NW)
+        items_frame = tk.Frame(left_canvas, bg="black")
+        left_canvas.create_window((0, 0), window=items_frame, anchor=tk.NW)
 
-        right_frame = tk.LabelFrame(main_frame, text="Your Seeds", font=("Arial", 14), bg="black", fg="white")
+        right_frame = tk.LabelFrame(
+            main_frame, text="Your Items", font=("Arial", 14), bg="black", fg="white"
+        )
         right_frame.pack(side=tk.RIGHT, padx=10, pady=10, fill=tk.BOTH, expand=True)
 
         right_canvas = tk.Canvas(right_frame, bg="black", highlightthickness=0)
-        right_scrollbar = tk.Scrollbar(right_frame, orient=tk.VERTICAL, command=right_canvas.yview)
+        right_scrollbar = tk.Scrollbar(
+            right_frame, orient=tk.VERTICAL, command=right_canvas.yview
+        )
         right_canvas.configure(yscrollcommand=right_scrollbar.set)
 
         right_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         right_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        your_seeds_frame = tk.Frame(right_canvas, bg="black")
-        right_canvas.create_window((0, 0), window=your_seeds_frame, anchor=tk.NW)
+        your_items_frame = tk.Frame(right_canvas, bg="black")
+        right_canvas.create_window((0, 0), window=your_items_frame, anchor=tk.NW)
 
-        for seed_id in BOTANY_SEED_IDS:
-            seed = get_item_definition(seed_id)
-            if not seed:
-                continue
-            seed_frame = tk.Frame(seeds_frame, bg="#1A3200", bd=1, relief=tk.RIDGE, width=300)
-            seed_frame.pack(fill=tk.X, padx=10, pady=5)
+        def rebuild_available_list(reset_scroll=False):
+            for child in items_frame.winfo_children():
+                child.destroy()
 
-            tk.Label(
-                seed_frame, text=seed["name"], font=("Arial", 12, "bold"), bg="#1A3200", fg="#00FF00"
-            ).pack(anchor="w", padx=10, pady=5)
+            kind = current_filter["kind"]
+            for item_id in BOTANY_VEND_IDS:
+                item = get_item_definition(item_id)
+                if not item:
+                    continue
+                vend_kinds = (item.get("attributes") or {}).get("vend_kinds") or []
+                if kind != "all" and kind not in vend_kinds:
+                    continue
 
-            tk.Button(
-                seed_frame,
-                text="Get Seeds",
-                font=("Arial", 10),
-                command=lambda sid=seed_id: self.get_seeds(sid, seed_window),
-            ).pack(anchor="e", padx=10, pady=5)
-
-        inventory_seeds = self._inventory_seeds()
-        if not inventory_seeds:
-            tk.Label(
-                your_seeds_frame,
-                text="You don't have any seeds.",
-                font=("Arial", 12),
-                bg="black",
-                fg="white",
-            ).pack(pady=20)
-        else:
-            for _index, seed in inventory_seeds:
-                seed_frame = tk.Frame(your_seeds_frame, bg="#1A3200", bd=1, relief=tk.RIDGE, width=300)
-                seed_frame.pack(fill=tk.X, padx=10, pady=5)
+                item_frame = tk.Frame(
+                    items_frame, bg="#1A3200", bd=1, relief=tk.RIDGE, width=300
+                )
+                item_frame.pack(fill=tk.X, padx=10, pady=5)
 
                 tk.Label(
-                    seed_frame,
-                    text=format_inventory_label(seed),
+                    item_frame,
+                    text=item["name"],
                     font=("Arial", 12, "bold"),
                     bg="#1A3200",
                     fg="#00FF00",
                 ).pack(anchor="w", padx=10, pady=5)
 
-        seeds_frame.update_idletasks()
-        left_canvas.config(scrollregion=left_canvas.bbox("all"))
+                tk.Button(
+                    item_frame,
+                    text="Get Item",
+                    font=("Arial", 10),
+                    command=lambda iid=item_id: self.get_vending_item(iid, vend_window),
+                ).pack(anchor="e", padx=10, pady=5)
 
-        your_seeds_frame.update_idletasks()
-        right_canvas.config(scrollregion=right_canvas.bbox("all"))
+            items_frame.update_idletasks()
+            left_canvas.config(scrollregion=left_canvas.bbox("all"))
+            if reset_scroll:
+                left_canvas.yview_moveto(0.0)
 
-        left_canvas.yview_moveto(0.0)
+        def rebuild_your_items():
+            for child in your_items_frame.winfo_children():
+                child.destroy()
+
+            inventory_items = self._inventory_vend_items()
+            if not inventory_items:
+                tk.Label(
+                    your_items_frame,
+                    text="You don't have any botany items.",
+                    font=("Arial", 12),
+                    bg="black",
+                    fg="white",
+                ).pack(pady=20)
+            else:
+                for _index, inv_item in inventory_items:
+                    item_frame = tk.Frame(
+                        your_items_frame, bg="#1A3200", bd=1, relief=tk.RIDGE, width=300
+                    )
+                    item_frame.pack(fill=tk.X, padx=10, pady=5)
+
+                    tk.Label(
+                        item_frame,
+                        text=format_inventory_label(inv_item),
+                        font=("Arial", 12, "bold"),
+                        bg="#1A3200",
+                        fg="#00FF00",
+                    ).pack(anchor="w", padx=10, pady=5)
+
+            your_items_frame.update_idletasks()
+            right_canvas.config(scrollregion=right_canvas.bbox("all"))
+
+        # Keep left scroll locked: Get Item only refreshes the right list in place.
+        vend_window._rebuild_your_items = rebuild_your_items
+
+        rebuild_available_list(reset_scroll=True)
+        rebuild_your_items()
 
         def on_frame_configure(canvas):
             canvas.configure(scrollregion=canvas.bbox("all"))
 
-        seeds_frame.bind("<Configure>", lambda e: on_frame_configure(left_canvas))
-        your_seeds_frame.bind("<Configure>", lambda e: on_frame_configure(right_canvas))
+        items_frame.bind("<Configure>", lambda e: on_frame_configure(left_canvas))
+        your_items_frame.bind("<Configure>", lambda e: on_frame_configure(right_canvas))
 
         def on_mousewheel(event, canvas):
-            widget = seed_window.winfo_containing(event.x_root, event.y_root)
+            widget = vend_window.winfo_containing(event.x_root, event.y_root)
             while widget is not None:
                 if widget == left_canvas:
                     left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
@@ -530,286 +935,27 @@ class Botany(SpecialRoomBase):
 
             left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-        bind_mousewheel(seed_window, lambda e: on_mousewheel(e, left_canvas), recursive=True)
+        bind_mousewheel(
+            vend_window, lambda e: on_mousewheel(e, left_canvas), recursive=True
+        )
 
-        close_btn = tk.Button(seed_window, text="Close", font=("Arial", 14), width=15, command=seed_window.destroy)
-        close_btn.pack(side=tk.BOTTOM, pady=10)
-
-    def get_seeds(self, seed_id, parent_window):
-        """Get seeds from the seed machine into inventory."""
-        seed = get_item_definition(seed_id)
-        if not seed:
+    def get_vending_item(self, item_id, parent_window):
+        """Get an item from the botany vending machine into inventory."""
+        item = get_item_definition(item_id)
+        if not item:
             return
 
-        add_to_inventory(self.player_data, seed)
-        add_note(self.player_data, f"Acquired {seed['name']} from the botany seed dispenser.")
+        add_to_inventory(self.player_data, item)
+        add_note(
+            self.player_data,
+            f"Acquired {item['name']} from the botany vending machine.",
+        )
 
+        rebuild_your_items = getattr(parent_window, "_rebuild_your_items", None)
+        if callable(rebuild_your_items):
+            rebuild_your_items()
+            return
+
+        # Fallback if the panel was rebuilt without an in-place refresher.
         parent_window.destroy()
-        self.access_seed_machine()
-
-    def plant_seeds(self):
-        """Pick a hydroponic row, then plant seeds into that row's planters."""
-        self._show_row_picker("Plant Seeds", self._plant_seeds_row)
-
-    def _plant_seeds_row(self, row_index):
-        start = row_index * PLANTERS_PER_ROW
-        end = start + PLANTERS_PER_ROW
-        content_width = 600
-        seeds_viewport_height = 250  # ~4–5 seed rows
-
-        _panel, plant_window = open_modal_panel(
-            self.botany_window, title=f"Plant Seeds — Row {row_index + 1}"
-        )
-        plant_window.configure(bg="black")
-
-        # Centered column that fills the modal height.
-        column = tk.Frame(plant_window, bg="black", width=content_width)
-        column.place(relx=0.5, rely=0, relheight=1, anchor="n")
-        column.place_configure(width=content_width)
-
-        # --- Bottom chrome (pack first so it stays pinned) ---
-        button_frame = tk.Frame(column, bg="black")
-        button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 20))
-
-        planters_frame = tk.LabelFrame(
-            column, text="Available Planters", font=("Arial", 14), bg="black", fg="white"
-        )
-        planters_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(5, 5))
-
-        # --- Top header ---
-        tk.Label(
-            column,
-            text=f"Plant Seeds — Row {row_index + 1}",
-            font=("Arial", 18, "bold"),
-            bg="black",
-            fg="white",
-        ).pack(side=tk.TOP, pady=(15, 5))
-
-        tk.Label(
-            column,
-            text="Select a seed to plant and an empty planter to place it in.",
-            font=("Arial", 12),
-            bg="black",
-            fg="white",
-            wraplength=content_width - 40,
-            justify=tk.CENTER,
-        ).pack(side=tk.TOP, pady=(0, 10))
-
-        # --- Scrollable seeds (fills remaining space, fixed viewport height) ---
-        seeds_outer = tk.LabelFrame(
-            column, text="Your Seeds", font=("Arial", 14), bg="black", fg="white"
-        )
-        seeds_outer.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 5))
-
-        seeds_canvas = tk.Canvas(
-            seeds_outer,
-            bg="black",
-            highlightthickness=0,
-            height=seeds_viewport_height,
-        )
-        seeds_scrollbar = tk.Scrollbar(
-            seeds_outer, orient=tk.VERTICAL, command=seeds_canvas.yview
-        )
-        seeds_canvas.configure(yscrollcommand=seeds_scrollbar.set)
-        seeds_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        seeds_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0), pady=5)
-
-        seeds_list = tk.Frame(seeds_canvas, bg="black")
-        seeds_canvas_window = seeds_canvas.create_window((0, 0), window=seeds_list, anchor="nw")
-
-        def _sync_seeds_scroll(_event=None):
-            seeds_canvas.configure(scrollregion=seeds_canvas.bbox("all"))
-            canvas_width = seeds_canvas.winfo_width()
-            if canvas_width > 1:
-                seeds_canvas.itemconfig(seeds_canvas_window, width=canvas_width)
-
-        seeds_list.bind("<Configure>", _sync_seeds_scroll)
-        seeds_canvas.bind("<Configure>", _sync_seeds_scroll)
-
-        selected_data = {"inv_index": None, "planter": None}
-        seed_buttons = []
-        planter_buttons = []
-
-        def select_seed(inv_index, button):
-            for btn in seed_buttons:
-                btn.config(bg="#1A3200")
-            button.config(bg="#006600")
-            selected_data["inv_index"] = inv_index
-            if selected_data["planter"] is not None:
-                plant_btn.config(state=tk.NORMAL)
-
-        def select_planter(index, button):
-            if self.player_data["botany"]["planters"][index]["occupied"]:
-                messagebox.showinfo(
-                    "Planter Occupied",
-                    f"Planter {index + 1} already has a plant in it. Choose an empty planter.",
-                    parent=plant_window,
-                )
-                return
-
-            for btn in planter_buttons:
-                btn.config(bg="#222222")
-            button.config(bg="#006600")
-            selected_data["planter"] = index
-            if selected_data["inv_index"] is not None:
-                plant_btn.config(state=tk.NORMAL)
-
-        def rebuild_seed_list():
-            for widget in seeds_list.winfo_children():
-                widget.destroy()
-            seed_buttons.clear()
-            selected_data["inv_index"] = None
-
-            inventory_seeds = self._inventory_seeds()
-            if not inventory_seeds:
-                tk.Label(
-                    seeds_list,
-                    text="No seeds in inventory.",
-                    font=("Arial", 12),
-                    bg="black",
-                    fg="gray",
-                ).pack(pady=10)
-                _sync_seeds_scroll()
-                return
-
-            for inv_index, seed in inventory_seeds:
-                seed_frame = tk.Frame(seeds_list, bg="#1A3200", bd=1, relief=tk.RIDGE)
-                seed_frame.pack(fill=tk.X, padx=10, pady=5)
-
-                tk.Label(
-                    seed_frame,
-                    text=format_inventory_label(seed),
-                    font=("Arial", 12, "bold"),
-                    bg="#1A3200",
-                    fg="#00FF00",
-                ).pack(side=tk.LEFT, padx=10, pady=5)
-
-                tk.Button(
-                    seed_frame,
-                    text="Select",
-                    font=("Arial", 10),
-                    bg="#333333",
-                    command=lambda idx=inv_index, b=seed_frame: select_seed(idx, b),
-                ).pack(side=tk.RIGHT, padx=10, pady=5)
-                seed_buttons.append(seed_frame)
-
-            _sync_seeds_scroll()
-            seeds_canvas.yview_moveto(0.0)
-
-        def rebuild_planter_list():
-            for widget in planters_frame.winfo_children():
-                widget.destroy()
-            planter_buttons.clear()
-            selected_data["planter"] = None
-
-            planters = self.player_data["botany"]["planters"]
-            for i in range(start, end):
-                planter = planters[i]
-                planter_frame = tk.Frame(planters_frame, bg="#222222", bd=2, relief=tk.RIDGE)
-                planter_frame.pack(fill=tk.X, padx=10, pady=6)
-
-                if planter["occupied"]:
-                    tk.Label(
-                        planter_frame,
-                        text=f"Planter {i + 1}: {planter['plant']}",
-                        font=("Arial", 14, "bold"),
-                        bg="#222222",
-                        fg="light green",
-                    ).pack(side=tk.LEFT, padx=10, pady=5)
-                    tk.Label(
-                        planter_frame,
-                        text="OCCUPIED",
-                        font=("Arial", 12),
-                        bg="#222222",
-                        fg="red",
-                    ).pack(side=tk.RIGHT, padx=10, pady=5)
-                else:
-                    tk.Label(
-                        planter_frame,
-                        text=f"Planter {i + 1}: Empty",
-                        font=("Arial", 14, "bold"),
-                        bg="#222222",
-                        fg="white",
-                    ).pack(side=tk.LEFT, padx=10, pady=5)
-                    tk.Button(
-                        planter_frame,
-                        text="Select",
-                        font=("Arial", 10),
-                        bg="#333333",
-                        command=lambda idx=i, b=planter_frame: select_planter(idx, b),
-                    ).pack(side=tk.RIGHT, padx=10, pady=5)
-                planter_buttons.append(planter_frame)
-
-        def do_planting():
-            if selected_data["inv_index"] is None or selected_data["planter"] is None:
-                return
-
-            inv_index = selected_data["inv_index"]
-            planter_index = selected_data["planter"]
-            inventory = self.player_data.get("inventory", [])
-            if not (0 <= inv_index < len(inventory)):
-                rebuild_seed_list()
-                plant_btn.config(state=tk.DISABLED)
-                return
-
-            seed = inventory[inv_index]
-            if not isinstance(seed, dict) or seed.get("id") not in BOTANY_SEED_IDS:
-                rebuild_seed_list()
-                plant_btn.config(state=tk.DISABLED)
-                return
-
-            attrs = seed.get("attributes") or {}
-            plant_name = attrs.get("plant_name") or seed.get("name", "Plant")
-            growth_class = attrs.get("growth_class") or "crop"
-            produces = attrs.get("produces")
-
-            self.player_data["botany"]["planters"][planter_index] = {
-                "occupied": True,
-                "plant": plant_name,
-                "seed_id": seed.get("id"),
-                "produces": produces,
-                "growth_class": growth_class,
-                "planted_at_seconds": get_elapsed_seconds(self.player_data),
-                "growth_stage": 1,
-            }
-
-            remove_one_from_inventory(self.player_data, inv_index)
-            add_note(
-                self.player_data,
-                f"Planted {seed.get('name', plant_name)} in planter {planter_index + 1}.",
-            )
-
-            rebuild_seed_list()
-            rebuild_planter_list()
-            plant_btn.config(state=tk.DISABLED)
-
-        plant_btn = tk.Button(
-            button_frame,
-            text="Plant Seed",
-            font=("Arial", 14),
-            width=15,
-            command=do_planting,
-            state=tk.DISABLED,
-        )
-        plant_btn.pack(side=tk.LEFT, expand=True, padx=20)
-
-        def cancel_to_row_picker():
-            plant_window.destroy()
-            self.plant_seeds()
-
-        cancel_btn = tk.Button(
-            button_frame,
-            text="Cancel",
-            font=("Arial", 14),
-            width=15,
-            command=cancel_to_row_picker,
-        )
-        cancel_btn.pack(side=tk.LEFT, expand=True, padx=20)
-
-        rebuild_seed_list()
-        rebuild_planter_list()
-
-        def on_seeds_mousewheel(event):
-            seeds_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        bind_mousewheel(seeds_outer, on_seeds_mousewheel, recursive=True)
+        self.access_botany_vending()

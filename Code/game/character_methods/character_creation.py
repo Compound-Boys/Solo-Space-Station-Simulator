@@ -328,6 +328,7 @@ class CharacterCreation:
         self.player_data["subdepartment"] = job_info["subdepartment"]
         self.player_data["inventory"] = []
         self.player_data["locker_inventory"] = build_default_locker_inventory()
+        self.player_data["hands"] = {"left": None, "right": None}
         self.player_data["location"] = {"x": -1, "y": 0}
         self.player_data["stock_holdings"] = {}
         self.player_data["bar_mixed_stock"] = {}
