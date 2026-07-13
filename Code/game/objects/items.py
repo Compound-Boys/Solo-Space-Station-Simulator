@@ -6,6 +6,7 @@ from tkinter import messagebox
 
 from game.helper_methods.ui_panels import open_modal_panel
 from game.maps.donut import render_map_text
+from game.objects.botany_items import BOTANY_ITEMS
 from game.objects.food import FOOD_ITEMS
 
 # Tool IDs that fit inside a Basic Tools set (one of each).
@@ -127,6 +128,7 @@ ALL_ITEMS = {
 }
 
 ALL_ITEMS.update(FOOD_ITEMS)
+ALL_ITEMS.update(BOTANY_ITEMS)
 
 # --- Helper Functions ---
 DEFAULT_LOCKER_ITEM_IDS = [

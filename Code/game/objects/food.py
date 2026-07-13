@@ -26,3 +26,48 @@ FOOD_ITEMS = {
         "actions": ["examine", "eat", "drop"],
     },
 }
+
+PRODUCE = {
+    "tomato": {
+        "id": "tomato",
+        "name": "Tomato",
+        "description": "A juicy red tomato fresh from the hydroponics bay.",
+        "category": "Food",
+        "attributes": {},
+        "actions": ["examine", "eat", "drop"],
+    },
+    "potato": {
+        "id": "potato",
+        "name": "Potato",
+        "description": "A starchy potato grown on the station.",
+        "category": "Food",
+        "attributes": {},
+        "actions": ["examine", "eat", "drop"],
+    },
+    "wheat": {
+        "id": "wheat",
+        "name": "Wheat",
+        "description": "A bundle of tall wheat stalks.",
+        "category": "Food",
+        "attributes": {},
+        "actions": ["examine", "eat", "drop"],
+    },
+    "carrot": {
+        "id": "carrot",
+        "name": "Carrot",
+        "description": "An orange root vegetable from the botany lab.",
+        "category": "Food",
+        "attributes": {},
+        "actions": ["examine", "eat", "drop"],
+    },
+    "apple": {
+        "id": "apple",
+        "name": "Apple",
+        "description": "A crisp apple from a small hydroponic tree.",
+        "category": "Food",
+        "attributes": {},
+        "actions": ["examine", "eat", "drop"],
+    },
+}
+
+FOOD_ITEMS.update(PRODUCE)

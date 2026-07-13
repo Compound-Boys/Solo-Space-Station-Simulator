@@ -24,6 +24,14 @@ BRIBE_MIN_CREDITS = 5
 BRIBE_MAX_CREDITS = 50
 FINE_REFUSE_CHANCE = 0.15
 
+# Player jobs that can scan warrants and offer Arrest / Let Go.
+PLAYER_ARREST_JOBS = frozenset({"Security Guard", "Captain"})
+
+
+def can_player_arrest(player_data):
+    """True if the player job can enforce warrants (Security Guard or Captain)."""
+    return player_data.get("job") in PLAYER_ARREST_JOBS
+
 
 def _location_dict_from_key(key):
     x_str, y_str = key.split(",")
@@ -534,12 +542,12 @@ def _ask_arrest_or_let_go(parent, message):
 def offer_player_arrest_choice(
     player_data, npc, *, parent, game=None, place="hall", elapsed_seconds=0.0
 ):
-    """Let a Security Guard player Arrest or Let Go a wanted crew member.
+    """Let a Security Guard or Captain player Arrest or Let Go a wanted crew member.
 
     place: 'hall', 'room', or 'call'
     Returns 'arrest', 'let_go', or None if the NPC was not eligible.
     """
-    if player_data.get("job") != "Security Guard":
+    if not can_player_arrest(player_data):
         return None
     if is_jailed(player_data) or is_jailed(npc) or not npc.get("warrant", False):
         return None
@@ -641,7 +649,7 @@ def _add_player_note(player_data, game, text):
 
 
 def maybe_offer_arrest_after_call(player_data, npc, *, parent, game=None, elapsed_seconds=0.0):
-    """If the player is Security and the called NPC is wanted, offer Arrest/Let Go."""
+    """If the player can enforce warrants and the called NPC is wanted, offer Arrest/Let Go."""
     return offer_player_arrest_choice(
         player_data, npc, parent=parent, game=game, place="call", elapsed_seconds=elapsed_seconds
     )
