@@ -19,6 +19,7 @@ from game.helper_methods.player_movement import PlayerMovementMixin
 from game.helper_methods.random_events import ensure_job_event
 from game.helper_methods.jail import (
     arrest_member,
+    can_player_arrest,
     fined_in_room,
     has_fine,
     is_jailed,
@@ -83,15 +84,14 @@ SPECIAL_ROOM_CLASSES = {
 SPECIAL_ROOM_TILES = donut.SPECIAL_ROOM_TILES
 SPECIAL_ROOM_HALLWAY = donut.SPECIAL_ROOM_HALLWAY
 
-# Real-time idle NPC cadence while the player stands still (not master clock).
-NPC_IDLE_INTERVAL_MIN = 3.0
-NPC_IDLE_INTERVAL_MAX = 5.0
-NPC_IDLE_POLL_SECONDS = 0.5
+# Real-time NPC wander cadence (not master clock). Independent of player moves
+# so walking the same direction as an NPC doesn't spam hallway encounters.
+NPC_MOVE_INTERVAL_SECONDS = 3.0
 
-# Master clock poll interval (real seconds). Kept short so the 300s stock
-# market cadence is checked with good accuracy; power/oxygen/alcohol formulas
-# are linear in elapsed time so this doesn't change their balance.
-MASTER_TICK_INTERVAL_SECONDS = 5
+# Master clock poll interval (real seconds). 1s keeps on-screen timers and
+# jail releases responsive; power/oxygen/alcohol formulas are linear in
+# elapsed time so this doesn't change their balance.
+MASTER_TICK_INTERVAL_SECONDS = 1
 
 class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
     def __init__(self, root, base_path):
@@ -111,12 +111,8 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         self.master_timer_running = False
         self.master_timer_id = None
 
-        self.time_since_player_moved = 0.0
-        self.npc_idle_threshold_seconds = random.uniform(
-            NPC_IDLE_INTERVAL_MIN, NPC_IDLE_INTERVAL_MAX
-        )
-        self.npc_idle_timer_running = False
-        self.npc_idle_timer_id = None
+        self.npc_move_timer_running = False
+        self.npc_move_timer_id = None
 
         self.market_engine = StockMarketEngine()
         
@@ -179,10 +175,10 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         Game.save_game(self.player_data)
 
     def _ensure_game_running(self):
-        """Start the master clock and NPC idle timers if they aren't running."""
+        """Start the master clock and NPC move timers if they aren't running."""
         if not self.master_timer_running:
             self.start_master_timer()
-        self.start_npc_idle_timer()
+        self.start_npc_move_timer()
 
     def _enter_special_room(self, room_class):
         """Create a special room UI instance from a room class."""
@@ -201,7 +197,7 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
     def on_closing(self):
         """Handle application closing"""
         self.stop_master_timer()
-        self.stop_npc_idle_timer()
+        self.stop_npc_move_timer()
 
         if self.player_data and self.player_data.get("name"):
             self._save_game()
@@ -214,41 +210,33 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         if self.master_timer_id:
             self.root.after_cancel(self.master_timer_id)
             self.master_timer_id = None
-        self.stop_npc_idle_timer()
+        self.stop_npc_move_timer()
 
     def start_master_timer(self):
         """Start the single timer that drives every timed system in the game."""
         if not self.master_timer_running:
             self.master_timer_running = True
             self.tick_master_clock()
-        self.start_npc_idle_timer()
+        self.start_npc_move_timer()
 
-    def stop_npc_idle_timer(self):
-        """Stop the dedicated NPC idle poll if it's running."""
-        self.npc_idle_timer_running = False
-        if self.npc_idle_timer_id:
+    def stop_npc_move_timer(self):
+        """Stop the dedicated NPC movement timer if it's running."""
+        self.npc_move_timer_running = False
+        if self.npc_move_timer_id:
             try:
-                self.root.after_cancel(self.npc_idle_timer_id)
+                self.root.after_cancel(self.npc_move_timer_id)
             except tk.TclError:
                 pass
-            self.npc_idle_timer_id = None
+            self.npc_move_timer_id = None
 
-    def start_npc_idle_timer(self):
-        """Start the real-time idle poll that advances NPCs while the player stands still."""
-        if self.npc_idle_timer_running:
+    def start_npc_move_timer(self):
+        """Start the real-time timer that advances NPCs on a fixed cadence."""
+        if self.npc_move_timer_running:
             return
-        self.npc_idle_timer_running = True
-        self.tick_npc_idle()
-
-    def _roll_npc_idle_threshold(self):
-        self.npc_idle_threshold_seconds = random.uniform(
-            NPC_IDLE_INTERVAL_MIN, NPC_IDLE_INTERVAL_MAX
+        self.npc_move_timer_running = True
+        self.npc_move_timer_id = self.root.after(
+            int(NPC_MOVE_INTERVAL_SECONDS * 1000), self.tick_npc_move
         )
-
-    def _reset_player_move_idle_timer(self):
-        """Restart the stand-still countdown after a player hallway move."""
-        self.time_since_player_moved = 0.0
-        self._roll_npc_idle_threshold()
 
     def _advance_npcs_one_step(self):
         """One departure roll + one wander/goal step for all eligible NPCs."""
@@ -260,27 +248,18 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
             player_data=self.player_data,
         )
 
-    def advance_npcs_from_player_move(self):
-        """Advance NPCs when the player takes a hallway step; reset idle timer."""
-        self._advance_npcs_one_step()
-        self._reset_player_move_idle_timer()
-
-    def tick_npc_idle(self):
-        """Accumulate time_since_player_moved; advance NPCs when the idle threshold hits."""
-        if not self.npc_idle_timer_running:
+    def tick_npc_move(self):
+        """Advance NPCs every NPC_MOVE_INTERVAL_SECONDS, independent of player moves."""
+        if not self.npc_move_timer_running:
             return
 
-        self.time_since_player_moved += NPC_IDLE_POLL_SECONDS
-        if self.time_since_player_moved >= self.npc_idle_threshold_seconds:
-            try:
-                self._advance_npcs_one_step()
-            except Exception as e:
-                print(f"Error advancing NPCs on idle: {e}")
-            self.time_since_player_moved = 0.0
-            self._roll_npc_idle_threshold()
+        try:
+            self._advance_npcs_one_step()
+        except Exception as e:
+            print(f"Error advancing NPCs: {e}")
 
-        self.npc_idle_timer_id = self.root.after(
-            int(NPC_IDLE_POLL_SECONDS * 1000), self.tick_npc_idle
+        self.npc_move_timer_id = self.root.after(
+            int(NPC_MOVE_INTERVAL_SECONDS * 1000), self.tick_npc_move
         )
 
     def tick_master_clock(self):
@@ -288,7 +267,7 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
 
         Power/oxygen/alcohol, jail releases, and the stock market read their
         "now" from the same master timer (see game_clock.py). NPC wandering
-        uses a separate real-time idle timer.
+        uses a separate real-time move timer.
         """
         if not self.master_timer_running:
             return
@@ -445,7 +424,7 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         
         # Stop timers when returning to main menu
         self.stop_master_timer()
-        self.stop_npc_idle_timer()
+        self.stop_npc_move_timer()
         
         for widget in self.root.winfo_children():
             widget.destroy()
@@ -704,7 +683,7 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         Returns True if an arrest (or security-specific handling) occurred.
         """
         npc_is_guard = npc.get("job") == "Security Guard"
-        player_is_guard = self.player_data.get("job") == "Security Guard"
+        player_can_enforce = can_player_arrest(self.player_data)
         elapsed_seconds = get_elapsed_seconds(self.player_data)
 
         # Unpaid fines: pay or go to jail when meeting security.
@@ -722,7 +701,7 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
             # Paid: still allow warrant handling below if wanted.
 
         if (
-            player_is_guard
+            player_can_enforce
             and has_fine(npc)
             and not is_jailed(npc)
         ):
@@ -753,7 +732,7 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
             return True
 
         if (
-            player_is_guard
+            player_can_enforce
             and npc.get("warrant", False)
             and not is_jailed(npc)
         ):
@@ -763,8 +742,8 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         return False
 
     def _scan_room_for_warrants(self, room_key):
-        """As a Security Guard player, collect fines and offer Arrest/Let Go for wanted people."""
-        if self.player_data.get("job") != "Security Guard":
+        """As Security Guard or Captain, collect fines and offer Arrest/Let Go for wanted people."""
+        if not can_player_arrest(self.player_data):
             return
         if is_jailed(self.player_data):
             return
@@ -789,7 +768,7 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
             self._offer_player_arrest_choice(npc, place="room")
 
     def _offer_player_arrest_choice(self, npc, place="hall"):
-        """Let a Security Guard player Arrest or Let Go a wanted crew member."""
+        """Let a Security Guard or Captain player Arrest or Let Go a wanted crew member."""
         offer_player_arrest_choice(
             self.player_data,
             npc,
@@ -957,11 +936,8 @@ class SpaceStationGame(ItemInventoryMixin, PlayerMovementMixin):
         x_str, y_str = target_key.split(",")
         self.player_data["location"] = {"x": int(x_str), "y": int(y_str)}
 
-        # Security Guard players scan the room for warrants on entry.
-        if (
-            self.player_data.get("job") == "Security Guard"
-            and not is_jailed(self.player_data)
-        ):
+        # Security Guard / Captain players scan the room for warrants on entry.
+        if can_player_arrest(self.player_data) and not is_jailed(self.player_data):
             self._scan_room_for_warrants(target_key)
 
         self._instantiate_special_room(room_name)

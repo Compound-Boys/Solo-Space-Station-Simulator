@@ -14,9 +14,10 @@ from game.helper_methods.ui_panels import (
     schedule_ui_tick,
 )
 from game.maps import donut
+from game.objects.botany_items import refresh_all_planters_growth
 
 OXYGEN_STRESS_THRESHOLD = WARNING_THRESHOLDS[0]  # 30%
-BOTANY_MATURE_STAGE = 6
+BOTANY_MATURE_STAGE = 5
 
 SYSTEM_DISPLAY = (
     ("life_support", "Life Support"),
@@ -149,7 +150,8 @@ def collect_station_status(player_data, station_crew):
             locked_rooms.append(door_info["room_name"])
 
     botany = player_data.get("botany") or {}
-    planters = botany.get("planters") or []
+    elapsed_seconds = get_elapsed_seconds(player_data)
+    planters = refresh_all_planters_growth(player_data, elapsed_seconds)
     botany_total = len(planters)
     botany_occupied = sum(1 for p in planters if p.get("occupied"))
     botany_mature = sum(
@@ -160,7 +162,6 @@ def collect_station_status(player_data, station_crew):
 
     market = player_data.get("stock_market") or {}
     cycle_number = market.get("cycle_number", 1)
-    elapsed_seconds = get_elapsed_seconds(player_data)
 
     announcements = player_data.get("announcements") or []
     emergency_announcements = [a for a in announcements if a.get("type") == "emergency"]

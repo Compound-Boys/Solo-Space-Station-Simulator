@@ -715,7 +715,7 @@ def build_npc_contact_section(
         title = "Call Successful" if success else "No Answer"
         messagebox.showinfo(title, message, parent=room_window)
         if success:
-            # Security Guard players scan anyone they call back for warrants.
+            # Security Guard / Captain players scan anyone they call back for warrants.
             maybe_offer_arrest_after_call(
                 player_data,
                 away_npc,

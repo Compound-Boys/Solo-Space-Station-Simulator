@@ -99,10 +99,6 @@ class PlayerMovementMixin:
             self.player_data["location"]["y"] = y - (1 if direction == "east" else -1 if direction == "west" else 0)
             return
 
-        # NPCs take a step whenever the player does; idle timer resets.
-        if hasattr(self, "advance_npcs_from_player_move"):
-            self.advance_npcs_from_player_move()
-
         maybe_trigger_hallway_event(self)
 
         if is_jailed(self.player_data):
